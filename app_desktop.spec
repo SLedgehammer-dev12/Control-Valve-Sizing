@@ -12,6 +12,8 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
+        # setuptools (needed by PyInstaller hooks)
+        "setuptools",
         # Core engine
         "valve_sizing",
         "fluid_properties",
@@ -68,8 +70,6 @@ a = Analysis(
         "urllib",
         "pydoc",
         "test",
-        "distutils",
-        "setuptools._distutils",
         "turtle",
         "venv",
         "ensurepip",
