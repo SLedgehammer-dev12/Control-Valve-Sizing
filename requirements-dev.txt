@@ -1,0 +1,6 @@
+# Development Dependencies for Control Valve Sizing
+
+# Testing and Development tools
+pytest>=8.0,<9.0
+pytest-asyncio>=0.21.1
+streamlit-extras>=0.10.0

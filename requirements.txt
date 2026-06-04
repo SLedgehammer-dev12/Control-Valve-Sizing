@@ -1,0 +1,10 @@
+streamlit>=1.24.0,<2.0
+pandas>=2.0,<3.0
+coolprop>=7.4,<8.0
+fluids>=1.0,<2.0
+chemicals>=1.0,<2.0
+pint>=0.24,<1.0
+iapws>=1.5,<3.0
+thermo>=0.6,<1.0
+pytest>=8.0,<9.0
+

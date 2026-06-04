@@ -1,0 +1,45 @@
+> """Project save/load utilities for control valve sizing.
+  
+> Serialises service type and input data to/from JSON, including validation
+> of payload structure and date-stamped metadata."""
+  
+> from __future__ import annotations
+  
+> import json
+> from datetime import UTC, datetime
+  
+  
+> def build_project_payload(service: str, data: dict) -> dict:
+>     """Build a project payload dict with service type, data, and timestamp."""
+>     return {
+>         "project_type": "control_valve_sizing",
+>         "saved_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+>         "service": service,
+>         "data": data,
+>     }
+  
+  
+> def dump_project_json(service: str, data: dict) -> str:
+>     """Serialize a project payload to JSON string."""
+>     return json.dumps(build_project_payload(service, data), ensure_ascii=False, indent=2)
+  
+  
+> def validate_project_payload(payload: dict) -> None:
+>     """Raise ValueError if payload is not a valid control valve sizing project."""
+>     if not isinstance(payload, dict):
+!         raise ValueError("Proje payload'i bir JSON nesnesi olmalidir.")
+>     if payload.get("project_type") != "control_valve_sizing":
+>         raise ValueError("Bu dosya control valve sizing proje dosyasi degil.")
+>     service = payload.get("service")
+>     if service not in {"Liquid", "Gas", "Steam"}:
+!         raise ValueError("Project service degeri Liquid, Gas veya Steam olmalidir.")
+>     data = payload.get("data")
+>     if not isinstance(data, dict):
+>         raise ValueError("Proje data alanı bir JSON nesnesi olmalidir.")
+  
+  
+> def load_project_json(text: str) -> dict:
+>     """Parse JSON string, validate, and return project payload."""
+>     payload = json.loads(text)
+>     validate_project_payload(payload)
+>     return payload

@@ -1,0 +1,42 @@
+# Changelog
+
+## [2.0.0] — 2026-05-18
+
+### Added
+- `SizingResult` frozen dataclass with `__getitem__` backward compatibility
+- Steam sizing IEC alignment via CoolProp density + `size_control_valve_g` candidate loop
+- `_size_iteration()` shared candidate-valve loop helper
+- `get_pure_fluid_state` LRU cache (maxsize=256)
+- `.opencode/` skills: `cv-sizing`, `cv-fluid`, `cv-vendor`, `cv-qa`
+- `.opencode/` agents: `cv-reviewer`, `cv-engineer`, `cv-documenter`
+- `AGENTS.md` project context file
+- `Dockerfile` for Streamlit deployment
+- `.pre-commit-config.yaml` with ruff + whitespace hooks
+- Coverage threshold (80%) in `pyproject.toml`
+- 11 new edge-case tests (steam choked/overflow, liquid regimes, gas overflow, fluid errors, CoolProp fallback)
+
+### Changed
+- `SteamSizingInput` now includes `fl`, `fd`, `pipe_inlet_diameter_mm`, `pipe_outlet_diameter_mm`
+- `app_desktop._calculate` refactored to dispatch pattern (`_calc_liquid`, `_calc_gas`, `_calc_steam`)
+- `pyproject.toml` line length: 120 → 150
+- `reporting.py` `build_report` signature: `dict` → `SizingResult`
+- `app_web.py` `render_result` signature: `dict` → `SizingResult`
+
+### Fixed
+- `valve_sizing.py` zero-diameter bug (`value if value else fallback` → `value if value is not None else fallback`)
+- Gas sizing `NameError` for undefined variables (`mw`, `flow_nm3h`, etc.)
+- Steam sizing `NameError` for undefined variables (`mw`, `y`, etc.)
+- `app_desktop.py` missing `critical_pressure_bar_a` and `viscosity_pa_s` in `LiquidSizingInput`
+- `app_desktop.py` missing `specific_heat_ratio` and `viscosity_pa_s` in `GasSizingInput`
+
+### Removed
+- Duplicate `GAS_PRESETS` from `app_desktop.py` and `app_web.py` (centralized in `config.py`)
+- `test_z_implementation.py` standalone script (converted to pytest tests)
+
+## [1.0.0] — 2026-05-14
+
+- Initial release: liquid/gas sizing with Tkinter + Streamlit UI
+- CoolProp HEOS integration for gas mixture properties
+- Fisher vendor catalog (4 valve types)
+- Project JSON save/load
+- Markdown report generation
