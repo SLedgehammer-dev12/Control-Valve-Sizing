@@ -79,7 +79,7 @@ def test_get_vendor_definition_arca():
 
 
 def test_get_vendor_definition_unknown_raises():
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="Bilinmeyen vendor"):
         get_vendor_definition("nonexistent_vendor")
 
 

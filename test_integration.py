@@ -22,7 +22,7 @@ def test_project_json_round_trip():
     dumped = dump_project_json("Liquid", payload)
     loaded = load_project_json(dumped)
     assert loaded["project_type"] == "control_valve_sizing"
-    assert loaded["service"] == "Liquid"
+    assert loaded["service"] == "liquid"
     assert loaded["data"]["liquid_flow_m3h"] == 25.0
 
 

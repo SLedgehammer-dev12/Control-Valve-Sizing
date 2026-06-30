@@ -50,7 +50,7 @@ def test_desktop_has_project_io():
     from project_io import dump_project_json, load_project_json
     data = dump_project_json("Liquid", {"test": 1})
     loaded = load_project_json(data)
-    assert loaded["service"] == "Liquid"
+    assert loaded["service"] == "liquid"
 
 
 def test_desktop_has_reporting():

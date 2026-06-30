@@ -19,7 +19,7 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 disallow_untyped_defs = false
 check_untyped_defs = false
-exclude = ["test_app_integration.py"]
+exclude = []
 
 [tool.coverage.run]
 source = ["."]

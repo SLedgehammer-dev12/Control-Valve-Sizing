@@ -37,11 +37,11 @@ class TestCavitationIndex:
         assert sigma == float("inf")
 
     def test_severity_classification(self):
-        assert cavitation_severity(1.5) == "No cavitation"
-        assert cavitation_severity(0.8) == "Incipient cavitation"
-        assert cavitation_severity(0.6) == "Moderate cavitation"
-        assert cavitation_severity(0.4) == "Severe cavitation"
-        assert cavitation_severity(0.2) == "Flashing / fully developed cavitation"
+        assert cavitation_severity(1.5) == "Kavitasyon yok"
+        assert cavitation_severity(0.8) == "Hafif kavitasyon"
+        assert cavitation_severity(0.6) == "Orta kavitasyon"
+        assert cavitation_severity(0.4) == "Siddetli kavitasyon"
+        assert cavitation_severity(0.2) == "Flashing / tam kavitasyon"
 
 
 class TestTwoPhaseDensity:

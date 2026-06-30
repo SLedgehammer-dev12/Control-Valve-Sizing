@@ -170,7 +170,7 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     source = st.selectbox("Akiskan tanimi", ["Preset", "CoolProp pure fluid", "Custom"], key="liquid_source")
     c1, c2 = st.columns(2)
     temperature_c = c1.number_input("Sicaklik [C]", key="liquid_temp_c", step=1.0)
-    ref_pressure = c2.number_input("Referans basinc [bar(a)]", key="liquid_ref_pressure_bar_a", min_value=0.1, step=0.1)
+    inlet_pressure = c2.number_input("Giris P [bar(a)]", key="liquid_p1", min_value=0.001, step=0.1)
 
     density_default = st.session_state.liquid_density
     pv_default = st.session_state.liquid_pv
@@ -191,7 +191,7 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
         fluid = st.selectbox("CoolProp fluid", list_coolprop_fluids(), index=list_coolprop_fluids().index("Water"))
         fluid_label = fluid
         try:
-            props = get_pure_fluid_state(fluid, ref_pressure, temperature_c)
+            props = get_pure_fluid_state(fluid, inlet_pressure, temperature_c)
             density_default = props["density_kg_m3"]
             pv_default = props["vapor_pressure_bar_a"]
             pc_default = props["critical_pressure_bar_a"]
@@ -209,9 +209,8 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     viscosity = c6.number_input("Viskozite [Pa.s]", value=float(mu_default), key="liquid_mu", min_value=1e-7, step=0.0001, format="%.7f")
 
     st.markdown("**Proses Verileri**")
-    p1, p2, q, d1, d2 = st.columns(5)
+    p2, q, d1, d2 = st.columns(4)
     flow_m3h = q.number_input("Debi [m3/h]", key="liquid_flow_m3h", min_value=0.0001, step=1.0)
-    inlet_pressure = p1.number_input("Giris P [bar(a)]", key="liquid_p1", min_value=0.001, step=0.1)
     outlet_pressure = p2.number_input("Cikis P [bar(a)]", key="liquid_p2", min_value=0.001, step=0.1)
     pipe_in_mm = d1.number_input("Hat giris capi [mm]", key="liquid_pipe_in_mm", min_value=1.0, step=1.0)
     pipe_out_mm = d2.number_input("Hat cikis capi [mm]", key="liquid_pipe_out_mm", min_value=1.0, step=1.0)

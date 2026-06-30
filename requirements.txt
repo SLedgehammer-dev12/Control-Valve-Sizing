@@ -1,6 +1,6 @@
 streamlit>=1.24.0,<2.0
 pandas>=2.0,<3.0
-coolprop>=6.8,<8.0
+coolprop>=6.8,<9.0
 fluids>=1.0,<2.0
 chemicals>=1.0,<2.0
 pint>=0.24,<1.0

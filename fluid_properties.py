@@ -37,6 +37,8 @@ except ImportError:
 _CHEMICAL_CACHE: dict[str, dict[str, Any]] = {}
 
 
+_CHEMICAL_CACHE_MAX = 512
+
 def _safe_chemical_props(name: str) -> dict[str, Any]:
     if name in _CHEMICAL_CACHE:
         return _CHEMICAL_CACHE[name]
@@ -49,7 +51,8 @@ def _safe_chemical_props(name: str) -> dict[str, Any]:
             return {}
         props["cas"] = cas
         props["cas_int"] = int(cas.replace("-", ""))
-    except Exception:
+    except Exception as exc:
+        logger.debug("chemicals CAS lookup failure for '%s': %s", name, exc)
         return {}
 
     try:
@@ -80,7 +83,7 @@ def _safe_chemical_props(name: str) -> dict[str, Any]:
     except Exception:
         pass
 
-    if props:
+    if props and len(_CHEMICAL_CACHE) < _CHEMICAL_CACHE_MAX:
         _CHEMICAL_CACHE[name] = props
     return props
 
@@ -139,6 +142,11 @@ def list_chemical_fluids() -> list[str]:
         except Exception:
             pass
     return sorted(names)
+
+
+def _gas_viscosity_fallback(t_k: float) -> float:
+    """Estimate gas viscosity [Pa*s] via simplified kinetic theory (mu ~ sqrt(T))."""
+    return 1.5e-5 * (t_k / 300.0) ** 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -334,19 +342,17 @@ def _evaluate_mixture_state_heos(
 
 @lru_cache(maxsize=256)
 def _evaluate_mixture_state_fallback(
-    mole_fraction_items: tuple[tuple[str, float], ...],
     average_mw: float,
     pressure_bar_a: float,
     temperature_c: float,
 ) -> dict[str, float | None]:
-    """Ideal gas mixture fallback."""
+    """Ideal gas mixture fallback. Uses air-like defaults (k=1.4, Z=1.0)."""
     t_k = temperature_c + 273.15
     p_pa = pressure_bar_a * 1e5
     r = 8314.0
     avg_rho = (p_pa * average_mw) / (r * t_k)
-    k_avg = sum(frac * 1.4 for _, frac in mole_fraction_items) / sum(frac for _, frac in mole_fraction_items)
-    return {"z": 1.0, "density_kg_m3": avg_rho, "viscosity_pa_s": 1.5e-5,
-            "cp_j_kgk": 1000.0, "cv_j_kgk": 714.0, "specific_heat_ratio": k_avg}
+    return {"z": 1.0, "density_kg_m3": avg_rho, "viscosity_pa_s": _gas_viscosity_fallback(t_k),
+            "cp_j_kgk": 1000.0, "cv_j_kgk": 714.0, "specific_heat_ratio": 1.4}
 
 
 def evaluate_gas_mixture(
@@ -364,9 +370,7 @@ def evaluate_gas_mixture(
         summary.mixture_string, tuple(ordered), pressure_bar_a, temperature_c,
     )
     if props is None:
-        props = _evaluate_mixture_state_fallback(
-            tuple(ordered), mw, pressure_bar_a, temperature_c,
-        )
+        props = _evaluate_mixture_state_fallback(mw, pressure_bar_a, temperature_c)
 
     return CompositionSummary(
         basis=summary.basis,
@@ -504,7 +508,7 @@ def _evaluate_chemicals_state(fluid: str, pressure_bar_a: float, temperature_c: 
             z = max(z, 0.2)
     return {
         "density_kg_m3": rho,
-        "viscosity_pa_s": 1.5e-5,
+        "viscosity_pa_s": _gas_viscosity_fallback(t_k),
         "cp_kj_kgk": 1.0,
         "specific_heat_ratio": 1.4,
         "z": z,
@@ -523,7 +527,7 @@ def _ideal_gas_fallback(fluid: str, pressure_bar_a: float, temperature_c: float)
     return {
         "density_kg_m3": rho,
         "vapor_pressure_bar_a": 0.0,
-        "viscosity_pa_s": 1.5e-5,
+        "viscosity_pa_s": _gas_viscosity_fallback(t_k),
         "cp_j_kgk": 1000.0,
         "cv_j_kgk": 714.0,
         "z": 1.0,
@@ -533,6 +537,7 @@ def _ideal_gas_fallback(fluid: str, pressure_bar_a: float, temperature_c: float)
     }
 
 
+@lru_cache(maxsize=256)
 def get_pure_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float) -> dict[str, float]:
     """Return fluid state with cascade: CoolProp → thermo → chemicals → ideal gas.
 
@@ -588,7 +593,7 @@ def get_pure_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float
         return {
             "density_kg_m3": rho,
             "vapor_pressure_bar_a": 0.0,
-            "viscosity_pa_s": 1.5e-5,
+            "viscosity_pa_s": _gas_viscosity_fallback(t_k),
             "cp_j_kgk": 1000.0,
             "cv_j_kgk": 714.0,
             "z": z,

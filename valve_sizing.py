@@ -19,6 +19,7 @@ from typing import Any, cast
 
 from fluids.control_valve import size_control_valve_g, size_control_valve_l
 
+from two_phase import cavitation_index as _iec_cavitation_index
 from units import (
     AIR_K,
     AIR_MW,
@@ -208,6 +209,8 @@ def select_valve_size(required_cv: float, valve_series: list[ValveSize] | None =
 
     Deprecated: use _size_iteration instead (accounts for pipe reducer effects).
     """
+    import warnings
+    warnings.warn("select_valve_size deprecated; use _size_iteration", DeprecationWarning, stacklevel=2)
     _require_positive("Gerekli Cv", required_cv)
     valve_series = valve_series or DEFAULT_VALVE_SERIES
     for valve in valve_series:
@@ -242,6 +245,71 @@ def _pack_result(raw: dict) -> SizingResult:
         if field_name in raw:
             kwargs[field_name] = raw[field_name]
     return SizingResult(**kwargs)
+
+
+def _predict_valve_noise(
+    service: str,
+    flow_kg_s: float,
+    p1_bar: float,
+    p2_bar: float,
+    t_k: float,
+    density_kg_m3: float,
+    specific_heat_ratio: float,
+    mw: float,
+    kv: float,
+    valve_diameter_m: float,
+    pipe_diameter_m: float,
+    fl: float,
+    fd: float,
+    vapor_pressure_bar: float | None = None,
+) -> float | None:
+    """Estimate valve noise level [dB(A)] via IEC 60534-8 wrapper. Returns None on failure."""
+    try:
+        from valve_noise import predict_noise_gas, predict_noise_liquid
+    except ImportError:
+        return None
+    try:
+        p1_pa = p1_bar * 1e5
+        p2_pa = p2_bar * 1e5
+        if service == "liquid":
+            pv_pa = (vapor_pressure_bar or 0.0) * 1e5
+            return predict_noise_liquid(
+                flow_kg_s=flow_kg_s, inlet_pressure_pa=p1_pa, outlet_pressure_pa=p2_pa,
+                vapor_pressure_pa=pv_pa, density_kg_m3=density_kg_m3,
+                speed_of_sound_m_s=None, kv=kv, valve_diameter_m=valve_diameter_m,
+                pipe_diameter_m=pipe_diameter_m, fl=fl, fd=fd,
+            )
+        return predict_noise_gas(
+            flow_kg_s=flow_kg_s, inlet_pressure_pa=p1_pa, outlet_pressure_pa=p2_pa,
+            inlet_temperature_k=t_k, density_kg_m3=density_kg_m3,
+            specific_heat_ratio=specific_heat_ratio, molecular_weight=mw,
+            kv=kv, valve_diameter_m=valve_diameter_m, pipe_diameter_m=pipe_diameter_m,
+            fd=fd, fl=fl,
+        )
+    except Exception:
+        return None
+
+
+def _predict_actuator_thrust(
+    valve_dn_mm: int,
+    inlet_pressure_bar: float,
+    outlet_pressure_bar: float,
+) -> dict[str, float] | None:
+    """Estimate actuator thrust requirement. Returns None on failure."""
+    try:
+        from actuator_sizing import total_required_thrust
+    except ImportError:
+        return None
+    try:
+        result = total_required_thrust(
+            port_diameter_mm=valve_dn_mm,
+            inlet_pressure_bar=inlet_pressure_bar,
+            outlet_pressure_bar=outlet_pressure_bar,
+            shutoff_pressure_bar=inlet_pressure_bar,
+        )
+        return result
+    except Exception:
+        return None
 
 
 def _size_iteration(
@@ -319,12 +387,12 @@ def size_liquid_valve(
     rev = details.get("Rev")
     laminar = details.get("laminar")
 
-    cavitation_index = (data.outlet_pressure_bar_a - pv) / max(data.inlet_pressure_bar_a - pv, 1e-9)
+    sigma = _iec_cavitation_index(data.inlet_pressure_bar_a, data.outlet_pressure_bar_a, pv)
     if data.outlet_pressure_bar_a <= pv:
         regime = "flashing"
     elif is_choked:
         regime = "choked-cavitating"
-    elif cavitation_index < 0.5:
+    elif sigma < 1.0:
         regime = "cavitating-risk"
     else:
         regime = "subcritical"
@@ -332,6 +400,14 @@ def size_liquid_valve(
     warning = ""
     if overflow:
         warning = "Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+
+    flow_kg_s_liquid = flow_m3h * density / 3600.0
+    noise_db = _predict_valve_noise(
+        "liquid", flow_kg_s_liquid, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
+        0.0, density, 0.0, 0.0, required_kv,
+        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        fl, fd, pv,
+    )
 
     result = _base_result_dict("liquid", ["iec_scope", "primer_liquid", "fisher_choked"])
     result.update(
@@ -350,13 +426,15 @@ def size_liquid_valve(
             "outlet_margin_to_vapor_bar": data.outlet_pressure_bar_a - pv,
             "ff": ff,
             "flow_regime": regime,
-            "cavitation_index": cavitation_index,
+            "cavitation_index": sigma,
             "warning": warning,
             "valve_meta": valve_meta or {},
             "reynolds_valve": rev,
             "laminar": laminar,
             "fp": fp,
             "flp": flp,
+            "noise_db": noise_db,
+            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
         }
     )
 
@@ -396,7 +474,7 @@ def size_liquid_valve(
         "mu_Pa_s": mu,
         "Rev": rev,
         "Laminar": laminar,
-        "Cavitation_index": cavitation_index,
+        "Cavitation_index": sigma,
     }
     logger.info("Liquid sizing: Cv=%.3f, valve=DN%s, regime=%s", required_cv, valve.dn_mm, regime)
     return _pack_result(result)
@@ -460,6 +538,15 @@ def size_gas_valve(
     if overflow:
         warning = "Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
 
+    gas_density_kg_m3 = (data.inlet_pressure_bar_a * 1e5 * mw * 0.001) / (8.314 * t_k * z)
+    flow_kg_s_gas = (flow_nm3h * mw * 0.001) / (22.414 * 3600.0)
+    noise_db = _predict_valve_noise(
+        "gas", flow_kg_s_gas, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
+        t_k, gas_density_kg_m3, k, mw, required_kv,
+        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        fd, fl,
+    )
+
     result = _base_result_dict("gas", ["iec_scope", "isa_committee", "primer_liquid"])
     result.update(
         {
@@ -483,13 +570,15 @@ def size_gas_valve(
             "laminar": laminar,
             "warning": warning,
             "valve_meta": valve_meta or {},
+            "noise_db": noise_db,
+            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
         }
     )
     result["equations"] = [
         "Fk = k/1.4",
         "x = DeltaP/P1",
         "x_choked = Fk* xTP_e  where xTP_e = xT or xTP (with reducers)",
-        "IEC candidate sizing via fluids.control_valve.size_control_valve_g",
+        "Expansion factor Y via fluids.control_valve.size_control_valve_g",
         "Kv = 0.865 * Cv",
     ]
     result["method_panel"] = [
@@ -601,12 +690,17 @@ def size_steam_valve(
     is_choked = x >= (xtp if xtp is not None else xt) * fk
 
     warning = "Steam sizing IEC/ISA'ya yaklastirilmistir; yine de final secim vendor yazilimi ile dogrulanmali."
-    if iapws_ok:
-        pass
-    elif not coolprop_ok:
+    if not iapws_ok and not coolprop_ok:
         warning += " Uyari: CoolProp devre disi, ideal gaz yaklasimi kullanildi (30 bar(a) uzerinde hata >%10)."
     if overflow:
-        warning = "Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+        warning += " Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+
+    noise_db = _predict_valve_noise(
+        "steam", flow_kg_h / 3600.0, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
+        t_k, density, k, mw, required_kv,
+        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        fd, fl,
+    )
 
     result = _base_result_dict("steam", ["primer_liquid", "iec_scope", "isa_committee"])
     result.update(
@@ -631,6 +725,8 @@ def size_steam_valve(
             "laminar": laminar,
             "warning": warning,
             "valve_meta": valve_meta or {},
+            "noise_db": noise_db,
+            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
         }
     )
     result["equations"] = [

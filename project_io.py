@@ -31,8 +31,9 @@ def validate_project_payload(payload: dict) -> None:
     if payload.get("project_type") != "control_valve_sizing":
         raise ValueError("Bu dosya control valve sizing proje dosyasi degil.")
     service = payload.get("service")
-    if service not in {"Liquid", "Gas", "Steam"}:
+    if isinstance(service, str) and service.lower() not in {"liquid", "gas", "steam"}:
         raise ValueError("Project service degeri Liquid, Gas veya Steam olmalidir.")
+    payload["service"] = service.lower() if isinstance(service, str) else service
     data = payload.get("data")
     if not isinstance(data, dict):
         raise ValueError("Proje data alanı bir JSON nesnesi olmalidir.")

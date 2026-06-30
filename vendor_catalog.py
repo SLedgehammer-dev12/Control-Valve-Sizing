@@ -317,4 +317,6 @@ def get_vendor_options() -> list[str]:
 
 
 def get_vendor_definition(key: str) -> VendorValveDefinition:
+    if key not in VENDOR_CATALOG:
+        raise ValueError(f"Bilinmeyen vendor anahtari: {key}")
     return VENDOR_CATALOG[key]
