@@ -27,6 +27,8 @@ class VendorValveDefinition:
     fd: float | None
     opening_desc: str
     sizes: tuple[ValveSize, ...]
+    pressure_class: str = "CL300"
+    leakage_class: str = "IV"
 
 
 FISHER_VENDOR_CATALOG: dict[str, VendorValveDefinition] = {
@@ -80,8 +82,10 @@ FISHER_VENDOR_CATALOG: dict[str, VendorValveDefinition] = {
         family="Representative Rotary",
         style="V-Notch Ball Valve",
         service="liquid_gas_steam",
-        source_note="Representative sizing coefficients from Fisher Control Valve Handbook Chapter 5.10.2 at 90 degrees opening.",
-        source_url="https://www.emerson.com/documents/automation/control-valve-handbook-en-3661206.pdf",
+        source_note="Representative sizing coefficients from Fisher Control Valve Handbook Chapter 5.10.2 at 90 degrees opening. "
+                     "Metal-seal Cv reference: Fisher Vee-Ball Design V150/V200/V300 Bulletin D101363X012 and capacity MOC D352710X012 "
+                     "(1 in=33.1, 1-1/2 in=70.8, 2 in=122).",
+        source_url="https://www.emerson.com/is/content/emerson/en/final-control/flow-controls/documents/d101363x012.pdf",
         fl=0.74,
         xt=0.27,
         fd=0.99,

@@ -5,6 +5,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.cover
+*,cover
 .coverage
 .coverage.*
 htmlcov/

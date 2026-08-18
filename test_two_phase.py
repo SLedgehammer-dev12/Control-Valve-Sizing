@@ -36,6 +36,12 @@ class TestCavitationIndex:
         sigma = cavitation_index(10.0, 10.0, 2.0)
         assert sigma == float("inf")
 
+    def test_vapor_pressure_at_or_above_inlet(self):
+        from two_phase import xfz_cavitation_factor
+
+        assert xfz_cavitation_factor(10.0, 8.0, 10.0) == 0.0
+        assert xfz_cavitation_factor(10.0, 8.0, 12.0) == 0.0
+
     def test_severity_classification(self):
         assert cavitation_severity(1.5) == "Kavitasyon yok"
         assert cavitation_severity(0.8) == "Hafif kavitasyon"
@@ -84,3 +90,45 @@ class TestFlashFraction:
     def test_flash_positive(self):
         x = flash_fraction(10.0, 2.0, 180.0, 4200.0, 2.0e6)
         assert 0.0 <= x <= 1.0
+
+    def test_non_positive_latent_heat(self):
+        assert flash_fraction(10.0, 2.0, 180.0, 4200.0, 0.0) == 0.0
+        assert flash_fraction(10.0, 2.0, 180.0, 4200.0, -1000.0) == 0.0
+
+
+class TestVaporDensityIdealGas:
+    def test_water_vapor_at_5bar(self):
+        from two_phase import vapor_density_ideal_gas
+
+        rho = vapor_density_ideal_gas(5.0, 100.0, 18.015)
+        assert 2.0 < rho < 4.0
+
+    def test_zero_temperature_guard(self):
+        from two_phase import vapor_density_ideal_gas
+
+        assert vapor_density_ideal_gas(5.0, -273.15, 18.015) == 0.0
+
+
+class TestFlashingCvEstimate:
+    def test_no_flash_returns_liquid_cv(self):
+        from two_phase import flashing_cv_estimate
+
+        cv = flashing_cv_estimate(20.0, 0.0, 1000.0, 1.0)
+        assert abs(cv - 20.0) < 1e-9
+
+    def test_flash_increases_cv(self):
+        from two_phase import flashing_cv_estimate
+
+        cv_tp = flashing_cv_estimate(20.0, 0.1, 1000.0, 1.2)
+        assert cv_tp > 20.0
+
+    def test_non_positive_cv_returns_zero(self):
+        from two_phase import flashing_cv_estimate
+
+        assert flashing_cv_estimate(0.0, 0.5, 1000.0, 1.0) == 0.0
+
+    def test_degenerate_two_phase_density_returns_liquid_cv(self):
+        from two_phase import flashing_cv_estimate
+
+        cv = flashing_cv_estimate(20.0, 0.5, 1000.0, -1.0)
+        assert cv == 20.0

@@ -2,5 +2,8 @@
 
 # Testing and Development tools
 pytest>=8.0,<9.0
+pytest-cov>=5.0,<6.0
 pytest-asyncio>=0.21.1
 streamlit-extras>=0.10.0
+ruff>=0.12.0
+mypy>=1.8.0

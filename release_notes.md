@@ -1,36 +1,51 @@
-# Control Valve Sizing v1.1.0
+# Control Valve Sizing v3.1.0
 
-IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması — 22 bug fix.
+IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
-## Düzeltmeler
+## İndirmeler
 
-### Kritik
-- **Proje kaydet/yükle**: Servis adı büyük/küçük harf duyarsız yapıldı. Masaüstü (`"liquid"`) ve web (`"Liquid"`) projeleri artık karşılıklı yüklenebilir.
-- **Eksik LRU cache**: `get_pure_fluid_state`'a `@lru_cache(256)` eklendi. CoolProp çağrıları tekrarlanmıyor.
-- **Kavitasyon indeksi**: IEC 60534-8-4 standardına geçildi (`sigma = (P1-Pv)/(P1-P2)`). Daha önce 2 farklı formül vardı.
-- **Steam uyarısı**: Overflow durumunda CoolProp düşüş uyarısı ezilmiyor, birleştiriliyor.
-- **Gaz karışımı fallback**: `k_avg` hep `1.4` döndüren sahte döngü kaldırıldı.
+| Platform | Dosya | Not |
+|---|---|---|
+| Windows (x86_64) | `ControlValveSizing_windows_x86_64.zip` | Kurulum gerektirmez, klasörü açıp `ControlValveSizing.exe` çalıştırın |
+| macOS (Apple Silicon / arm64) | `ControlValveSizing_macos_arm64.zip` | `.app` dosyasını `/Applications`'a taşıyın |
 
-### Entegrasyon
-- **Vana gürültüsü (IEC 60534-8)**: Liquid/Gas/Steam sonuçlarına `noise_db` alanı eklendi. `valve_noise.py` motor'a bağlandı.
-- **Aktüatör boyutlandırma**: Vana seçimi sonrası otomatik `actuator_thrust_n` hesaplanıyor. `actuator_sizing.py` motor'a bağlandı.
-- **Web UI**: Referans basınç kaldırıldı, giriş basıncı tek kaynak. Akışkan özellikleri doğru basınçta hesaplanıyor.
+## Bu sürümde yeni
 
-### Akışkan özellikleri
-- **İdeal gaz viskozitesi**: Sabit `1.5e-5` → sıcaklık düzeltmeli `mu_ref * sqrt(T/300)`. Yüksek sıcaklıkta daha doğru.
-- **Flaş buhar fraksiyonu**: Kaba `DeltaT_sat = DeltaP * 2.0` → Clausius-Clapeyron (`dT/dP = RT^2/Ph_fg`).
-- **Chemicals hata loglama**: Sessiz hata yutma → `logger.debug()` eklendi.
-- **Chemicals cache sınırı**: Sınırsız büyüme → max 512 giriş.
+- **Sektör birim seçicileri** (petrol / doğalgaz / enerji):
+  - Sıcaklık: °C, °F, K
+  - Basınç: bar(a)/bar(g), psi(a)/psi(g), kPa(a), MPa(a), atm(a)
+  - Sıvı debi: m³/h, US gpm, L/min, m³/d, US bbl/d, kg/h
+  - Gaz debi: Nm³/h, Sm³/h, scfh, MMSCFD, m³/h (actual), kg/h
+  - Buhar debi: kg/h, t/h, lb/h, kg/s
+- **Canlı hesaplama**: Girdi veya birim değiştirdiğinizde sonuç anında güncellenir (butona gerek yok).
+- Gauge basınçlar 1.01325 bar atmosfer basıncıyla mutlak değere çevrilir.
+- Seçilen birimler proje kaydet/yükle ile saklanır.
 
-### Diğer
-- `get_vendor_definition`: Çıplak `KeyError` → `ValueError("Bilinmeyen vendor...")`
-- `cavitation_severity`: İngilizce → Türkçe etiketler
-- `select_valve_size`: `DeprecationWarning` eklendi
-- `.dockerignore` eklendi
-- `pyproject.toml`: Geçersiz `test_app_integration.py` referansı silindi
-- CI fallback komutu genişletildi
-- CoolProp versiyon kısıtı gevşetildi (`<8.0` → `<9.0`)
+## Windows — Kurulum ve SmartScreen
+
+- ZIP'i açın, `ControlValveSizing.exe`'yi çalıştırın.
+- Dağıtım imzasız olduğundan **SmartScreen "More info → Run anyway"** isteyebilir. Bu normaldir; uygulama
+  antivirüs/antimalware alarmını azaltmak için tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenmiştir.
+- Kurulum gerektirmez; taşınabilirdir.
+
+## macOS (Apple Silicon) — Kurulum ve Gatekeeper
+
+1. ZIP'i açın, `ControlValveSizing.app`'i `/Applications`'a taşıyın.
+2. Uygulama noter onaylı (notarized) olmadığından ilk açılışta Gatekeeper uyarısı çıkar. Şu adımlardan birini kullanın:
+   - **Sağ tık → Aç** → "Aç" deyin, veya
+   - Terminalden karantina bayrağını kaldırın:
+     ```
+     xattr -dr com.apple.quarantine "/Applications/ControlValveSizing.app"
+     ```
+3. uygulama Apple Silicon için ad-hoc imzalanmıştır (arm64 zorunluluğu), doğrulama:
+   ```
+   codesign --verify --deep --strict "/Applications/ControlValveSizing.app"
+   ```
+
+> Not: Windows Authenticode ve macOS noter onayı için bir geliştirici sertifikası gereklidir.
+> Sertifika eklendiğinde uyarılar tamamen kalkar; bu sürümde ad-hoc imza + karantina talimatı kullanılmaktadır.
 
 ## Sistem Gereksinimleri
+
 - Windows 10 / 11 (64-bit)
-- Standalone .exe — kurulum gerektirmez
+- macOS 12+ (Apple Silicon / M1-M4)

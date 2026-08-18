@@ -21,10 +21,20 @@ from units import (
     Q_,
     bar_to_pa,
     celsius_to_k,
+    gas_flow_from_nm3h,
+    gas_flow_to_nm3h,
     k_to_celsius,
+    liquid_flow_from_m3h,
+    liquid_flow_to_m3h,
     mm_to_m,
     nm3h_to_actual_m3h,
     pa_to_bar,
+    pressure_from_bar_a,
+    pressure_to_bar_a,
+    steam_flow_from_kgh,
+    steam_flow_to_kgh,
+    temperature_from_c,
+    temperature_to_c,
     ureg,
 )
 
@@ -136,6 +146,160 @@ class TestNm3hToActual:
     def test_z_factor(self):
         result = nm3h_to_actual_m3h(100.0, NORMAL_P_BAR, NORMAL_T_K, 0.5)
         assert abs(result - 50.0) < _TOL
+
+
+class TestTemperatureConverters:
+    def test_c_to_c(self):
+        assert temperature_to_c(25.0, "C") == 25.0
+
+    def test_f_to_c(self):
+        assert abs(temperature_to_c(212.0, "F") - 100.0) < _TOL
+
+    def test_k_to_c(self):
+        assert abs(temperature_to_c(298.15, "K") - 25.0) < _TOL
+
+    def test_c_to_f(self):
+        assert abs(temperature_from_c(100.0, "F") - 212.0) < _TOL
+
+    def test_c_to_k(self):
+        assert abs(temperature_from_c(0.0, "K") - 273.15) < _TOL
+
+    def test_roundtrip(self):
+        for unit in ("C", "F", "K"):
+            for value in (0.0, 25.0, 120.0, -40.0):
+                assert abs(temperature_to_c(temperature_from_c(value, unit), unit) - value) < _TOL
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen sicaklik birimi"):
+            temperature_to_c(1.0, "R")
+
+
+class TestPressureConverters:
+    def test_bar_a(self):
+        assert pressure_to_bar_a(8.0, "bar_a") == 8.0
+
+    def test_bar_g_to_abs(self):
+        assert abs(pressure_to_bar_a(0.0, "bar_g") - 1.01325) < _TOL
+
+    def test_psi_a_to_bar(self):
+        assert abs(pressure_to_bar_a(14.5037738, "psi_a") - 1.0) < _TOL
+
+    def test_psi_g_to_abs(self):
+        assert abs(pressure_to_bar_a(0.0, "psi_g") - 1.01325) < _TOL
+
+    def test_kpa_a_to_bar(self):
+        assert abs(pressure_to_bar_a(1000.0, "kPa_a") - 10.0) < _TOL
+
+    def test_mpa_a_to_bar(self):
+        assert abs(pressure_to_bar_a(1.0, "MPa_a") - 10.0) < _TOL
+
+    def test_atm_to_bar(self):
+        assert abs(pressure_to_bar_a(1.0, "atm_a") - 1.01325) < _TOL
+
+    def test_bar_to_psi(self):
+        assert abs(pressure_from_bar_a(1.0, "psi_a") - 14.5037738) < _TOL
+
+    def test_roundtrip(self):
+        for unit in ("bar_a", "bar_g", "psi_a", "psi_g", "kPa_a", "MPa_a", "atm_a"):
+            for value in (1.0, 8.0, 50.0):
+                assert abs(pressure_to_bar_a(pressure_from_bar_a(value, unit), unit) - value) < _TOL
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen basinc birimi"):
+            pressure_to_bar_a(1.0, "ksi")
+
+
+class TestLiquidFlowConverters:
+    def test_m3h(self):
+        assert liquid_flow_to_m3h(25.0, "m3h") == 25.0
+
+    def test_gpm_to_m3h(self):
+        assert abs(liquid_flow_to_m3h(110.0, "gpm") - 110.0 / M3H_TO_GPM) < _TOL
+
+    def test_lpm_to_m3h(self):
+        assert abs(liquid_flow_to_m3h(1000.0, "lpm") - 60.0) < _TOL
+
+    def test_m3d_to_m3h(self):
+        assert abs(liquid_flow_to_m3h(2400.0, "m3d") - 100.0) < _TOL
+
+    def test_bbl_d_to_m3h(self):
+        assert abs(liquid_flow_to_m3h(1000.0, "bbl_d") - 1000.0 * 0.158987 / 24.0) < _TOL
+
+    def test_kgh_to_m3h(self):
+        assert abs(liquid_flow_to_m3h(9980.0, "kgh", density_kg_m3=998.0) - 10.0) < _TOL
+
+    def test_roundtrip(self):
+        for unit in ("m3h", "gpm", "lpm", "m3d", "bbl_d"):
+            for value in (1.0, 25.0, 500.0):
+                assert abs(liquid_flow_to_m3h(liquid_flow_from_m3h(value, unit), unit) - value) < _TOL
+
+    def test_kgh_requires_density(self):
+        with pytest.raises(ValueError, match="yogunlugu gereklidir"):
+            liquid_flow_to_m3h(10.0, "kgh")
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen sivi debi birimi"):
+            liquid_flow_to_m3h(1.0, "cfh")
+
+
+class TestSteamFlowConverters:
+    def test_kgh(self):
+        assert steam_flow_to_kgh(2500.0, "kgh") == 2500.0
+
+    def test_th_to_kgh(self):
+        assert steam_flow_to_kgh(2.5, "th") == 2500.0
+
+    def test_lbh_to_kgh(self):
+        assert abs(steam_flow_to_kgh(2204.6, "lbh") - 1000.0) < 0.5
+
+    def test_kgs_to_kgh(self):
+        assert steam_flow_to_kgh(1.0, "kgs") == 3600.0
+
+    def test_roundtrip(self):
+        for unit in ("kgh", "th", "lbh", "kgs"):
+            for value in (100.0, 2500.0):
+                assert abs(steam_flow_to_kgh(steam_flow_from_kgh(value, unit), unit) - value) < _TOL
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen buhar debi birimi"):
+            steam_flow_to_kgh(1.0, "scfh")
+
+
+class TestGasFlowConverters:
+    def test_nm3h(self):
+        assert gas_flow_to_nm3h(800.0, "nm3h") == 800.0
+
+    def test_sm3h_to_nm3h(self):
+        assert abs(gas_flow_to_nm3h(1000.0, "sm3h") - 1000.0 * NORMAL_T_K / 288.15) < _TOL
+
+    def test_scfh_to_nm3h(self):
+        assert abs(gas_flow_to_nm3h(35314.6667, "scfh") - 1000.0) < 0.01
+
+    def test_mmscfd_to_nm3h(self):
+        assert abs(gas_flow_to_nm3h(1.0, "mmscfd") - 1e6 / 24.0 / NM3H_TO_SCFH) < _TOL
+
+    def test_actual_m3h_to_nm3h(self):
+        result = gas_flow_to_nm3h(100.0, "m3h", pressure_bar_a=8.0, temperature_c=20.0, z=0.98)
+        assert abs(result - 100.0 * (8.0 / NORMAL_P_BAR) * (NORMAL_T_K / 293.15) * 0.98) < _TOL
+
+    def test_kgh_to_nm3h(self):
+        density = 7.0
+        result = gas_flow_to_nm3h(700.0, "kgh", pressure_bar_a=8.0, temperature_c=20.0, z=1.0, density_kg_m3=density)
+        expected = 100.0 * (8.0 / NORMAL_P_BAR) * (NORMAL_T_K / 293.15)
+        assert abs(result - expected) < _TOL
+
+    def test_roundtrip(self):
+        for unit in ("nm3h", "sm3h", "scfh", "mmscfd"):
+            for value in (100.0, 800.0):
+                assert abs(gas_flow_to_nm3h(gas_flow_from_nm3h(value, unit), unit) - value) < 1e-3
+
+    def test_kgh_requires_density(self):
+        with pytest.raises(ValueError, match="yogunlugu gereklidir"):
+            gas_flow_to_nm3h(100.0, "kgh")
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen gaz debi birimi"):
+            gas_flow_to_nm3h(1.0, "gpm")
 
 
 class TestPintRegistry:

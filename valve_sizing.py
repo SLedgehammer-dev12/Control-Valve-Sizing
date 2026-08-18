@@ -2,9 +2,8 @@
 
 Implements IEC 60534 / ISA-based Cv/Kv calculations for liquid, gas, and steam
 services.  Exposes dataclass input types (LiquidSizingInput, GasSizingInput,
-SteamSizingInput), sizing functions (size_liquid_valve, size_gas_valve,
-size_steam_valve), and valve selection utilities (select_valve_size,
-cv_to_kv, kv_to_cv).
+SteamSizingInput) and sizing functions (size_liquid_valve, size_gas_valve,
+size_steam_valve), plus unit conversions (cv_to_kv, kv_to_cv).
 """
 
 from __future__ import annotations
@@ -19,7 +18,14 @@ from typing import Any, cast
 
 from fluids.control_valve import size_control_valve_g, size_control_valve_l
 
+from trim_guidance import recommend_trim
 from two_phase import cavitation_index as _iec_cavitation_index
+from two_phase import (
+    flash_fraction,
+    flashing_cv_estimate,
+    two_phase_density_homogeneous,
+    vapor_density_ideal_gas,
+)
 from units import (
     AIR_K,
     AIR_MW,
@@ -34,6 +40,7 @@ from units import (
     NORMAL_P_BAR,
     NORMAL_T_K,
 )
+from valve_selection import build_valve_spec
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,10 @@ class LiquidSizingInput:
     fd: float = 1.0
     pipe_inlet_diameter_mm: float | None = None
     pipe_outlet_diameter_mm: float | None = None
+    temperature_c: float = 25.0
+    specific_heat_j_kgk: float = 4186.0
+    latent_heat_j_kg: float = 2257000.0
+    molecular_weight: float = 18.015
 
 
 @dataclass(frozen=True)
@@ -143,6 +154,11 @@ class SizingResult:
     delta_p_bar: float
     is_choked: bool
     warning: str
+    design_margin_pct: float = 0.0
+    opening_percent: float = 0.0
+    cv_ratio: float = 0.0
+    rangeability_min_cv: float = 0.0
+    rangeability_ok: bool = True
     valve_meta: dict = field(default_factory=dict)
     sources: list[dict] = field(default_factory=list)
     equations: list[str] = field(default_factory=list)
@@ -204,19 +220,82 @@ def kv_to_cv(kv: float) -> float:
     return float(kv) * KV_TO_CV
 
 
-def select_valve_size(required_cv: float, valve_series: list[ValveSize] | None = None) -> ValveSize:
-    """Select the smallest valve whose rated Cv >= required_cv.
+FLOW_CHARACTERISTICS = ("linear", "equal_percentage")
 
-    Deprecated: use _size_iteration instead (accounts for pipe reducer effects).
+DEFAULT_RANGEABILITY = 50.0
+
+
+def estimate_opening(
+    required_cv: float,
+    rated_cv: float,
+    characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
+) -> float:
+    """Estimate valve opening fraction (0-1) from the inherent characteristic.
+
+    linear: opening = Cv_req/Cv_rated
+    equal-percentage: Cv(theta) = Cv_rated * R^(theta-1), so theta is obtained
+    by inverting the characteristic. Values are clamped to [0, 1].
     """
-    import warnings
-    warnings.warn("select_valve_size deprecated; use _size_iteration", DeprecationWarning, stacklevel=2)
-    _require_positive("Gerekli Cv", required_cv)
-    valve_series = valve_series or DEFAULT_VALVE_SERIES
-    for valve in valve_series:
-        if valve.cv_rated >= required_cv:
-            return valve
-    return valve_series[-1]
+    if rated_cv <= 0 or required_cv <= 0:
+        return 0.0
+    ratio = min(required_cv / rated_cv, 1.0)
+    if characteristic == "linear":
+        return ratio
+    if characteristic == "equal_percentage" and rangeability > 1.0:
+        opening = 1.0 + math.log(max(ratio, 1e-9)) / math.log(rangeability)
+        return max(0.0, min(opening, 1.0))
+    return ratio
+
+
+def estimate_min_controllable_cv(
+    rated_cv: float,
+    characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
+) -> float:
+    """Return the minimum controllable Cv for a given inherent characteristic.
+
+    equal-percentage: rated / rangeability (Cv(R) at ~0% travel).
+    linear: 1% of rated Cv (typical positioner/actuator resolution limit).
+    """
+    if characteristic == "linear":
+        return rated_cv * 0.01
+    if rangeability > 1.0:
+        return rated_cv / rangeability
+    return rated_cv
+
+
+LIQUID_VELOCITY_ADVISORY_M_S = 6.0
+LIQUID_VELOCITY_LIMIT_M_S = 8.0
+GAS_MACH_ADVISORY = 0.3
+GAS_MACH_LIMIT = 0.5
+API_14E_C_CONTINUOUS_SI = 122.0
+API_14E_C_INTERMITTENT_SI = 152.0
+
+
+def pipe_velocity_m_s(flow_m3_s: float, diameter_mm: float) -> float:
+    """Mean velocity in a circular pipe [m/s]."""
+    d = _require_positive("Cap", diameter_mm) / 1000.0
+    area = math.pi * d * d / 4.0
+    return max(float(flow_m3_s), 0.0) / area
+
+
+def api_14e_erosion_velocity(rho_mix_kg_m3: float, continuous: bool = True) -> float:
+    """API RP 14E erosional velocity limit [m/s] (two-phase guidance).
+
+    v_e = C / sqrt(rho_mix), C = 122 (continuous) or 152 (intermittent) in SI.
+    """
+    rho = _require_positive("Yogunluk", rho_mix_kg_m3)
+    c = API_14E_C_CONTINUOUS_SI if continuous else API_14E_C_INTERMITTENT_SI
+    return c / math.sqrt(rho)
+
+
+def speed_of_sound_m_s(specific_heat_ratio: float, temperature_k: float, molecular_weight: float) -> float:
+    """Ideal-gas speed of sound [m/s]; c = sqrt(k * R_specific * T)."""
+    k = _require_positive("Isi kapasite orani", specific_heat_ratio)
+    t = _require_positive("Sicaklik", temperature_k)
+    mw = _require_positive("Molekuler agirlik", molecular_weight)
+    return math.sqrt(k * 8314.0 * t / mw)
 
 
 def _diameter_mm_to_m(value: float | None, fallback_mm: int) -> float:
@@ -317,8 +396,10 @@ def _size_iteration(
     pipe_inlet_mm: float | None,
     pipe_outlet_mm: float | None,
     compute: Callable[[float, float, float], dict],
+    design_margin_pct: float = 0.0,
 ) -> tuple[ValveSize, dict, bool]:
     """Common candidate-valve iteration used by liquid/gas/steam sizing."""
+    margin_factor = 1.0 + max(float(design_margin_pct), 0.0) / 100.0
     candidates: list[tuple[ValveSize, dict]] = []
     selected: tuple[ValveSize, dict] | None = None
     for valve in valve_series:
@@ -327,7 +408,7 @@ def _size_iteration(
         d = valve.dn_mm / 1000.0
         details = compute(d1, d2, d)
         candidates.append((valve, details))
-        if valve.cv_rated >= kv_to_cv(details["Kv"]):
+        if valve.cv_rated >= kv_to_cv(details["Kv"]) * margin_factor:
             selected = (valve, details)
             break
     if selected is None:
@@ -337,10 +418,35 @@ def _size_iteration(
     return valve, details, False
 
 
+def _opening_metrics(
+    required_cv: float,
+    rated_cv: float,
+    design_margin_pct: float,
+    flow_characteristic: str,
+    rangeability: float,
+) -> dict[str, float | bool]:
+    margin_factor = 1.0 + max(float(design_margin_pct), 0.0) / 100.0
+    required_cv_margin = required_cv * margin_factor
+    opening = estimate_opening(required_cv_margin, rated_cv, flow_characteristic, rangeability)
+    min_cv = estimate_min_controllable_cv(rated_cv, flow_characteristic, rangeability)
+    ratio = required_cv_margin / rated_cv if rated_cv > 0 else 0.0
+    return {
+        "required_cv_with_margin": required_cv_margin,
+        "opening_fraction": opening,
+        "opening_percent": opening * 100.0,
+        "cv_ratio": ratio,
+        "rangeability_min_cv": min_cv,
+        "rangeability_ok": required_cv >= min_cv,
+    }
+
+
 def size_liquid_valve(
     data: LiquidSizingInput,
     valve_series: list[ValveSize] | None = None,
     valve_meta: dict | None = None,
+    design_margin_pct: float = 0.0,
+    flow_characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
 ) -> SizingResult:
     """Size a control valve for liquid service.
 
@@ -360,10 +466,8 @@ def size_liquid_valve(
     sg = density / 999.016
     q_gpm = flow_m3h * M3H_TO_GPM
     ff = FF_A - FF_B * math.sqrt(max(pv / pc, 0.0))
-    dp_max_bar = (fl ** 2) * (data.inlet_pressure_bar_a - ff * pv)
-    dp_max_bar = max(dp_max_bar, 1e-9)
-    is_choked = delta_p_bar >= dp_max_bar
-    effective_dp_bar = min(delta_p_bar, dp_max_bar)
+    dp_max_valve_only_bar = (fl ** 2) * (data.inlet_pressure_bar_a - ff * pv)
+    dp_max_valve_only_bar = max(dp_max_valve_only_bar, 1e-9)
 
     valve_series = valve_series or DEFAULT_VALVE_SERIES
 
@@ -378,14 +482,26 @@ def size_liquid_valve(
 
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
+        design_margin_pct=design_margin_pct,
     )
 
     required_kv = details["Kv"]
     required_cv = kv_to_cv(required_kv)
+    opening_metrics = _opening_metrics(
+        required_cv, valve.cv_rated, design_margin_pct, flow_characteristic, rangeability,
+    )
     fp = details.get("FP") or 1.0
     flp = details.get("FLP")
     rev = details.get("Rev")
     laminar = details.get("laminar")
+
+    fl_effective = flp if flp else fl
+    dp_max_bar = (fl_effective ** 2) * (data.inlet_pressure_bar_a - ff * pv)
+    dp_max_bar = max(dp_max_bar, 1e-9)
+    is_choked = delta_p_bar >= dp_max_bar
+    effective_dp_bar = min(delta_p_bar, dp_max_bar)
+    dp_max_valve_only_bar = (fl ** 2) * (data.inlet_pressure_bar_a - ff * pv)
+    dp_max_valve_only_bar = max(dp_max_bar if flp else dp_max_valve_only_bar, 1e-9)
 
     sigma = _iec_cavitation_index(data.inlet_pressure_bar_a, data.outlet_pressure_bar_a, pv)
     if data.outlet_pressure_bar_a <= pv:
@@ -397,9 +513,20 @@ def size_liquid_valve(
     else:
         regime = "subcritical"
 
-    warning = ""
+    warnings: list[str] = []
     if overflow:
-        warning = "Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+        warnings.append("Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir.")
+    elif not opening_metrics["rangeability_ok"]:
+        warnings.append(
+            f"Gereken Cv ({required_cv:.3f}), minimum kontrollu Cv'nin "
+            f"({opening_metrics['rangeability_min_cv']:.3f}) altinda; vana rangeability disinda "
+            "kontrol edemez. Daha kucuk trim veya vana secin."
+        )
+    elif opening_metrics["opening_percent"] > 85.0:
+        warnings.append(
+            f"Tasarim acikligi %{opening_metrics['opening_percent']:.1f} onerilen sinirin "
+            "(~%85) uzerinde; daha buyuk vana degerlendirilmelidir."
+        )
 
     flow_kg_s_liquid = flow_m3h * density / 3600.0
     noise_db = _predict_valve_noise(
@@ -408,6 +535,22 @@ def size_liquid_valve(
         valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fl, fd, pv,
     )
+
+    q_m3s = flow_m3h / 3600.0
+    velocity: dict[str, float | bool] = {
+        "pipe_in_m_s": pipe_velocity_m_s(q_m3s, data.pipe_inlet_diameter_mm or valve.dn_mm),
+        "pipe_out_m_s": pipe_velocity_m_s(q_m3s, data.pipe_outlet_diameter_mm or valve.dn_mm),
+    }
+    if velocity["pipe_out_m_s"] > LIQUID_VELOCITY_LIMIT_M_S:
+        warnings.append(
+            f"Cikis hattinda sivi hizi {velocity['pipe_out_m_s']:.1f} m/s onerilen "
+            f"{LIQUID_VELOCITY_LIMIT_M_S:.0f} m/s sinirini asiyor; erozyon riski."
+        )
+    elif velocity["pipe_out_m_s"] > LIQUID_VELOCITY_ADVISORY_M_S:
+        warnings.append(
+            f"Cikis hattinda sivi hizi {velocity['pipe_out_m_s']:.1f} m/s; "
+            f"{LIQUID_VELOCITY_ADVISORY_M_S:.0f} m/s uzeri uzun sureli servis icin degerlendirilmelidir."
+        )
 
     result = _base_result_dict("liquid", ["iec_scope", "primer_liquid", "fisher_choked"])
     result.update(
@@ -423,31 +566,81 @@ def size_liquid_valve(
             "specific_gravity": sg,
             "is_choked": is_choked,
             "dp_choked_bar": dp_max_bar,
+            "dp_choked_valve_only_bar": dp_max_valve_only_bar,
             "outlet_margin_to_vapor_bar": data.outlet_pressure_bar_a - pv,
             "ff": ff,
             "flow_regime": regime,
             "cavitation_index": sigma,
-            "warning": warning,
+            "warning": "",
+            "velocity": velocity,
             "valve_meta": valve_meta or {},
+            "design_margin_pct": float(design_margin_pct),
+            "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
+            "opening_percent": float(opening_metrics["opening_percent"]),
+            "cv_ratio": float(opening_metrics["cv_ratio"]),
+            "rangeability_min_cv": float(opening_metrics["rangeability_min_cv"]),
+            "rangeability_ok": bool(opening_metrics["rangeability_ok"]),
             "reynolds_valve": rev,
             "laminar": laminar,
             "fp": fp,
             "flp": flp,
             "noise_db": noise_db,
             "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "valve_spec": build_valve_spec(
+                "liquid", data.inlet_pressure_bar_a, is_choked, regime,
+                vendor_pressure_class="", vendor_leakage_class="",
+            ),
         }
     )
 
     if regime == "flashing":
-        result["warning"] = (
-            "Flashing bekleniyor: P2, Pv'nin altinda veya esiti. "
-            "Iki fazli akista Cv gereksinimi tek faza gore cok daha yuksektir. "
+        quality_x = flash_fraction(
+            data.inlet_pressure_bar_a,
+            data.outlet_pressure_bar_a,
+            data.temperature_c,
+            data.specific_heat_j_kgk,
+            data.latent_heat_j_kg,
+        )
+        rho_g = vapor_density_ideal_gas(
+            data.outlet_pressure_bar_a, data.temperature_c, data.molecular_weight,
+        )
+        rho_tp = two_phase_density_homogeneous(quality_x, density, rho_g)
+        cv_flashing = flashing_cv_estimate(required_cv, quality_x, density, rho_g)
+        result["flashing"] = {
+            "quality_x": quality_x,
+            "rho_vapor_kg_m3": rho_g,
+            "rho_tp_kg_m3": rho_tp,
+            "required_cv_single_phase": required_cv,
+            "required_cv_flashing": cv_flashing,
+            "flashing_cv_multiplier": cv_flashing / required_cv if required_cv > 0 else 1.0,
+        }
+        q_tp_m3s = (flow_m3h * density / rho_tp) / 3600.0
+        v_tp = pipe_velocity_m_s(q_tp_m3s, data.pipe_outlet_diameter_mm or valve.dn_mm)
+        v_e = api_14e_erosion_velocity(rho_tp)
+        velocity["two_phase_out_m_s"] = v_tp
+        velocity["api_14e_limit_m_s"] = v_e
+        velocity["erosion_risk"] = bool(v_tp > v_e)
+        warnings.append(
+            f"Flashing bekleniyor: P2 ({data.outlet_pressure_bar_a:.3f} bar) <= Pv "
+            f"({pv:.3f} bar). Tahmini flash orani %{quality_x * 100.0:.1f}; iki fazli Cv "
+            f"gereksinimi tek faza gore yaklasik {cv_flashing / required_cv:.2f}x daha yuksek. "
             "Ozel anti-flashing trim ve body secimi icin vendor dogrulamasi sarttir."
         )
+        if v_tp > v_e:
+            warnings.append(
+                f"Iki fazli cikis hizi {v_tp:.1f} m/s, API 14E erozyon siniri "
+                f"({v_e:.1f} m/s) uzerinde; erozyon korumasi gerekir."
+            )
     elif regime == "choked-cavitating":
-        result["warning"] = "Choked liquid flow / kavitasyon riski mevcut. Trim ve malzeme kontrolu gerekli."
+        warnings.append("Choked liquid flow / kavitasyon riski mevcut. Trim ve malzeme kontrolu gerekli.")
     elif regime == "cavitating-risk":
-        result["warning"] = "Kismi kavitasyon riski mevcut. Vendor trim secimi ile kontrol edilmeli."
+        warnings.append("Kismi kavitasyon riski mevcut. Vendor trim secimi ile kontrol edilmeli.")
+
+    result["warning"] = " ".join(warnings)
+    result["trim_guidance"] = recommend_trim(
+        "liquid", regime, is_choked, noise_db,
+        float(opening_metrics["opening_percent"]), sigma, temperature_c=data.temperature_c,
+    )
 
     result["equations"] = [
         "FF = 0.96 - 0.28*sqrt(Pv/Pc)",
@@ -459,7 +652,7 @@ def size_liquid_valve(
         "IEC/ISA liquid sizing yaklasimi fluids.control_valve uygulamasi ile candidate-valve bazinda hesaplandi.",
         "Pipe reducer etkisi icin FP ve FLP otomatik hesaplandi.",
         "Flow regime, P2-Pv iliskisi ve choke siniri uzerinden siniflandirildi.",
-        "Flashing durumunda iki fazli akis modelleri devreye girer; bu surum tek fazli IEC denklemi kullanir.",
+        "Flashing durumunda HEM iki fazli Cv tahmini (flash orani, homojen yogunluk) sonuca eklenir; final trim vendor dogrulamasi ile secilmelidir.",
     ]
     result["intermediate_values"] = {
         "Q_gpm": q_gpm,
@@ -467,14 +660,24 @@ def size_liquid_valve(
         "FF": ff,
         "DeltaP_actual_bar": delta_p_bar,
         "DeltaP_max_bar": dp_max_bar,
+        "DeltaP_max_valve_only_bar": dp_max_valve_only_bar,
         "DeltaP_effective_bar": effective_dp_bar,
+        "FLP": flp,
+        "FL_valve_only": fl,
         "Fd": fd,
         "Fp": fp,
-        "FLP": flp,
         "mu_Pa_s": mu,
         "Rev": rev,
         "Laminar": laminar,
         "Cavitation_index": sigma,
+        "Design_margin_pct": float(design_margin_pct),
+        "Opening_percent": float(opening_metrics["opening_percent"]),
+        "Cv_ratio": float(opening_metrics["cv_ratio"]),
+        "Rangeability_min_Cv": float(opening_metrics["rangeability_min_cv"]),
+        "Rangeability_ok": bool(opening_metrics["rangeability_ok"]),
+        "Flashing_Cv_multiplier": result.get("flashing", {}).get("flashing_cv_multiplier", 1.0),
+        "Pipe_in_velocity_m_s": velocity["pipe_in_m_s"],
+        "Pipe_out_velocity_m_s": velocity["pipe_out_m_s"],
     }
     logger.info("Liquid sizing: Cv=%.3f, valve=DN%s, regime=%s", required_cv, valve.dn_mm, regime)
     return _pack_result(result)
@@ -484,6 +687,9 @@ def size_gas_valve(
     data: GasSizingInput,
     valve_series: list[ValveSize] | None = None,
     valve_meta: dict | None = None,
+    design_margin_pct: float = 0.0,
+    flow_characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
 ) -> SizingResult:
     """Size a control valve for gas service.
 
@@ -522,21 +728,37 @@ def size_gas_valve(
 
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
+        design_margin_pct=design_margin_pct,
     )
 
     required_kv = details["Kv"]
     required_cv = kv_to_cv(required_kv)
+    opening_metrics = _opening_metrics(
+        required_cv, valve.cv_rated, design_margin_pct, flow_characteristic, rangeability,
+    )
     fp = details.get("FP") or 1.0
     xtp = details.get("xTP")
     expansion_factor = details.get("Y")
     rev = details.get("Rev")
     laminar = details.get("laminar")
-    x_for_eq = min(x, xtp * fk) if xtp else min(x, x_choked)
-    is_choked = x >= (xtp if xtp is not None else xt) * fk
+    x_choked_effective = (xtp if xtp is not None else xt) * fk
+    x_for_eq = min(x, x_choked_effective)
+    is_choked = x >= x_choked_effective
 
-    warning = "Gaz sizing IEC/ISA'ya yaklastirildi; yine de final secim vendor yazilimi ile dogrulanmali."
+    warnings: list[str] = ["Gaz sizing IEC/ISA'ya yaklastirildi; yine de final secim vendor yazilimi ile dogrulanmali."]
     if overflow:
-        warning = "Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+        warnings = ["Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."]
+    elif not opening_metrics["rangeability_ok"]:
+        warnings = [
+            f"Gereken Cv ({required_cv:.3f}), minimum kontrollu Cv'nin "
+            f"({opening_metrics['rangeability_min_cv']:.3f}) altinda; vana rangeability disinda "
+            "kontrol edemez. Daha kucuk trim veya vana secin."
+        ]
+    elif opening_metrics["opening_percent"] > 85.0:
+        warnings = [
+            f"Tasarim acikligi %{opening_metrics['opening_percent']:.1f} onerilen sinirin "
+            "(~%85) uzerinde; daha buyuk vana degerlendirilmelidir."
+        ]
 
     gas_density_kg_m3 = (data.inlet_pressure_bar_a * 1e5 * mw * 0.001) / (8.314 * t_k * z)
     flow_kg_s_gas = (flow_nm3h * mw * 0.001) / (22.414 * 3600.0)
@@ -546,6 +768,25 @@ def size_gas_valve(
         valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fd, fl,
     )
+
+    c_out = speed_of_sound_m_s(k, t_k, mw)
+    q_out_m3h = q_actual_m3h * (data.inlet_pressure_bar_a / data.outlet_pressure_bar_a)
+    v_out = pipe_velocity_m_s(q_out_m3h / 3600.0, data.pipe_outlet_diameter_mm or valve.dn_mm)
+    mach_out = v_out / c_out if c_out > 0 else 0.0
+    velocity: dict[str, float | bool] = {
+        "pipe_out_m_s": v_out,
+        "mach_outlet": mach_out,
+        "speed_of_sound_m_s": c_out,
+    }
+    if mach_out > GAS_MACH_LIMIT:
+        warnings.append(
+            f"Cikis Mach sayisi {mach_out:.2f} onerilen {GAS_MACH_LIMIT:.1f} sinirini asiyor; "
+            "gurultu/erozyon riski yuksek."
+        )
+    elif mach_out > GAS_MACH_ADVISORY:
+        warnings.append(
+            f"Cikis Mach sayisi {mach_out:.2f}; {GAS_MACH_ADVISORY:.1f} uzeri gurultu acisindan degerlendirilmelidir."
+        )
 
     result = _base_result_dict("gas", ["iec_scope", "isa_committee", "primer_liquid"])
     result.update(
@@ -563,15 +804,31 @@ def size_gas_valve(
             "expansion_factor_y": expansion_factor,
             "is_choked": is_choked,
             "fk": fk,
-            "x_choked": x_choked,
+            "x_choked": x_choked_effective,
+            "x_choked_valve_only": x_choked,
             "xtp": xtp,
             "fp": fp,
             "reynolds_valve": rev,
             "laminar": laminar,
-            "warning": warning,
+            "warning": " ".join(warnings),
+            "velocity": velocity,
             "valve_meta": valve_meta or {},
+            "design_margin_pct": float(design_margin_pct),
+            "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
+            "opening_percent": float(opening_metrics["opening_percent"]),
+            "cv_ratio": float(opening_metrics["cv_ratio"]),
+            "rangeability_min_cv": float(opening_metrics["rangeability_min_cv"]),
+            "rangeability_ok": bool(opening_metrics["rangeability_ok"]),
             "noise_db": noise_db,
             "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "valve_spec": build_valve_spec(
+                "gas", data.inlet_pressure_bar_a, is_choked,
+                vendor_pressure_class="", vendor_leakage_class="",
+            ),
+            "trim_guidance": recommend_trim(
+                "gas", "", is_choked, noise_db,
+                float(opening_metrics["opening_percent"]), None, x, data.temperature_c,
+            ),
         }
     )
     result["equations"] = [
@@ -596,7 +853,8 @@ def size_gas_valve(
         "k": k,
         "Fk": fk,
         "x": x,
-        "x_choked": x_choked,
+        "x_choked": x_choked_effective,
+        "x_choked_valve_only": x_choked,
         "x_for_equation": x_for_eq,
         "Y": expansion_factor,
         "Fp": fp,
@@ -606,6 +864,13 @@ def size_gas_valve(
         "Laminar": laminar,
         "Z": z,
         "Z_source": "User input",
+        "Design_margin_pct": float(design_margin_pct),
+        "Opening_percent": float(opening_metrics["opening_percent"]),
+        "Cv_ratio": float(opening_metrics["cv_ratio"]),
+        "Rangeability_min_Cv": float(opening_metrics["rangeability_min_cv"]),
+        "Rangeability_ok": bool(opening_metrics["rangeability_ok"]),
+        "Pipe_out_velocity_m_s": velocity["pipe_out_m_s"],
+        "Mach_outlet": velocity["mach_outlet"],
     }
     logger.info("Gas sizing: Cv=%.3f, valve=DN%s, x=%.4f, choked=%s", required_cv, valve.dn_mm, x, is_choked)
     return _pack_result(result)
@@ -615,6 +880,9 @@ def size_steam_valve(
     data: SteamSizingInput,
     valve_series: list[ValveSize] | None = None,
     valve_meta: dict | None = None,
+    design_margin_pct: float = 0.0,
+    flow_characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
 ) -> SizingResult:
     """Size a control valve for steam service.
 
@@ -677,23 +945,56 @@ def size_steam_valve(
 
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
+        design_margin_pct=design_margin_pct,
     )
 
     required_kv = details["Kv"]
     required_cv = kv_to_cv(required_kv)
+    opening_metrics = _opening_metrics(
+        required_cv, valve.cv_rated, design_margin_pct, flow_characteristic, rangeability,
+    )
     fp_val = details.get("FP") or 1.0
     xtp = details.get("xTP")
     expansion_factor = details.get("Y")
     rev = details.get("Rev")
     laminar = details.get("laminar")
-    x_for_eq = min(x, xtp * fk) if xtp else min(x, x_choked)
-    is_choked = x >= (xtp if xtp is not None else xt) * fk
+    x_choked_effective = (xtp if xtp is not None else xt) * fk
+    x_for_eq = min(x, x_choked_effective)
+    is_choked = x >= x_choked_effective
 
     warning = "Steam sizing IEC/ISA'ya yaklastirilmistir; yine de final secim vendor yazilimi ile dogrulanmali."
     if not iapws_ok and not coolprop_ok:
         warning += " Uyari: CoolProp devre disi, ideal gaz yaklasimi kullanildi (30 bar(a) uzerinde hata >%10)."
     if overflow:
         warning += " Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
+    elif not opening_metrics["rangeability_ok"]:
+        warning += (
+            f" Gereken Cv ({required_cv:.3f}) minimum kontrollu Cv'nin "
+            f"({opening_metrics['rangeability_min_cv']:.3f}) altinda; vana rangeability disinda "
+            "kontrol edemez. Daha kucuk trim veya vana secin."
+        )
+    elif opening_metrics["opening_percent"] > 85.0:
+        warning += (
+            f" Tasarim acikligi %{opening_metrics['opening_percent']:.1f} onerilen sinirin "
+            "(~%85) uzerinde; daha buyuk vana degerlendirilmelidir."
+        )
+
+    c_out = speed_of_sound_m_s(k, t_k, mw)
+    q_out_m3h = q_actual_m3h * (data.inlet_pressure_bar_a / data.outlet_pressure_bar_a)
+    v_out = pipe_velocity_m_s(q_out_m3h / 3600.0, data.pipe_outlet_diameter_mm or valve.dn_mm)
+    mach_out = v_out / c_out if c_out > 0 else 0.0
+    velocity: dict[str, float | bool] = {
+        "pipe_out_m_s": v_out,
+        "mach_outlet": mach_out,
+        "speed_of_sound_m_s": c_out,
+    }
+    if mach_out > GAS_MACH_LIMIT:
+        warning += (
+            f" Cikis Mach sayisi {mach_out:.2f} onerilen {GAS_MACH_LIMIT:.1f} sinirini asiyor; "
+            "gurultu/erozyon riski yuksek."
+        )
+    elif mach_out > GAS_MACH_ADVISORY:
+        warning += f" Cikis Mach sayisi {mach_out:.2f}; {GAS_MACH_ADVISORY:.1f} uzeri gurultu acisindan degerlendirilmelidir."
 
     noise_db = _predict_valve_noise(
         "steam", flow_kg_h / 3600.0, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
@@ -718,15 +1019,31 @@ def size_steam_valve(
             "expansion_factor_y": expansion_factor,
             "is_choked": is_choked,
             "fk": fk,
-            "x_choked": x_choked,
+            "x_choked": x_choked_effective,
+            "x_choked_valve_only": x_choked,
             "xtp": xtp,
             "fp": fp_val,
             "reynolds_valve": rev,
             "laminar": laminar,
             "warning": warning,
+            "velocity": velocity,
             "valve_meta": valve_meta or {},
+            "design_margin_pct": float(design_margin_pct),
+            "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
+            "opening_percent": float(opening_metrics["opening_percent"]),
+            "cv_ratio": float(opening_metrics["cv_ratio"]),
+            "rangeability_min_cv": float(opening_metrics["rangeability_min_cv"]),
+            "rangeability_ok": bool(opening_metrics["rangeability_ok"]),
             "noise_db": noise_db,
             "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "valve_spec": build_valve_spec(
+                "steam", data.inlet_pressure_bar_a, is_choked,
+                vendor_pressure_class="", vendor_leakage_class="",
+            ),
+            "trim_guidance": recommend_trim(
+                "steam", "", is_choked, noise_db,
+                float(opening_metrics["opening_percent"]), None, x, data.temperature_c,
+            ),
         }
     )
     result["equations"] = [
@@ -750,7 +1067,8 @@ def size_steam_valve(
         "k": k,
         "Fk": fk,
         "x": x,
-        "x_choked": x_choked,
+        "x_choked": x_choked_effective,
+        "x_choked_valve_only": x_choked,
         "x_for_equation": x_for_eq,
         "Y": expansion_factor,
         "Fp": fp_val,
@@ -760,6 +1078,13 @@ def size_steam_valve(
         "Laminar": laminar,
         "Z": z,
         "Z_source": "Calculated from CoolProp or fallback",
+        "Design_margin_pct": float(design_margin_pct),
+        "Opening_percent": float(opening_metrics["opening_percent"]),
+        "Cv_ratio": float(opening_metrics["cv_ratio"]),
+        "Rangeability_min_Cv": float(opening_metrics["rangeability_min_cv"]),
+        "Rangeability_ok": bool(opening_metrics["rangeability_ok"]),
+        "Pipe_out_velocity_m_s": velocity["pipe_out_m_s"],
+        "Mach_outlet": velocity["mach_outlet"],
     }
     logger.info("Steam sizing (IEC): Cv=%.3f, valve=DN%s, x=%.4f, choked=%s", required_cv, valve.dn_mm, x, is_choked)
     return _pack_result(result)

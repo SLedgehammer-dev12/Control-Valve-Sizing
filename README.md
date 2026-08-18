@@ -1,18 +1,25 @@
 # Control Valve Sizing
 
-IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması. Liquid, gas ve steam servisleri için Cv/Kv hesabı, vana seçimi, vendor katalog entegrasyonu, proje kaydetme/yükleme ve Markdown rapor üretimi içerir.
+IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması. Liquid, gas ve steam servisleri için Cv/Kv hesabı, vana seçimi, vendor katalog entegrasyonu, proje kaydetme/yükleme ve Markdown rapor üretimi içerir. Dual UI: Tkinter masaüstü + Streamlit web.
 
 ## Modüller
 
 | Modül | Açıklama |
 |---|---|
-| `valve_sizing.py` | Çekirdek sizing motoru (liquid/gas/steam), dataclass'lar (`LiquidSizingInput`, `GasSizingInput`, `SteamSizingInput`) |
-| `fluid_properties.py` | CoolProp HEOS ile akışkan özellikleri (Z, MW, k, viskozite, yoğunluk), gaz kompozisyon normalizasyonu |
-| `vendor_catalog.py` | Emerson Fisher katalog (4 vana tipi, ValveSize/Cv serileri) |
-| `config.py` | Ortak sabitler: `GAS_PRESETS`, `GAS_PRESET_NAMES`, `DEFAULT_GAS_ROWS` |
-| `project_io.py` | JSON proje kaydetme/yükleme (Liquid/Gas/Steam) |
+| `valve_sizing.py` | Çekirdek sizing motoru (liquid/gas/steam), dataclass'lar, `_size_iteration()` candidate-valve döngüsü |
+| `fluid_properties.py` | CoolProp HEOS akışkan özellikleri (Z, MW, k, viskozite, yoğunluk), gaz karışımı, LRU cache |
+| `vendor_catalog.py` | Emerson Fisher / Metso / SAMSON / ARCA katalogları (12 representative trim) |
+| `config.py` | Ortak sabitler: `GAS_PRESETS` (enerji gazları dahil), `GAS_PRESET_NAMES`, `DEFAULT_GAS_ROWS` |
+| `project_io.py` | JSON proje kaydetme/yükleme, schema versioning + doğrulama |
 | `reporting.py` | Markdown rapor üretimi |
-| `app_desktop.py` | Tkinter masaüstü arayüzü (3 servis, vendor, proje, rapor) |
+| `two_phase.py` | Flashing/iki-fazlı Cv tahmini (HEM) |
+| `valve_selection.py` | ANSI basınç sınıfı, sızdırmazlık sınıfı, fail-safe ve vana spec önerileri |
+| `trim_guidance.py` | Rule-based trim önerileri (anti-flash, anti-kavitasyon, düşük gürültü, vb.) |
+| `thermal_expansion.py` | Boru hattı termal genleşme, termal gerilme ve loop uzunluğu |
+| `valve_noise.py` | IEC 60534-8-4 aerodinamik gürültü tahmini |
+| `actuator_sizing.py` | Aktüatör boyutlandırma yardımcıları |
+| `units.py` | Pint tabanlı birim dönüşümleri |
+| `app_desktop.py` | Tkinter masaüstü arayüzü |
 | `app_web.py` | Streamlit web arayüzü |
 
 ## Hızlı Başlangıç
@@ -25,18 +32,39 @@ pip install -r requirements.txt
 
 - **Web UI:** `streamlit run app_web.py`
 - **Desktop UI:** `python app_desktop.py`
+- **Paketlenmiş giriş noktaları:** `valve-sizing-web`, `valve-sizing-desktop`
+
+## Yayınlar (Desktop)
+
+`v*` etiketine push edildiğinde GitHub Actions **Windows (x86_64)** ve **macOS (Apple Silicon/arm64)** için PyInstaller paketlerini derler ve Release'e ekler. AV alarmını azaltmak için paketler tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenir; macOS paketi ad-hoc imzalıdır. Detaylar ve SmartScreen/Gatekeeper talimatları için `release_notes.md`'ye bakın.
+
+```powershell
+git tag v3.1.0 && git push origin v3.1.0
+```
 
 ## Test
 
 ```powershell
-pytest -v              # 44 test
-.\run_smoke_test.ps1   # hızlı smoke test
+python -m pytest -q        # 315 test
+python -m pytest --cov=. --cov-report=term -q
+ruff check .
+mypy . --ignore-missing-imports
 ```
+
+## Özellikler
+
+- **Sizing:** IEC 60534-2-1 (liquid), IEC 60534-2-1 gas (choked) ve steam (CoolProp yoğunluk + gas yolu)
+- **Açıklık & tasarım marjı:** `design_margin_pct`, doğrusal/equal-percentage karakteristik, rangeability kontrolü, `opening_percent`
+- **Flashing / iki-fazlı:** HEM yaklaşımı ile `flashing_cv_estimate` (quality_x, iki-fazlı yoğunluk, Cv çarpanı)
+- **Vana spec:** ANSI basınç sınıfı, sızdırmazlık sınıfı (I-VI), fail-safe yönü, trim önerileri
+- **Hız & erozyon:** Boru içi hız, Mach sayısı, API 14E erozyon hızı uyarıları
+- **Enerji gazları:** H2-NG blend'leri (%5/%10/%20/%50), syngas, H2-CO2 preset'leri (ideal-gaz fallback)
+- **Gürültü:** IEC 60534-8-4 aerodinamik gürültü (SPL)
+- **Boru hattı:** Termal genleşme, termal gerilme, expansion loop uzunluğu (web UI bölümü)
 
 ## Sürüm Geçmişi
 
-- **Phase 5 (current):** 44 test, edge case testleri, desktop entegrasyon testi, CI/CD yapılandırması
-- **Phase 4:** Logging, magic number sabitleri, CoolProp LRU cache, steam/gas bug fix
-- **Phase 3:** `config.py` merkezileştirme, GasSizingInput FL/Fd, kod tekrarı temizliği
-- **Phase 2:** Vendor katalog, steam sizing, sıvı preset seçici, pipe reducer, proje I/O, Markdown rapor
-- **Phase 1:** Kritik bug fix: `_diameter_mm_to_m` None kontrolü, `LiquidSizingInput`/`GasSizingInput` alan eklemeleri
+- **3.1.0 (current):** Sektör birim seçicileri (°C/°F/K; bar/psi/kPa/MPa/atm mutlak+gauge; m³/h-gpm-bbl-d gibi akış birimleri; Nm³/h-sm³/h-scfh-MMSCFD; t/h-lb/h), web + desktop'ta canlı hesaplama (butonsuz), birimlerin projede saklanması, Windows + macOS Apple Silicon için PyInstaller release pipeline (one-dir, UPX'siz, ad-hoc imza) — 315 test, ruff + mypy temiz
+- **3.0.0:** IEC doğrulama benchmark'ları, gürültü/aktüatör çıktıları, FLP/xTP tutarlılığı, açıklık & tasarım marjı, flashing Cv, vana spec & trim önerileri, hız/erozyon, enerji gaz preset'leri, termal genleşme web bölümü, Streamlit preset düzeltmesi, proje schema versioning, paketleme metadata'sı — 249 test, ruff + mypy temiz
+- **2.0.0:** `SizingResult` dataclass, steam sizing IEC hizalaması, `_size_iteration()` yardımcısı, LRU cache, `.opencode/` skills/agents, Dockerfile, coverage eşiği
+- **1.x:** Vendor katalog, steam sizing, sıvı preset seçici, pipe reducer, proje I/O, Markdown rapor, config merkezileştirme, edge case testleri

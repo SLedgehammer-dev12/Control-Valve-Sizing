@@ -402,7 +402,7 @@ except ImportError:
     logger.debug("iapws not available; using CoolProp for steam properties.")
 
 
-def get_steam_properties_iapws(pressure_bar_a: float, temperature_c: float) -> dict[str, float] | None:
+def get_steam_properties_iapws(pressure_bar_a: float, temperature_c: float) -> dict[str, Any] | None:
     """Return steam/water properties via IAPWS-IF97.
 
     Returns None if iapws is not installed or the state point cannot be solved.
@@ -445,7 +445,7 @@ except ImportError:
 
 
 @lru_cache(maxsize=128)
-def get_thermo_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float) -> dict[str, float] | None:
+def get_thermo_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float) -> dict[str, Any] | None:
     """Return fluid properties via the thermo library.
 
     Returns None if thermo is not installed or the fluid is not found.

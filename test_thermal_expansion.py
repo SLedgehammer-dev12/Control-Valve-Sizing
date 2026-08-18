@@ -56,3 +56,10 @@ class TestExpansionLoop:
     def test_loop_length_positive(self):
         loop_m = expansion_loop_length(20.0, 100.0, "carbon_steel")
         assert loop_m > 0.0
+
+    def test_unknown_material_raises(self):
+        with pytest.raises(KeyError, match="Bilinmeyen malzeme"):
+            expansion_loop_length(20.0, 100.0, "unknown")
+
+    def test_non_positive_allowable_stress_returns_zero(self):
+        assert expansion_loop_length(20.0, 100.0, "carbon_steel", allowable_stress_mpa=0.0) == 0.0

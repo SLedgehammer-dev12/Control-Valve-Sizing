@@ -2,8 +2,12 @@ import pytest
 
 from valve_sizing import ValveSize
 from vendor_catalog import (
-    ARCA_VENDOR_CATALOG, FISHER_VENDOR_CATALOG, METSO_VENDOR_CATALOG,
-    SAMSON_VENDOR_CATALOG, VENDOR_CATALOG, get_vendor_definition,
+    ARCA_VENDOR_CATALOG,
+    FISHER_VENDOR_CATALOG,
+    METSO_VENDOR_CATALOG,
+    SAMSON_VENDOR_CATALOG,
+    VENDOR_CATALOG,
+    get_vendor_definition,
     get_vendor_options,
 )
 
@@ -118,3 +122,73 @@ def test_vendor_sizes_are_valvesize_instances():
 def test_all_vendors_have_distinct_keys():
     keys = list(VENDOR_CATALOG.keys())
     assert len(keys) == len(set(keys))
+
+
+def test_vendors_have_pressure_and_leakage_class():
+    for v in VENDOR_CATALOG.values():
+        assert v.pressure_class.startswith("CL"), f"{v.key}: pressure_class={v.pressure_class}"
+        assert v.leakage_class in {"II", "III", "IV", "V", "VI"}, f"{v.key}: leakage_class={v.leakage_class}"
+
+
+def test_recommend_pressure_class_mapping():
+    from valve_selection import recommend_pressure_class
+
+    assert recommend_pressure_class(10.0) == "CL150"
+    assert recommend_pressure_class(50.0) == "CL300"
+    assert recommend_pressure_class(100.0) == "CL600"
+    assert recommend_pressure_class(250.0) == "CL1500"
+    assert recommend_pressure_class(500.0) == "CL2500"
+    assert recommend_pressure_class(0.0) == "CL150"
+    assert recommend_pressure_class(-5.0) == "CL150"
+
+
+def test_recommend_fail_safe_branches():
+    from valve_selection import recommend_fail_safe
+
+    assert "fail-open" in recommend_fail_safe("liquid", "Cooling water")
+    assert "fail-open" in recommend_fail_safe("liquid", "soğutma suyu")
+    assert "fail-closed" in recommend_fail_safe("gas", "Fuel gas")
+    assert "fail-closed" in recommend_fail_safe("gas", "yakıt hattı")
+    assert "fail-closed" in recommend_fail_safe("steam")
+    assert "fail-in-position" in recommend_fail_safe("liquid")
+
+
+def test_recommend_leakage_class_by_service():
+    from valve_selection import recommend_leakage_class
+
+    assert recommend_leakage_class("gas") == "VI"
+    assert recommend_leakage_class("steam") == "V"
+    assert recommend_leakage_class("liquid") == "IV"
+    assert recommend_leakage_class("liquid", is_choked=True) == "VI"
+
+
+def test_build_valve_spec_contains_guidance():
+    from valve_selection import build_valve_spec
+
+    spec = build_valve_spec("liquid", 60.0, is_choked=True, regime="choked-cavitating")
+    assert spec["pressure_class_recommended"] == "CL600"
+    assert spec["leakage_class_recommended"] == "VI"
+    assert "HAZOP" in spec["note"]
+
+
+def test_fisher_handbook_coefficients_match_reference():
+    eqpct = get_vendor_definition("fisher_globe_eqpct")
+    linear = get_vendor_definition("fisher_globe_linear")
+    vnotch = get_vendor_definition("fisher_vnotch_90")
+    assert (eqpct.fl, eqpct.xt, eqpct.fd) == pytest.approx((0.85, 0.69, 0.31))
+    assert (linear.fl, linear.xt, linear.fd) == pytest.approx((0.82, 0.64, 0.30))
+    assert (vnotch.fl, vnotch.xt, vnotch.fd) == pytest.approx((0.74, 0.27, 0.99))
+
+
+def test_veeball_cv_close_to_published_reference():
+    v = get_vendor_definition("fisher_vnotch_90")
+    by_dn = {s.dn_mm: s.cv_rated for s in v.sizes}
+    published = {25: 33.1, 40: 70.8, 50: 122.0}
+    for dn, cv in published.items():
+        assert by_dn[dn] == pytest.approx(cv, rel=0.10), f"DN{dn} Cv off reference"
+
+
+def test_vendor_source_urls_are_https():
+    for v in VENDOR_CATALOG.values():
+        assert v.source_url.startswith("https://"), f"{v.key}: non-HTTPS source"
+        assert len(v.source_note) > 20, f"{v.key}: missing source note"

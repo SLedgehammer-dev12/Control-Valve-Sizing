@@ -97,6 +97,55 @@ GAS_PRESETS: dict[str, dict] = {
             {"component": "Propane", "fraction_pct": 5.0},
         ],
     },
+    "H2-NG %5 (blend)": {
+        "components": [
+            {"component": "Methane", "fraction_pct": 85.5},
+            {"component": "Ethane", "fraction_pct": 5.7},
+            {"component": "Nitrogen", "fraction_pct": 1.9},
+            {"component": "CarbonDioxide", "fraction_pct": 1.9},
+            {"component": "Hydrogen", "fraction_pct": 5.0},
+        ],
+    },
+    "H2-NG %10 (blend)": {
+        "components": [
+            {"component": "Methane", "fraction_pct": 81.0},
+            {"component": "Ethane", "fraction_pct": 5.4},
+            {"component": "Nitrogen", "fraction_pct": 1.8},
+            {"component": "CarbonDioxide", "fraction_pct": 1.8},
+            {"component": "Hydrogen", "fraction_pct": 10.0},
+        ],
+    },
+    "H2-NG %20 (blend)": {
+        "components": [
+            {"component": "Methane", "fraction_pct": 72.0},
+            {"component": "Ethane", "fraction_pct": 4.8},
+            {"component": "Nitrogen", "fraction_pct": 1.6},
+            {"component": "CarbonDioxide", "fraction_pct": 1.6},
+            {"component": "Hydrogen", "fraction_pct": 20.0},
+        ],
+    },
+    "H2-NG %50 (blend)": {
+        "components": [
+            {"component": "Methane", "fraction_pct": 45.0},
+            {"component": "Ethane", "fraction_pct": 3.0},
+            {"component": "Nitrogen", "fraction_pct": 1.0},
+            {"component": "CarbonDioxide", "fraction_pct": 1.0},
+            {"component": "Hydrogen", "fraction_pct": 50.0},
+        ],
+    },
+    "Sentez Gazi (Syngas)": {
+        "components": [
+            {"component": "CarbonMonoxide", "fraction_pct": 45.0},
+            {"component": "Hydrogen", "fraction_pct": 45.0},
+            {"component": "CarbonDioxide", "fraction_pct": 10.0},
+        ],
+    },
+    "Hidrojen zengin (H2-CO2)": {
+        "components": [
+            {"component": "Hydrogen", "fraction_pct": 80.0},
+            {"component": "CarbonDioxide", "fraction_pct": 20.0},
+        ],
+    },
 }
 
 GAS_PRESET_NAMES = list(GAS_PRESETS.keys())

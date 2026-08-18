@@ -1,0 +1,9 @@
+# Build-time dependencies for the PyInstaller desktop bundles.
+# Intentionally excludes streamlit/pandas (web-only) to keep the
+# frozen desktop app lean and the release build fast.
+coolprop>=6.8,<9.0
+fluids>=1.0,<2.0
+chemicals>=1.0,<2.0
+pint>=0.24,<1.0
+iapws>=1.5,<3.0
+thermo>=0.6,<1.0

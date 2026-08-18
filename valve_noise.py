@@ -57,7 +57,7 @@ def predict_noise_liquid(
     c = speed_of_sound_m_s if speed_of_sound_m_s is not None else 1400.0
 
     return control_valve_noise_l_2015(
-        m=flow_kg_s,
+        m=flow_kg_s,  # type: ignore[arg-type]
         P1=inlet_pressure_pa,
         P2=outlet_pressure_pa,
         Psat=pv,

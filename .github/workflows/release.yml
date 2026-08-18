@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   build-windows:
+    name: Windows x86_64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,23 +23,82 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements-build.txt pyinstaller
 
-      - name: Build with PyInstaller
+      - name: Build with PyInstaller (one-dir, no UPX)
+        run: pyinstaller app_desktop.spec
+
+      - name: Package release zip
+        shell: pwsh
         run: |
-          pyinstaller app_desktop.spec
+          Compress-Archive -Path "dist/ControlValveSizing" -DestinationPath "dist/ControlValveSizing_windows_x86_64.zip" -Force
 
-      - name: Upload .exe artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ControlValveSizing-windows
-          path: dist/ControlValveSizing.exe
+          name: ControlValveSizing-windows-x86_64
+          path: dist/ControlValveSizing_windows_x86_64.zip
           retention-days: 7
+
+  build-macos:
+    name: macOS Apple Silicon (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install python.org Python 3.12 (bundled Tcl/Tk)
+        run: |
+          curl -L -o python.pkg https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+
+      - name: Create build virtualenv
+        run: |
+          /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -m venv build-venv
+          ./build-venv/bin/python -m pip install --upgrade pip
+          ./build-venv/bin/python -m pip install -r requirements-build.txt pyinstaller
+
+      - name: Verify Tkinter is available
+        run: ./build-venv/bin/python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+
+      - name: Build .app with PyInstaller (one-dir, no UPX)
+        run: ./build-venv/bin/pyinstaller app_desktop.spec
+
+      - name: Verify arm64 architecture
+        run: |
+          file dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
+          arch dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
+
+      - name: Ad-hoc codesign (required for Apple Silicon execution)
+        run: codesign --force --deep --sign - dist/ControlValveSizing.app
+
+      - name: Verify signature
+        run: codesign --verify --deep --strict dist/ControlValveSizing.app
+
+      - name: Package release zip
+        run: ditto -c -k --sequesterRsrc dist/ControlValveSizing.app dist/ControlValveSizing_macos_arm64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControlValveSizing-macos-arm64
+          path: dist/ControlValveSizing_macos_arm64.zip
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ControlValveSizing.exe
+          files: artifacts/**/*.zip
           name: Control Valve Sizing ${{ github.ref_name }}
           body_path: release_notes.md
           generate_release_notes: false

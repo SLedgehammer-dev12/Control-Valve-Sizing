@@ -2,6 +2,59 @@
 requires = ["setuptools>=64"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
+[project]
+name = "control-valve-sizing"
+version = "3.0.0"
+description = "IEC 60534 / ISA tabanli kontrol vanasi boyutlandirma (desktop Tkinter + web Streamlit)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Control Valve Sizing Team" }]
+keywords = ["control valve", "sizing", "IEC 60534", "ISA", "Cv", "Kv"]
+dependencies = [
+    "streamlit>=1.24.0,<2.0",
+    "pandas>=2.0,<3.0",
+    "coolprop>=6.8,<9.0",
+    "fluids>=1.0,<2.0",
+    "chemicals>=1.0,<2.0",
+    "pint>=0.24,<1.0",
+    "iapws>=1.5,<3.0",
+    "thermo>=0.6,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-cov>=5.0,<6.0",
+    "pytest-asyncio>=0.21.1",
+    "streamlit-extras>=0.10.0",
+    "ruff>=0.12.0",
+    "mypy>=1.8.0",
+]
+
+[project.scripts]
+valve-sizing-web = "app_web:main"
+valve-sizing-desktop = "app_desktop:main"
+
+[tool.setuptools]
+py-modules = [
+    "actuator_sizing",
+    "app_desktop",
+    "app_web",
+    "config",
+    "fluid_properties",
+    "project_io",
+    "reporting",
+    "thermal_expansion",
+    "trim_guidance",
+    "two_phase",
+    "units",
+    "valve_noise",
+    "valve_selection",
+    "valve_sizing",
+    "vendor_catalog",
+]
+
 [tool.ruff]
 line-length = 150
 target-version = "py312"

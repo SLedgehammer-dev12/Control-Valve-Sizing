@@ -81,3 +81,9 @@ class TestActuatorSelection:
     def test_select_specific(self):
         result = select_actuator(5000.0, 35.0, actuator_key="DA-200")
         assert result["model"] == "DA-200"
+
+    def test_select_specific_too_small_returns_best_effort(self):
+        result = select_actuator(500000.0, 200.0, actuator_key="DA-100")
+        assert result["selected"] is False
+        assert result["model"] == "DA-100"
+        assert result["thrust_margin_pct"] < 0.0

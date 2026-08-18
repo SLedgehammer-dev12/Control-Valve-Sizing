@@ -5,18 +5,27 @@ IEC 60534 / ISA-based control valve sizing application with dual UI (desktop Tki
 ## Project Layout
 
 ```
-valve_sizing.py       — Core sizing engine (710 lines)
+valve_sizing.py       — Core sizing engine (1100+ lines)
 fluid_properties.py   — CoolProp HEOS integration (190 lines)
-vendor_catalog.py     — Fisher valve catalog (131 lines)
-config.py             — Gas presets, default rows (44 lines)
-project_io.py         — JSON save/load (45 lines)
-reporting.py          — Markdown report generation (66 lines)
-app_desktop.py        — Tkinter desktop UI (740 lines)
-app_web.py            — Streamlit web UI (530 lines)
-test_valve_sizing.py  — Core engine tests (30 tests)
-test_vendor_catalog.py— Catalog validation (9 tests)
-test_integration.py   — Streamlit + I/O tests (8 tests)
-test_desktop_integration.py — Desktop import tests (7 tests)
+vendor_catalog.py     — Fisher catalog (131 lines)
+config.py             — Gas presets (energy), default rows (44 lines)
+project_io.py         — JSON save/load + schema versioning
+reporting.py          — Markdown report generation
+two_phase.py          — Flashing / two-phase Cv (HEM)
+valve_selection.py    — ANSI class / leakage / fail-safe guidance
+trim_guidance.py      — Rule-based trim recommendations
+thermal_expansion.py  — Pipe thermal expansion / stress / loop length
+valve_noise.py        — IEC 60534-8-4 aerodynamic noise
+actuator_sizing.py    — Actuator sizing helpers
+units.py              — Pint-based unit conversions + sector unit maps/converters
+app_desktop.py        — Tkinter desktop UI
+app_web.py            — Streamlit web UI
+test_valve_sizing.py  — Core engine tests
+test_vendor_catalog.py— Catalog validation
+test_integration.py   — Streamlit + I/O tests
+test_desktop_integration.py — Desktop import tests
+test_fluid_advanced.py— Energy gas preset tests
+test_benchmark_iec.py — IEC/ISA benchmark verification
 ```
 
 ## Dependency Chain
@@ -25,6 +34,8 @@ test_desktop_integration.py — Desktop import tests (7 tests)
 valve_sizing  ←  fluids (pip)
 fluid_properties ← CoolProp (pip)
 vendor_catalog ← valve_sizing (ValveSize)
+two_phase ← valve_sizing (types, circular-import-free scalar API)
+valve_selection / trim_guidance ← vendor_catalog, valve_sizing
 app_desktop ← valve_sizing, fluid_properties, vendor_catalog, config, project_io, reporting
 app_web ← valve_sizing, fluid_properties, vendor_catalog, config, project_io, reporting
 ```
@@ -69,9 +80,11 @@ python app_desktop.py
 4. **CoolProp caching**: `get_pure_fluid_state` and `_evaluate_mixture_state` use `@lru_cache`
 5. **Vendor catalog** is separate from sizing engine — `valve_series` passed as parameter
 6. **`config.py`** centralizes `GAS_PRESETS` to avoid duplication across desktop/web/test files
+7. **Sector units are centralized in `units.py`**: unit maps (`TEMPERATURE_UNITS`, `PRESSURE_UNITS`, `LIQUID_FLOW_UNITS`, `GAS_FLOW_UNITS`, `STEAM_FLOW_UNITS`) + converters; both UIs convert to engine units (bar(a), °C, m³/h, Nm³/h, kg/h) at calculation time
+8. **Live calculation**: web recomputes on every rerun (no buttons); desktop traces flow/pressure/temperature vars and unit combos → silent `_calculate(show_errors=False)`
 
 ## Test Status
 
-- **54 tests, 100% passing**
-- **Coverage**: 86% (excluding `app_desktop.py` Tkinter GUI)
-- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + pytest)
+- **315 tests, 100% passing**
+- **Coverage**: 91% (excluding `app_desktop.py` Tkinter GUI)
+- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)

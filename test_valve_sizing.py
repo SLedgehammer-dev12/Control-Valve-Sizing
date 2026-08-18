@@ -3,7 +3,16 @@ import unittest.mock as mock
 import pytest
 
 from fluid_properties import evaluate_gas_mixture, normalize_composition
-from valve_sizing import GasSizingInput, LiquidSizingInput, SteamSizingInput, select_valve_size, size_gas_valve, size_liquid_valve, size_steam_valve
+from valve_sizing import (
+    DEFAULT_VALVE_SERIES,
+    GasSizingInput,
+    LiquidSizingInput,
+    SteamSizingInput,
+    _size_iteration,
+    size_gas_valve,
+    size_liquid_valve,
+    size_steam_valve,
+)
 from vendor_catalog import get_vendor_definition
 
 
@@ -183,15 +192,27 @@ def test_gas_zero_flow_raises():
         size_gas_valve(GasSizingInput(0, 8, 6, 20, 18, 1.28, 1.1e-5, z=0.98, xt=0.7))
 
 
-def test_select_valve_size_exact_match():
-    result = select_valve_size(20.0)
-    assert result.cv_rated == 20.0
-    assert result.dn_mm == 32
+def test_size_iteration_selects_smallest_adequate():
+    valve, details, overflow = _size_iteration(
+        DEFAULT_VALVE_SERIES,
+        None,
+        None,
+        lambda _d1, _d2, _d: {"Kv": 18.0},
+    )
+    assert overflow is False
+    assert valve.dn_mm == 40
+    assert valve.cv_rated == 30.0
 
 
-def test_select_valve_size_overflow():
-    result = select_valve_size(99999.0)
-    assert result.cv_rated > 0
+def test_size_iteration_overflow_selects_largest():
+    valve, details, overflow = _size_iteration(
+        DEFAULT_VALVE_SERIES,
+        None,
+        None,
+        lambda _d1, _d2, _d: {"Kv": 99999.0},
+    )
+    assert overflow is True
+    assert valve == DEFAULT_VALVE_SERIES[-1]
 
 
 def test_cv_kv_conversion_roundtrip():
@@ -543,3 +564,211 @@ def test_report_includes_z_when_present():
     report = build_report("Gas", None, result)
     assert "Compressibility (Z)" in report
     assert "0.95" in report
+
+
+# --- Opening / characteristic / design margin (F2.1) ---
+
+def test_estimate_opening_linear_is_ratio():
+    from valve_sizing import estimate_opening
+    assert estimate_opening(25.0, 50.0, characteristic="linear") == pytest.approx(0.5)
+    assert estimate_opening(0.0, 50.0, characteristic="linear") == 0.0
+    assert estimate_opening(60.0, 50.0, characteristic="linear") == 1.0
+
+
+def test_estimate_opening_equal_percentage_bounds():
+    from valve_sizing import DEFAULT_RANGEABILITY, estimate_opening
+    r = DEFAULT_RANGEABILITY
+    assert estimate_opening(50.0, 50.0) == pytest.approx(1.0)
+    assert estimate_opening(50.0 / r, 50.0) == pytest.approx(0.0)
+    assert estimate_opening(25.0, 50.0) == pytest.approx(0.82301, abs=1e-3)
+
+
+def test_min_controllable_cv():
+    from valve_sizing import DEFAULT_RANGEABILITY, estimate_min_controllable_cv
+    assert estimate_min_controllable_cv(100.0) == pytest.approx(100.0 / DEFAULT_RANGEABILITY)
+    assert estimate_min_controllable_cv(100.0, rangeability=1.0) == 100.0
+    assert estimate_min_controllable_cv(100.0, characteristic="linear") == pytest.approx(1.0)
+
+
+def test_design_margin_increases_required_cv():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result_plain = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    result_margin = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+        design_margin_pct=20.0,
+    )
+    assert result_margin["required_cv_with_margin"] > result_plain["required_cv"]
+    assert result_margin["design_margin_pct"] == 20.0
+    assert result_margin["opening_percent"] < result_plain["opening_percent"]
+
+
+def test_opening_fields_accessible_via_attributes():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    assert 0.0 <= result.opening_percent <= 100.0
+    assert result.cv_ratio > 0.0
+    assert result.rangeability_ok is True
+
+
+def test_opening_warning_when_above_85_percent():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    flow = 20.0
+    while True:
+        result = size_liquid_valve(
+            LiquidSizingInput(flow, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+            valve_series=list(vendor.sizes),
+        )
+        if result["opening_percent"] > 85.0:
+            break
+        flow *= 10.0
+    assert "%85" in result["warning"] or "85" in result["warning"]
+
+
+def test_rangeability_warning_when_below_min_cv():
+    from valve_sizing import DEFAULT_VALVE_SERIES, LiquidSizingInput, size_liquid_valve
+    tiny_flow = 1e-6
+    result = size_liquid_valve(
+        LiquidSizingInput(tiny_flow, 8, 5, 998, 0.023, 220.64, 0.00089, fl=0.85, fd=1.0),
+        valve_series=DEFAULT_VALVE_SERIES,
+    )
+    assert result["rangeability_ok"] is False
+    assert "rangeability" in result["warning"].lower()
+
+
+def test_flashing_estimates_two_phase_cv():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=40.0,
+            inlet_pressure_bar_a=10.0,
+            outlet_pressure_bar_a=0.2,
+            density_kg_m3=950.0,
+            vapor_pressure_bar_a=2.5,
+            critical_pressure_bar_a=46.0,
+            viscosity_pa_s=0.0008,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+            temperature_c=120.0,
+            specific_heat_j_kgk=4200.0,
+            latent_heat_j_kg=2.0e6,
+            molecular_weight=18.015,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["flow_regime"] == "flashing"
+    assert result["flashing"]["required_cv_flashing"] > result["flashing"]["required_cv_single_phase"]
+    assert result["flashing"]["flashing_cv_multiplier"] > 1.0
+
+
+def test_valve_spec_present_in_result():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    spec = result["valve_spec"]
+    assert spec["service"] == "liquid"
+    assert spec["pressure_class_recommended"] in {"CL150", "CL300"}
+    assert spec["leakage_class_recommended"] in {"IV", "V", "VI"}
+
+
+def test_pipe_velocity_basic():
+    from valve_sizing import pipe_velocity_m_s
+
+    v = pipe_velocity_m_s(0.01, 100.0)
+    assert v == pytest.approx(1.2732, abs=1e-3)
+
+
+def test_api_14e_erosion_velocity():
+    from valve_sizing import api_14e_erosion_velocity
+
+    assert api_14e_erosion_velocity(100.0) == pytest.approx(12.2, abs=0.01)
+    assert api_14e_erosion_velocity(100.0, continuous=False) == pytest.approx(15.2, abs=0.01)
+
+
+def test_speed_of_sound_air():
+    from valve_sizing import speed_of_sound_m_s
+
+    c = speed_of_sound_m_s(1.4, 293.15, 28.97)
+    assert 340.0 < c < 350.0
+
+
+def test_liquid_result_includes_velocity():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["velocity"]["pipe_out_m_s"] > 0.0
+
+
+def test_gas_result_includes_mach():
+    result = size_gas_valve(GasSizingInput(800, 8, 6, 20, 18, 1.28, 1.1e-5, z=0.95, xt=0.7))
+    assert 0.0 < result["velocity"]["mach_outlet"] < 1.0
+
+
+def test_flashing_includes_erosion_check():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=40.0,
+            inlet_pressure_bar_a=10.0,
+            outlet_pressure_bar_a=0.2,
+            density_kg_m3=950.0,
+            vapor_pressure_bar_a=2.5,
+            critical_pressure_bar_a=46.0,
+            viscosity_pa_s=0.0008,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+            temperature_c=120.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert "api_14e_limit_m_s" in result["velocity"]
+    assert "erosion_risk" in result["velocity"]
+
+
+def test_trim_guidance_present_for_all_services():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    liquid = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    gas = size_gas_valve(GasSizingInput(800, 8, 6, 20, 18, 1.28, 1.1e-5, z=0.95, xt=0.7))
+    assert isinstance(liquid["trim_guidance"], list) and liquid["trim_guidance"]
+    assert isinstance(gas["trim_guidance"], list) and gas["trim_guidance"]
+
+
+def test_trim_guidance_flashing_rule():
+    from trim_guidance import recommend_trim
+
+    recs = recommend_trim("liquid", flow_regime="flashing")
+    assert any("Anti-flash" in r for r in recs)
+
+
+def test_trim_guidance_noise_rule():
+    from trim_guidance import recommend_trim
+
+    recs = recommend_trim("gas", noise_db=90.0)
+    assert any("dusuk gurultu trimi" in r.lower() for r in recs)
+
+
+def test_trim_guidance_low_opening_rule():
+    from trim_guidance import recommend_trim
+
+    recs = recommend_trim("gas", opening_percent=10.0)
+    assert any("reduced capacity trim" in r for r in recs)
+
+
+def test_trim_guidance_default_when_clean():
+    from trim_guidance import recommend_trim
+
+    recs = recommend_trim("gas", opening_percent=50.0, pressure_drop_ratio_x=0.2)
+    assert any("Standart trim" in r for r in recs)
