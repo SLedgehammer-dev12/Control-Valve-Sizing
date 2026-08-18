@@ -65,8 +65,14 @@ jobs:
 
       - name: Verify arm64 architecture
         run: |
-          file dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
-          arch dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
+          BIN=dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
+          file "$BIN"
+          ARCHS="$(lipo -archs "$BIN")"
+          echo "Architectures: $ARCHS"
+          case "$ARCHS" in
+            *arm64*) echo "arm64 confirmed" ;;
+            *) echo "ERROR: not arm64"; exit 1 ;;
+          esac
 
       - name: Ad-hoc codesign (required for Apple Silicon execution)
         run: codesign --force --deep --sign - dist/ControlValveSizing.app
