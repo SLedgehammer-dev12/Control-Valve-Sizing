@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Calculation verification suite (`verify_scenarios.py` + `test_scenario_verification.py`): 12 independent scenarios cross-check the sizing engine against analytic IEC/ISA formulas, the `fluids` library and CoolProp densities
+  - Liquid: subcritical, choked, flashing (HEM self-consistency), velocity/erosion
+  - Gas: IEC published CO2 example, analytic choked air, H2-NG %20 CoolProp blend
+  - Steam: superheated 12→8 bar(a), near-saturated 6→3 bar(a)
+  - Cross-checks: SI↔US unit equivalence, 15% design margin, Fisher vendor catalog selection
+  - `python verify_scenarios.py` prints a console report and exits non-zero on failure
+
 ## [3.1.0] — 2026-08-18
 
 ### Added
