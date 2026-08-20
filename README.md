@@ -38,6 +38,8 @@ pip install -r requirements.txt
 
 `v*` etiketine push edildiğinde GitHub Actions **Windows (x86_64)** ve **macOS (Apple Silicon/arm64)** için PyInstaller paketlerini derler ve Release'e ekler. AV alarmını azaltmak için paketler tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenir; macOS paketi ad-hoc imzalıdır. Detaylar ve SmartScreen/Gatekeeper talimatları için `release_notes.md`'ye bakın.
 
+Tüm sürümlerin what's new ve release notları: [`docs/releases/index.md`](docs/releases/index.md)
+
 ```powershell
 git tag v3.2.0 && git push origin v3.2.0
 ```

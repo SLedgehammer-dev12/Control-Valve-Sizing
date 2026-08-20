@@ -1,5 +1,7 @@
 # Changelog
 
+Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
+
 ## [3.2.0] — 2026-08-20
 
 ### Added
@@ -91,7 +93,30 @@
 - Duplicate `GAS_PRESETS` from `app_desktop.py` and `app_web.py` (centralized in `config.py`)
 - `test_z_implementation.py` standalone script (converted to pytest tests)
 
-## [1.0.0] — 2026-05-14
+## [1.1.0] — 2026-07-01
+
+### Fixed
+- Project save/load: service name made case-insensitive — desktop (`"liquid"`) and web (`"Liquid"`) projects now load interchangeably
+- `get_pure_fluid_state` LRU cache added (256) — CoolProp calls no longer repeated
+- Cavitation index aligned with IEC 60534-8-4 (`sigma = (P1-Pv)/(P1-P2)`, single formula)
+- Steam warning: CoolProp fallback warning no longer suppressed on overflow, merged instead
+- Gas mixture fallback: removed fake loop that always returned `k_avg = 1.4`
+- Ideal gas viscosity: constant `1.5e-5` → temperature-corrected `mu_ref * sqrt(T/300)`
+- Flash vapor fraction: crude `DeltaT_sat = DeltaP * 2.0` → Clausius-Clapeyron (`dT/dP = RT^2/Ph_fg`)
+- Chemicals error logging: silent swallowing → `logger.debug()`
+- Chemicals cache limit: unbounded growth → max 512 entries
+- `get_vendor_definition`: bare `KeyError` → `ValueError("Bilinmeyen vendor...")`
+- `cavitation_severity`: English → Turkish labels
+- `select_valve_size`: `DeprecationWarning` added
+- `.dockerignore` added
+- `pyproject.toml`: removed invalid `test_app_integration.py` reference
+
+### Added
+- Valve noise (IEC 60534-8): `noise_db` field on Liquid/Gas/Steam results; `valve_noise.py` wired into engine
+- Actuator sizing: automatic `actuator_thrust_n` after valve selection; `actuator_sizing.py` wired into engine
+- Web UI: reference pressure removed, inlet pressure is single source; fluid properties computed at correct pressure
+
+## [1.0.0] — 2026-06-05
 
 - Initial release: liquid/gas sizing with Tkinter + Streamlit UI
 - CoolProp HEOS integration for gas mixture properties
