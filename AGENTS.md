@@ -85,6 +85,7 @@ python app_desktop.py
 
 ## Test Status
 
-- **315 tests, 100% passing**
+- **328 tests, 100% passing**
 - **Coverage**: 91% (excluding `app_desktop.py` Tkinter GUI)
 - **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)
+- **Scenario verification**: `verify_scenarios.py` (12 independent cross-checks, 12/12 PASS) + `test_scenario_verification.py` wrappers

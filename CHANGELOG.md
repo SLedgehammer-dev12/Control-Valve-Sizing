@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [3.2.0] — 2026-08-20
 
 ### Added
 - Calculation verification suite (`verify_scenarios.py` + `test_scenario_verification.py`): 12 independent scenarios cross-check the sizing engine against analytic IEC/ISA formulas, the `fluids` library and CoolProp densities

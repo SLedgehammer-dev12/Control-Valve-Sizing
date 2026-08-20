@@ -16,12 +16,12 @@ VSVersionInfo(
         [
           StringStruct(u'CompanyName', u'Control Valve Sizing'),
           StringStruct(u'FileDescription', u'Control Valve Sizing (IEC 60534 / ISA)'),
-          StringStruct(u'FileVersion', u'3.1.0'),
+          StringStruct(u'FileVersion', u'3.2.0'),
           StringStruct(u'InternalName', u'ControlValveSizing'),
           StringStruct(u'LegalCopyright', u'Control Valve Sizing'),
           StringStruct(u'OriginalFilename', u'ControlValveSizing.exe'),
           StringStruct(u'ProductName', u'Control Valve Sizing'),
-          StringStruct(u'ProductVersion', u'3.1.0')
+          StringStruct(u'ProductVersion', u'3.2.0')
         ]
       )
     ]),

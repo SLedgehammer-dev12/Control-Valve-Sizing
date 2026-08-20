@@ -1,4 +1,4 @@
-# Control Valve Sizing v3.1.0
+# Control Valve Sizing v3.2.0
 
 IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
@@ -11,15 +11,13 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
 ## Bu sürümde yeni
 
-- **Sektör birim seçicileri** (petrol / doğalgaz / enerji):
-  - Sıcaklık: °C, °F, K
-  - Basınç: bar(a)/bar(g), psi(a)/psi(g), kPa(a), MPa(a), atm(a)
-  - Sıvı debi: m³/h, US gpm, L/min, m³/d, US bbl/d, kg/h
-  - Gaz debi: Nm³/h, Sm³/h, scfh, MMSCFD, m³/h (actual), kg/h
-  - Buhar debi: kg/h, t/h, lb/h, kg/s
-- **Canlı hesaplama**: Girdi veya birim değiştirdiğinizde sonuç anında güncellenir (butona gerek yok).
-- Gauge basınçlar 1.01325 bar atmosfer basıncıyla mutlak değere çevrilir.
-- Seçilen birimler proje kaydet/yükle ile saklanır.
+- **Hesaplama doğrulama paketi** — motorun doğruluğunu 12 bağımsız senaryo ile teyit eder:
+  - Sıvı: kritik altı, choking, flashing (HEM kendi-tutarlılığı), yüksek hız / erozyon
+  - Gaz: IEC yayınlı CO₂ örneği (63.34), analitik choked hava, H₂-NG %20 CoolProp karışımı
+  - Buhar: kızgın buhar 12→8 bar(a), doygunluğa yakın 6→3 bar(a)
+  - Çapraz kontroller: SI↔US birim eşdeğerliği, %15 tasarım marjı, Fisher vendor katalogu
+  - Tüm senaryolar bağımsız referanslarla < %0.05 sapma — **12/12 PASS**
+- Hesaplamalar, motoru test etmek isteyenler için `python verify_scenarios.py` ile yeniden çalıştırılabilir.
 
 ## Windows — Kurulum ve SmartScreen
 

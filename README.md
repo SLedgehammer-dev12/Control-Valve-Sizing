@@ -39,16 +39,17 @@ pip install -r requirements.txt
 `v*` etiketine push edildiğinde GitHub Actions **Windows (x86_64)** ve **macOS (Apple Silicon/arm64)** için PyInstaller paketlerini derler ve Release'e ekler. AV alarmını azaltmak için paketler tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenir; macOS paketi ad-hoc imzalıdır. Detaylar ve SmartScreen/Gatekeeper talimatları için `release_notes.md`'ye bakın.
 
 ```powershell
-git tag v3.1.0 && git push origin v3.1.0
+git tag v3.2.0 && git push origin v3.2.0
 ```
 
 ## Test
 
 ```powershell
-python -m pytest -q        # 315 test
+python -m pytest -q        # 328 test
 python -m pytest --cov=. --cov-report=term -q
 ruff check .
 mypy . --ignore-missing-imports
+python verify_scenarios.py  # 12-senaryolu motor doğrulama raporu (12/12 PASS)
 ```
 
 ## Özellikler
@@ -64,7 +65,8 @@ mypy . --ignore-missing-imports
 
 ## Sürüm Geçmişi
 
-- **3.1.0 (current):** Sektör birim seçicileri (°C/°F/K; bar/psi/kPa/MPa/atm mutlak+gauge; m³/h-gpm-bbl-d gibi akış birimleri; Nm³/h-sm³/h-scfh-MMSCFD; t/h-lb/h), web + desktop'ta canlı hesaplama (butonsuz), birimlerin projede saklanması, Windows + macOS Apple Silicon için PyInstaller release pipeline (one-dir, UPX'siz, ad-hoc imza) — 315 test, ruff + mypy temiz
+- **3.2.0 (current):** Hesaplama doğrulama paketi — 12 bağımsız senaryo (sıvı kritik altı/choked/flashing/hız, IEC yayınlı CO₂, analitik choked hava, H₂-NG %20, kızgın/doygunluğa yakın buhar, SI↔US birim, %15 marj, Fisher katalog) bağımsız referanslarla < %0.05 sapma, 12/12 PASS — 328 test, ruff + mypy temiz
+- **3.1.0:** Sektör birim seçicileri (°C/°F/K; bar/psi/kPa/MPa/atm mutlak+gauge; m³/h-gpm-bbl-d gibi akış birimleri; Nm³/h-sm³/h-scfh-MMSCFD; t/h-lb/h), web + desktop'ta canlı hesaplama (butonsuz), birimlerin projede saklanması, Windows + macOS Apple Silicon için PyInstaller release pipeline (one-dir, UPX'siz, ad-hoc imza) — 315 test, ruff + mypy temiz
 - **3.0.0:** IEC doğrulama benchmark'ları, gürültü/aktüatör çıktıları, FLP/xTP tutarlılığı, açıklık & tasarım marjı, flashing Cv, vana spec & trim önerileri, hız/erozyon, enerji gaz preset'leri, termal genleşme web bölümü, Streamlit preset düzeltmesi, proje schema versioning, paketleme metadata'sı — 249 test, ruff + mypy temiz
 - **2.0.0:** `SizingResult` dataclass, steam sizing IEC hizalaması, `_size_iteration()` yardımcısı, LRU cache, `.opencode/` skills/agents, Dockerfile, coverage eşiği
 - **1.x:** Vendor katalog, steam sizing, sıvı preset seçici, pipe reducer, proje I/O, Markdown rapor, config merkezileştirme, edge case testleri

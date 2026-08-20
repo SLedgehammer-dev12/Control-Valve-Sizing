@@ -136,8 +136,8 @@ if sys.platform == "darwin":
         icon="app_icon.icns",
         bundle_identifier="com.cvsizing.controlvalvesizing",
         info_plist={
-            "CFBundleShortVersionString": "3.1.0",
-            "CFBundleVersion": "3.1.0",
+            "CFBundleShortVersionString": "3.2.0",
+            "CFBundleVersion": "3.2.0",
             "NSHighResolutionCapable": True,
             "NSHumanReadableCopyright": "Control Valve Sizing",
         },
