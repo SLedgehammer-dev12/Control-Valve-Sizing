@@ -25,7 +25,6 @@ class ActuatorDefinition:
     stroke_mm: float
 
 
-# Representative actuator catalog (generic spring-diaphragm)
 ACTUATOR_CATALOG: dict[str, ActuatorDefinition] = {
     "DA-100": ActuatorDefinition(
         manufacturer="Generic", model="DA-100",
@@ -70,6 +69,19 @@ def get_actuator_definition(key: str) -> ActuatorDefinition:
     if key not in ACTUATOR_CATALOG:
         raise KeyError(f"Aktorator bulunamadi: {key}")
     return ACTUATOR_CATALOG[key]
+
+
+def estimate_valve_stroke_mm(valve_dn_mm: int) -> float:
+    """Estimate typical control valve rated travel/stroke [mm] from nominal diameter."""
+    if valve_dn_mm <= 25:
+        return 19.0
+    if valve_dn_mm <= 50:
+        return 29.0
+    if valve_dn_mm <= 100:
+        return 38.0
+    if valve_dn_mm <= 200:
+        return 51.0
+    return 76.0
 
 
 def required_thrust_unbalance(

@@ -6,6 +6,7 @@ import pytest
 
 from actuator_sizing import (
     ACTUATOR_CATALOG,
+    estimate_valve_stroke_mm,
     get_actuator_definition,
     get_actuator_options,
     required_thrust_packing,
@@ -87,3 +88,19 @@ class TestActuatorSelection:
         assert result["selected"] is False
         assert result["model"] == "DA-100"
         assert result["thrust_margin_pct"] < 0.0
+
+
+class TestValveStrokeEstimation:
+    def test_small_valves(self):
+        assert estimate_valve_stroke_mm(15) == 19.0
+        assert estimate_valve_stroke_mm(25) == 19.0
+
+    def test_medium_valves(self):
+        assert estimate_valve_stroke_mm(50) == 29.0
+        assert estimate_valve_stroke_mm(80) == 38.0
+        assert estimate_valve_stroke_mm(100) == 38.0
+
+    def test_large_valves(self):
+        assert estimate_valve_stroke_mm(150) == 51.0
+        assert estimate_valve_stroke_mm(200) == 51.0
+        assert estimate_valve_stroke_mm(300) == 76.0

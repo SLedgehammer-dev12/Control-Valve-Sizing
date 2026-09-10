@@ -280,7 +280,7 @@ class TestGasFlowConverters:
 
     def test_actual_m3h_to_nm3h(self):
         result = gas_flow_to_nm3h(100.0, "m3h", pressure_bar_a=8.0, temperature_c=20.0, z=0.98)
-        assert abs(result - 100.0 * (8.0 / NORMAL_P_BAR) * (NORMAL_T_K / 293.15) * 0.98) < _TOL
+        assert abs(result - 100.0 * (8.0 / NORMAL_P_BAR) * (NORMAL_T_K / 293.15) / 0.98) < _TOL
 
     def test_kgh_to_nm3h(self):
         density = 7.0
@@ -292,6 +292,17 @@ class TestGasFlowConverters:
         for unit in ("nm3h", "sm3h", "scfh", "mmscfd"):
             for value in (100.0, 800.0):
                 assert abs(gas_flow_to_nm3h(gas_flow_from_nm3h(value, unit), unit) - value) < 1e-3
+
+    def test_roundtrip_m3h_and_kgh(self):
+        for value in (50.0, 200.0):
+            converted = gas_flow_from_nm3h(value, "m3h", pressure_bar_a=8.0, temperature_c=20.0, z=0.92)
+            recovered = gas_flow_to_nm3h(converted, "m3h", pressure_bar_a=8.0, temperature_c=20.0, z=0.92)
+            assert abs(recovered - value) < 1e-3
+
+        for value in (100.0, 500.0):
+            converted = gas_flow_from_nm3h(value, "kgh", pressure_bar_a=8.0, temperature_c=20.0, z=0.92, density_kg_m3=6.5)
+            recovered = gas_flow_to_nm3h(converted, "kgh", pressure_bar_a=8.0, temperature_c=20.0, z=0.92, density_kg_m3=6.5)
+            assert abs(recovered - value) < 1e-3
 
     def test_kgh_requires_density(self):
         with pytest.raises(ValueError, match="yogunlugu gereklidir"):

@@ -7,25 +7,26 @@ IEC 60534 / ISA-based control valve sizing application with dual UI (desktop Tki
 ```
 valve_sizing.py       — Core sizing engine (1100+ lines)
 fluid_properties.py   — CoolProp HEOS integration (190 lines)
-vendor_catalog.py     — Fisher catalog (131 lines)
-config.py             — Gas presets (energy), default rows (44 lines)
+vendor_catalog.py     — Fisher / Valmet / Samson / Arca catalogs
+config.py             — Gas presets (energy), default rows
 project_io.py         — JSON save/load + schema versioning
 reporting.py          — Markdown report generation
 two_phase.py          — Flashing / two-phase Cv (HEM)
-valve_selection.py    — ANSI class / leakage / fail-safe guidance
-trim_guidance.py      — Rule-based trim recommendations
+valve_selection.py    — ANSI class / leakage / fail-safe / bonnet / metallurgy guidance
+trim_guidance.py      — Rule-based trim & cavitation severity recommendations
 thermal_expansion.py  — Pipe thermal expansion / stress / loop length
-valve_noise.py        — IEC 60534-8-4 aerodynamic noise
+valve_noise.py        — IEC 60534-8 aerodynamic & hydrodynamic noise + acoustic mitigation
 actuator_sizing.py    — Actuator sizing helpers
 units.py              — Pint-based unit conversions + sector unit maps/converters
+multi_case.py         — Multi-case operating envelope sizing (Min/Norm/Max)
+joule_thomson.py      — Joule-Thomson expansion & hydrate risk evaluation
+packing_emissions.py  — ISO 15848-1 / TA-Luft stem packing guidance
+safety_piping.py      — API 14E erosional velocity & API 520 PSV relief capacity
+datasheet_isa20.py    — ISA Form 20 procurement specification sheet generator
 app_desktop.py        — Tkinter desktop UI
 app_web.py            — Streamlit web UI
-test_valve_sizing.py  — Core engine tests
-test_vendor_catalog.py— Catalog validation
-test_integration.py   — Streamlit + I/O tests
-test_desktop_integration.py — Desktop import tests
-test_fluid_advanced.py— Energy gas preset tests
-test_benchmark_iec.py — IEC/ISA benchmark verification
+verify_50_scenarios.py— 52 industrial benchmark scenarios verification suite
+test_*.py             — Comprehensive pytest test suite (428 tests)
 ```
 
 ## Dependency Chain
@@ -85,7 +86,7 @@ python app_desktop.py
 
 ## Test Status
 
-- **328 tests, 100% passing**
+- **428 tests, 100% passing**
 - **Coverage**: 91% (excluding `app_desktop.py` Tkinter GUI)
 - **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)
-- **Scenario verification**: `verify_scenarios.py` (12 independent cross-checks, 12/12 PASS) + `test_scenario_verification.py` wrappers
+- **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

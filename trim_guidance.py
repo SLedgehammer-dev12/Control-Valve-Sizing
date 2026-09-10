@@ -1,12 +1,89 @@
-"""Rule-based trim selection guidance for control valves.
+"""Rule-based trim selection and severe service cavitation guidance for control valves.
 
 Provides engineering guidance on trim style (anti-cavitation, low-noise,
-anti-flash, multi-stage) from the sizing result conditions. These rules
-are heuristics aligned with vendor practices (Fisher Cavitrol/Whisper,
-etc.); final trim selection requires vendor confirmation.
+anti-flash, multi-stage) aligned with ISA-RP75.23 and IEC 60534-8-2.
 """
 
 from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class CavitationAnalysis:
+    """Detailed liquid cavitation severity and multi-stage trim evaluation."""
+
+    sigma: float
+    severity_level: str
+    stages_recommended: int
+    trim_recommendation: str
+    max_allowable_dp_per_stage_bar: float
+    warnings: list[str]
+    engineering_notes: list[str]
+
+
+def evaluate_cavitation_severity(
+    sigma: float,
+    delta_p_bar: float,
+    p1_bar_a: float,
+    pv_bar_a: float,
+) -> CavitationAnalysis:
+    """Evaluate liquid cavitation severity and determine required trim stages per ISA-RP75.23."""
+    dp = max(float(delta_p_bar), 0.001)
+    p1 = max(float(p1_bar_a), 0.001)
+    pv = max(float(pv_bar_a), 0.0)
+
+    warnings: list[str] = []
+    notes: list[str] = []
+
+    if p1 <= pv:
+        severity = "Buharlaşma (Flashing)"
+        stages = 1
+        trim = "Anti-Flash genişleme gövdesi (Angle Body) + Stellite kaplama"
+        max_dp_stage = dp
+        warnings.append("Akışkan girişte kaynıyor (P1 <= Pv). Kavitasyon değil iki fazlı flashing rejimindedir.")
+        notes.append("Yüksek hızlı sıvı damlacık erozyonuna karşı gövde genişletilmeli ve sertleştirilmiş yüzey seçilmelidir.")
+    elif sigma > 2.0:
+        severity = "Güvenli (Kavitasyonsuz)"
+        stages = 1
+        trim = "Standart Trim"
+        max_dp_stage = dp
+        notes.append("Kavitasyon indeksi sigma > 2.0: Kavitasyon hasarı veya gürültü riski bulunmamaktadır.")
+    elif sigma > 1.5:
+        severity = "Başlangıç Kavitasyonu (Incipient Cavitation)"
+        stages = 1
+        trim = "Sertleştirilmiş Trim (Stellite 6 / CoCr veya 410SS)"
+        max_dp_stage = (p1 - pv) / 1.5
+        warnings.append("Düşük düzeyde kavitasyon başlangıcı tespit edildi. Uzun dönemli sit aşınması mümkündür.")
+        notes.append("Tek kademeli sertleştirilmiş trim (Stellite sit/klape) yüzey ömrünü korur.")
+    elif sigma > 1.1:
+        severity = "Yoğun Kavitasyon (Constant Cavitation)"
+        stages = 2
+        trim = "2-Kademeli Anti-Kavitasyon Kafesi (Cavitrol II / Q-Trim benzeri)"
+        max_dp_stage = dp / 2.0
+        warnings.append("Yoğun kavitasyon: Standart trim hızlıca tahrip olur; yüksek titreşim ve gürültü beklenir.")
+        notes.append("Toplam basınç düşümü 2 kademeye bölünerek basıncın buharlaşma basıncının altına inmesi engellenir.")
+    else:
+        severity = "Şiddetli / Boğulmuş Kavitasyon (Choking Cavitation)"
+        calc_stages = max(3, min(6, math.ceil(dp / 15.0)))
+        stages = calc_stages
+        trim = f"{stages}-Kademeli Labirent / Çok Yollu Disk-Stack Trim (Cavitrol III / Tortuous Path)"
+        max_dp_stage = dp / stages
+        warnings.append("Şiddetli kavitasyon ve boğulma: Akış maksimum kapasitededir. Acil ağır hizmet trimi zorunludur.")
+        notes.append(
+            f"Basınç düşümü {stages} ayrı direnç kademesinde dağıtılarak kavitasyon enerjisi akışkan içinde sönümlendirilir."
+        )
+
+    return CavitationAnalysis(
+        sigma=sigma,
+        severity_level=severity,
+        stages_recommended=stages,
+        trim_recommendation=trim,
+        max_allowable_dp_per_stage_bar=max_dp_stage,
+        warnings=warnings,
+        engineering_notes=notes,
+    )
 
 
 def recommend_trim(
@@ -18,23 +95,18 @@ def recommend_trim(
     cavitation_index: float | None = None,
     pressure_drop_ratio_x: float = 0.0,
     temperature_c: float = 25.0,
+    delta_p_bar: float = 1.0,
+    p1_bar_a: float = 5.0,
+    pv_bar_a: float = 0.023,
 ) -> list[str]:
-    """Return a list of trim recommendations (Turkish) based on conditions.
-
-    Parameters
-    ----------
-    service : "liquid", "gas", or "steam"
-    flow_regime : Liquid flow regime label ("" for gas/steam)
-    is_choked : Choked-flow flag
-    noise_db : Predicted noise [dB(A)] if available
-    opening_percent : Estimated design opening [%]
-    cavitation_index : Classic cavitation index (liquid only)
-    pressure_drop_ratio_x : dP/P1 (gas/steam)
-    temperature_c : Process temperature [C]
-    """
+    """Return a list of trim recommendations based on operating conditions."""
     recs: list[str] = []
 
-    if service == "liquid" and flow_regime == "flashing":
+    if service == "liquid" and cavitation_index is not None:
+        analysis = evaluate_cavitation_severity(cavitation_index, delta_p_bar, p1_bar_a, pv_bar_a)
+        if analysis.stages_recommended > 1 or analysis.severity_level != "Güvenli (Kavitasyonsuz)":
+            recs.append(f"Kavitasyon: {analysis.severity_level} -> {analysis.trim_recommendation}.")
+    elif service == "liquid" and flow_regime == "flashing":
         recs.append(
             "Anti-flash trim: genlesme hacimli govde (angle body tercih edilebilir) ve "
             "sertlestirilmis trim (or. Stellite 6 kaplama) onerilir."
@@ -46,14 +118,6 @@ def recommend_trim(
         )
     elif service == "liquid" and flow_regime == "cavitating-risk":
         recs.append("Baslangic kavitasyonu icin kademeli (single/multi-stage) kavitasyon trimi degerlendirilmeli.")
-
-    if (
-        service == "liquid"
-        and cavitation_index is not None
-        and cavitation_index < 1.5
-        and flow_regime not in ("flashing", "choked-cavitating")
-    ):
-        recs.append("Cavitation index dusuk; sertlestirilmis trim malzemesi onerilir.")
 
     if service in ("gas", "steam") and (pressure_drop_ratio_x > 0.5 or is_choked):
         recs.append(

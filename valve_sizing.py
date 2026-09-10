@@ -391,6 +391,21 @@ def _predict_actuator_thrust(
         return None
 
 
+def _predict_actuator_selection(
+    valve_dn_mm: int,
+    thrust_result: dict[str, float] | None,
+) -> dict[str, Any] | None:
+    """Select actuator meeting thrust and stroke from catalog. Returns None on failure."""
+    if not thrust_result or "total_n" not in thrust_result:
+        return None
+    try:
+        from actuator_sizing import estimate_valve_stroke_mm, select_actuator
+        stroke_mm = estimate_valve_stroke_mm(valve_dn_mm)
+        return select_actuator(thrust_result["total_n"], stroke_mm)
+    except Exception:
+        return None
+
+
 def _size_iteration(
     valve_series: list[ValveSize],
     pipe_inlet_mm: float | None,
@@ -466,6 +481,12 @@ def size_liquid_valve(
     sg = density / 999.016
     q_gpm = flow_m3h * M3H_TO_GPM
     ff = FF_A - FF_B * math.sqrt(max(pv / pc, 0.0))
+    if data.inlet_pressure_bar_a <= ff * pv:
+        raise ValueError(
+            f"Giris basinci P1 ({data.inlet_pressure_bar_a:.3f} bar) buhar basincinin ve kavitasyon "
+            f"esiginin ({ff * pv:.3f} bar) altinda; akiskan vanaya kaynayarak giriyor. "
+            "Tek fazli IEC sivi sizing uygulanamaz; iki-fazli veya buhar/gaz sizing gereklidir."
+        )
     dp_max_valve_only_bar = (fl ** 2) * (data.inlet_pressure_bar_a - ff * pv)
     dp_max_valve_only_bar = max(dp_max_valve_only_bar, 1e-9)
 
@@ -514,6 +535,12 @@ def size_liquid_valve(
         regime = "subcritical"
 
     warnings: list[str] = []
+    if data.inlet_pressure_bar_a <= pv:
+        warnings.append(
+            f"Giris basinci P1 ({data.inlet_pressure_bar_a:.3f} bar) buhar basincina "
+            f"({pv:.3f} bar) esit veya altinda; akiskan vanaya kaynayan/iki-fazli giriyor. "
+            "Tek fazli IEC sivi boyutlandirmasi yetersiz kalabilir; iki-fazli analiz gereklidir."
+        )
     if overflow:
         warnings.append("Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir.")
     elif not opening_metrics["rangeability_ok"]:
@@ -535,6 +562,9 @@ def size_liquid_valve(
         valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fl, fd, pv,
     )
+
+    act_thrust = _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)
+    act_selection = _predict_actuator_selection(valve.dn_mm, act_thrust)
 
     q_m3s = flow_m3h / 3600.0
     velocity: dict[str, float | bool] = {
@@ -585,7 +615,8 @@ def size_liquid_valve(
             "fp": fp,
             "flp": flp,
             "noise_db": noise_db,
-            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "actuator_thrust_n": act_thrust,
+            "actuator_selection": act_selection,
             "valve_spec": build_valve_spec(
                 "liquid", data.inlet_pressure_bar_a, is_choked, regime,
                 vendor_pressure_class="", vendor_leakage_class="",
@@ -788,6 +819,9 @@ def size_gas_valve(
             f"Cikis Mach sayisi {mach_out:.2f}; {GAS_MACH_ADVISORY:.1f} uzeri gurultu acisindan degerlendirilmelidir."
         )
 
+    act_thrust = _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)
+    act_selection = _predict_actuator_selection(valve.dn_mm, act_thrust)
+
     result = _base_result_dict("gas", ["iec_scope", "isa_committee", "primer_liquid"])
     result.update(
         {
@@ -820,7 +854,8 @@ def size_gas_valve(
             "rangeability_min_cv": float(opening_metrics["rangeability_min_cv"]),
             "rangeability_ok": bool(opening_metrics["rangeability_ok"]),
             "noise_db": noise_db,
-            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "actuator_thrust_n": act_thrust,
+            "actuator_selection": act_selection,
             "valve_spec": build_valve_spec(
                 "gas", data.inlet_pressure_bar_a, is_choked,
                 vendor_pressure_class="", vendor_leakage_class="",
@@ -1003,6 +1038,9 @@ def size_steam_valve(
         fd, fl,
     )
 
+    act_thrust = _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)
+    act_selection = _predict_actuator_selection(valve.dn_mm, act_thrust)
+
     result = _base_result_dict("steam", ["primer_liquid", "iec_scope", "isa_committee"])
     result.update(
         {
@@ -1035,7 +1073,8 @@ def size_steam_valve(
             "rangeability_min_cv": float(opening_metrics["rangeability_min_cv"]),
             "rangeability_ok": bool(opening_metrics["rangeability_ok"]),
             "noise_db": noise_db,
-            "actuator_thrust_n": _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a),
+            "actuator_thrust_n": act_thrust,
+            "actuator_selection": act_selection,
             "valve_spec": build_valve_spec(
                 "steam", data.inlet_pressure_bar_a, is_choked,
                 vendor_pressure_class="", vendor_leakage_class="",

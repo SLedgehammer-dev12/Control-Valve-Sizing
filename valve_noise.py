@@ -8,6 +8,7 @@ SizingResult + input dataclass interface.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
 from fluids.control_valve import control_valve_noise_g_2011, control_valve_noise_l_2015
 
@@ -130,4 +131,69 @@ def predict_noise_gas(
         FL=fl,
         FLP=flp,
         FP=fp,
+    )
+
+
+@dataclass(frozen=True)
+class NoiseAttenuationOption:
+    """Acoustic attenuation evaluation per IEC 60534-8-3 and OSHA limits."""
+
+    predicted_noise_dba: float
+    whisper_trim_dba: float
+    diffuser_plate_dba: float
+    acoustic_insulation_dba: float
+    whisper_plus_insulation_dba: float
+    is_attenuation_required: bool
+    recommended_treatment: str
+    engineering_notes: list[str] = field(default_factory=list)
+
+
+def evaluate_noise_attenuation(
+    noise_dba: float,
+    service: str = "gas",
+    delta_p_bar: float = 1.0,
+) -> NoiseAttenuationOption:
+    """Evaluate acoustic treatment options when control valve noise exceeds 85 dBA."""
+    n = max(float(noise_dba), 0.0)
+    required = n > 85.0
+    whisper = max(n - 18.0, 45.0)
+    diffuser = max(n - 14.0, 45.0)
+    insulation = max(n - 10.0, 45.0)
+    combo = max(n - 26.0, 45.0)
+
+    notes: list[str] = []
+
+    if not required:
+        treatment = "Akustik İyileştirme Gerekmez (<= 85 dBA güvenli limit)"
+        notes.append(f"Tahmin edilen gürültü ({n:.1f} dBA) OSHA/ISO 85 dBA sınırının altındadır.")
+    elif n <= 100.0:
+        treatment = "Düşük Gürültülü Kafes (Whisper Trim / Drilled Cage)"
+        notes.append(f"Gürültü ({n:.1f} dBA) 85 dBA iş sağlığı sınırını aşıyor.")
+        notes.append("Delikli kafes (Whisper Trim) ile ses basınç seviyesi ~18 dBA düşürülerek güvenli sınıra çekilebilir.")
+        notes.append("Alternatif olarak boru hattına 50 mm mineral yün akustik izolasyon ceketi (-10 dBA) uygulanabilir.")
+    elif n <= 110.0:
+        treatment = "Kombine İyileştirme: Whisper Trim + Boru Akustik İzolasyonu"
+        notes.append(f"Yüksek aerodinamik gürültü ({n:.1f} dBA): Tek başına kafes veya ceket yeterli olmayabilir.")
+        notes.append("Whisper Trim ve akustik ceket birlikte uygulanarak ses seviyesi 85 dBA altına indirilebilir.")
+        notes.append("Boru çıkışına difüzör (baffle plate / susturucu orifis) eklenmesi basınç düşüşünü kademelendirir.")
+    else:
+        treatment = "Kritik Akustik Tehlike: Çok Kademeli Labirent Trim + Hat Susturucusu"
+        notes.append(f"Aşırı gürültü ({n:.1f} dBA > 110 dBA): Akustik Uyarılmış Titreşim (AIV) riski mevcuttur!")
+        notes.append("Energy Institute standartlarına göre boru kaynaklarında yorulma ve yırtılma riski bulunur.")
+        notes.append("Basınç düşüşü çok kademeli tortuous-path disk-stack trim ve downstream susturucu ile paylaşılmalıdır.")
+
+    if service.lower() == "liquid" and required:
+        notes.append("Sıvı servisinde yüksek ses genelde kavitasyondan kaynaklanır; anti-kavitasyon kafesi önceliklidir.")
+    if delta_p_bar > 20.0 and required:
+        notes.append(f"Yüksek basınç farkı ({delta_p_bar:.1f} bar): Kademeli basınç düşürücü orifis plakaları önerilir.")
+
+    return NoiseAttenuationOption(
+        predicted_noise_dba=n,
+        whisper_trim_dba=whisper,
+        diffuser_plate_dba=diffuser,
+        acoustic_insulation_dba=insulation,
+        whisper_plus_insulation_dba=combo,
+        is_attenuation_required=required,
+        recommended_treatment=treatment,
+        engineering_notes=notes,
     )

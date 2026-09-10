@@ -192,3 +192,52 @@ def test_vendor_source_urls_are_https():
     for v in VENDOR_CATALOG.values():
         assert v.source_url.startswith("https://"), f"{v.key}: non-HTTPS source"
         assert len(v.source_note) > 20, f"{v.key}: missing source note"
+
+
+def test_asme_b1634_derating_wcb():
+    from valve_selection import derated_mawp_bar
+
+    mawp_amb = derated_mawp_bar("CL150", 20.0, "WCB")
+    assert mawp_amb == pytest.approx(19.6, abs=0.1)
+
+    mawp_200 = derated_mawp_bar("CL150", 200.0, "WCB")
+    assert mawp_200 == pytest.approx(13.8, abs=0.1)
+
+    mawp_350 = derated_mawp_bar("CL150", 350.0, "WCB")
+    assert mawp_350 == pytest.approx((10.2 + 6.5) / 2.0, abs=0.1)
+
+    mawp_high = derated_mawp_bar("CL300", 400.0, "WCB")
+    assert mawp_high == pytest.approx(34.7, abs=0.1)
+
+
+def test_asme_b1634_recommend_pressure_class():
+    from valve_selection import recommend_pressure_class
+
+    assert recommend_pressure_class(15.0, 20.0, "WCB") == "CL150"
+    assert recommend_pressure_class(15.0, 300.0, "WCB") == "CL300"
+    assert recommend_pressure_class(50.0, 400.0, "WCB") == "CL600"
+    assert recommend_pressure_class(150.0, 300.0, "WCB") == "CL1500"
+
+
+def test_allowable_leakage_rate():
+    from valve_selection import allowable_leakage_rate
+
+    rate_ii = allowable_leakage_rate(rated_cv=100.0, leakage_class="II", delta_p_bar=1.0)
+    assert rate_ii["class"] == "II"
+    assert rate_ii["rate_unit"] == "L/min"
+    assert rate_ii["max_rate"] == pytest.approx(0.005 * 100.0 * 3.785, rel=1e-3)
+
+    rate_iv = allowable_leakage_rate(rated_cv=100.0, leakage_class="IV", delta_p_bar=1.0)
+    assert rate_iv["class"] == "IV"
+    assert rate_iv["max_rate"] == pytest.approx(0.0001 * 100.0 * 3.785, rel=1e-3)
+
+    rate_v = allowable_leakage_rate(rated_cv=100.0, leakage_class="V", port_diameter_mm=50.8, delta_p_bar=10.0)
+    assert rate_v["class"] == "V"
+    assert rate_v["rate_unit"] == "ml/min"
+    expected_v = 0.0005 * 2.0 * (10.0 * 14.5038)
+    assert rate_v["max_rate"] == pytest.approx(expected_v, rel=1e-3)
+
+    rate_vi = allowable_leakage_rate(rated_cv=100.0, leakage_class="VI", port_diameter_mm=50.8)
+    assert rate_vi["class"] == "VI"
+    assert rate_vi["max_rate"] == pytest.approx(8 * 0.15, rel=1e-3)
+

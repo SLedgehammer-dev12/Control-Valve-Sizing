@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 
+import pytest
+
 from fluid_properties import get_steam_properties_iapws, get_thermo_fluid_state
 
 HAS_IAPWS = find_spec("iapws") is not None
@@ -155,3 +157,52 @@ class TestPureFluidStateFallbackCascade:
         state = fluid_properties.get_pure_fluid_state("Methane", 1.0, 25.0)
         assert state["z"] == 1.0
         assert state["density_kg_m3"] > 0.0
+
+
+class TestSteamSaturation:
+    """Test suite for saturated and superheated steam property helpers."""
+
+    def test_saturated_steam_temperature_lookup(self):
+        from fluid_properties import get_saturated_steam_temperature
+
+        t_1bar = get_saturated_steam_temperature(1.01325)
+        assert t_1bar == pytest.approx(100.0, abs=0.5)
+
+        t_10bar = get_saturated_steam_temperature(10.0)
+        assert t_10bar == pytest.approx(179.9, abs=0.5)
+
+        t_50bar = get_saturated_steam_temperature(50.0)
+        assert t_50bar == pytest.approx(263.9, abs=0.5)
+
+    def test_saturated_steam_pressure_lookup(self):
+        from fluid_properties import get_saturated_steam_pressure
+
+        p_100c = get_saturated_steam_pressure(100.0)
+        assert p_100c == pytest.approx(1.013, abs=0.05)
+
+        p_180c = get_saturated_steam_pressure(180.0)
+        assert p_180c == pytest.approx(10.0, abs=0.5)
+
+    def test_evaluate_steam_state_superheated(self):
+        from fluid_properties import evaluate_steam_state
+
+        res = evaluate_steam_state(10.0, 250.0)
+        assert res["phase"] == "superheated"
+        assert res["is_superheated"] is True
+        assert res["delta_t_superheat"] > 60.0
+
+    def test_evaluate_steam_state_wet(self):
+        from fluid_properties import evaluate_steam_state
+
+        res = evaluate_steam_state(10.0, 150.0)
+        assert res["phase"] == "wet_steam"
+        assert res["is_wet"] is True
+        assert any("erozyon" in w.lower() for w in res["warnings"])
+
+    def test_evaluate_steam_state_saturated(self):
+        from fluid_properties import evaluate_steam_state
+
+        res = evaluate_steam_state(10.0, 180.0)
+        assert res["phase"] == "saturated"
+        assert any("Stellite" in w for w in res["warnings"])
+

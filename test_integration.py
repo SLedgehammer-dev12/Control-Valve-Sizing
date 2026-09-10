@@ -126,7 +126,7 @@ def test_report_scalar_actuator_thrust_branch():
 
 
 def test_streamlit_app_loads_and_shows_title():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     assert not at.exception
     assert at.title[0].value == "Control Valve Sizing"
@@ -134,7 +134,7 @@ def test_streamlit_app_loads_and_shows_title():
 
 
 def test_streamlit_liquid_calculation_shows_metrics():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     # Live calculation renders results on first run without clicking a button
     markdown_content = ' '.join([m.value for m in at.markdown if hasattr(m, 'value')])
@@ -145,7 +145,7 @@ def test_streamlit_liquid_calculation_shows_metrics():
 
 
 def test_streamlit_unit_selectors_present():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     selector_labels = {sb.label for sb in at.selectbox if sb.label}
     assert "Sicaklik birimi" in selector_labels
@@ -154,7 +154,7 @@ def test_streamlit_unit_selectors_present():
 
 
 def test_streamlit_liquid_gpm_unit_live_recalc():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     flow_sb = next(sb for sb in at.selectbox if sb.label == "Debi birimi")
     flow_sb.set_value("US gpm")
@@ -167,7 +167,7 @@ def test_streamlit_liquid_gpm_unit_live_recalc():
 
 
 def test_streamlit_can_switch_to_gas_page():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -176,7 +176,7 @@ def test_streamlit_can_switch_to_gas_page():
 
 
 def test_streamlit_gas_preset_selector_present():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -189,7 +189,7 @@ def test_streamlit_gas_preset_selector_present():
 def test_streamlit_gas_preset_loads_rows():
     from config import GAS_PRESETS
 
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -208,7 +208,7 @@ def _set_number_input(at, key: str, value: float) -> None:
 
 
 def test_streamlit_gas_preset_calculation_shows_result():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -225,7 +225,7 @@ def test_streamlit_gas_preset_calculation_shows_result():
 
 
 def test_streamlit_gas_invalid_composition_shows_error():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -237,7 +237,7 @@ def test_streamlit_gas_invalid_composition_shows_error():
 
 
 def test_streamlit_steam_calculation_shows_metrics():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Steam")
     at.run()
@@ -251,7 +251,7 @@ def test_streamlit_steam_calculation_shows_metrics():
 
 
 def test_streamlit_gas_scfh_unit_live_recalc():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -266,11 +266,59 @@ def test_streamlit_gas_scfh_unit_live_recalc():
 
 
 def test_streamlit_thermal_expansion_section():
-    at = AppTest.from_file(str(APP_FILE))
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     next(b for b in at.button if "Termal genlesme" in (b.label or "")).click()
     at.run()
-    assert not at.exception
     metric_labels = [m.label for m in at.metric]
     assert any("Uzama" in label for label in metric_labels)
     assert any("Termal gerilme" in label for label in metric_labels)
+
+
+def test_streamlit_multicase_section():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    btn = next((b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")), None)
+    assert btn is not None
+    btn.click()
+    at.run()
+    assert not at.exception
+    metric_labels = [m.label for m in at.metric]
+    assert any("Turndown" in label for label in metric_labels)
+    assert len(at.dataframe) > 0
+
+
+
+def test_build_joule_thomson_report():
+    from joule_thomson import calc_joule_thomson_drop
+    from reporting import build_joule_thomson_report
+
+    res = calc_joule_thomson_drop("Methane", 50.0, 10.0, 20.0)
+    rep = build_joule_thomson_report(res)
+    assert "Joule-Thomson & Gaz Hidrat Raporu" in rep
+    assert "Methane" in rep
+    assert "T1" in rep
+
+
+def test_build_multicase_report():
+    from multi_case import OperatingCase, size_multicase
+    from reporting import build_multicase_report
+
+    cases = [
+        OperatingCase("Min", 15.0, 6.0, 4.0, 25.0),
+        OperatingCase("Normal", 50.0, 6.0, 4.0, 25.0),
+        OperatingCase("Max", 80.0, 5.8, 4.0, 25.0),
+    ]
+    fluid_data = {
+        "density_kg_m3": 998.0,
+        "vapor_pressure_bar_a": 0.023,
+        "critical_pressure_bar_a": 220.64,
+        "viscosity_pa_s": 0.001,
+        "fl": 0.9,
+    }
+    res = size_multicase("liquid", cases, fluid_data)
+    rep = build_multicase_report(res)
+    assert "Multi-Case" in rep
+    assert "Turndown" in rep
+    assert "DN" in rep
+

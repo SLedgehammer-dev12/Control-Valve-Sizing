@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 import streamlit as st
 
@@ -177,16 +179,52 @@ def render_result(result: SizingResult) -> None:
         if result.get("noise_db") is not None:
             st.metric("Valve noise", f"{result['noise_db']:.1f} dB(A)")
             st.caption("IEC 60534-8 tahmini; low-noise trim için vendor doğrulaması gerekir.")
+            if float(result["noise_db"]) > 85.0:
+                from valve_noise import evaluate_noise_attenuation
+
+                dp_val = float(result.get("delta_p_bar", 1.0))
+                att = evaluate_noise_attenuation(float(result["noise_db"]), result["service"], dp_val)
+                st.warning(f"İş sağlığı sınırı (85 dBA) aşıldı! Öneri: {att.recommended_treatment}")
+                with st.expander("Akustik İyileştirme Seçenekleri (IEC 60534-8-3)", expanded=False):
+                    at1, at2 = st.columns(2)
+                    at1.metric("Whisper Trim (-18 dBA)", f"{att.whisper_trim_dba:.1f} dB(A)")
+                    at2.metric("Boru Ceketi (-10 dBA)", f"{att.acoustic_insulation_dba:.1f} dB(A)")
+                    for n in att.engineering_notes:
+                        st.caption(f"• {n}")
         else:
             st.write("-")
     with est_cols[1]:
         st.markdown("**Tahmini Aktüatör (est.)**")
         thrust = result.get("actuator_thrust_n")
-        if isinstance(thrust, dict):
+        act_sel = result.get("actuator_selection")
+        if act_sel and isinstance(act_sel, dict) and act_sel.get("model"):
+            margin = act_sel.get("thrust_margin_pct", 0.0)
+            st.metric("Model", f"{act_sel['model']} (+%{margin:.0f})")
+            thrust_val = thrust.get("total_n", 0.0) if isinstance(thrust, dict) else (thrust or 0.0)
+            stroke_status = "Yeterli" if act_sel.get("stroke_ok") else "Yetersiz"
+            st.caption(f"Gereken kuvvet: {thrust_val:.0f} N | Strok: {stroke_status}")
+        elif isinstance(thrust, dict):
             st.metric("Toplam kuvvet", f"{thrust.get('total_n', 0.0):.1f} N")
             st.caption("Statik tahmin; dinamik kuvvet ve bench-set için vendor doğrulaması gerekir.")
+        elif thrust is not None:
+            st.metric("Toplam kuvvet", f"{thrust:.1f} N")
         else:
             st.write("-")
+
+    vel_info = result.get("velocity")
+    if vel_info and vel_info.get("pipe_out_m_s"):
+        from safety_piping import check_erosional_velocity
+
+        v_val = float(vel_info["pipe_out_m_s"])
+        d_val = float(result.get("extra", {}).get("density", 1000.0))
+        eros_chk = check_erosional_velocity(v_val, d_val)
+        if eros_chk.is_velocity_exceeded:
+            st.error(
+                f"API 14E Boru Erozyon Tehlikesi! Boru çıkış hızı {v_val:.2f} m/s, "
+                f"izin verilen erozyonel limitin ({eros_chk.erosional_limit_m_s:.2f} m/s) üzerindedir!"
+            )
+            for w in eros_chk.warnings:
+                st.caption(f"• {w}")
 
     with st.expander("Hesap metodu / kaynak", expanded=True):
         st.markdown("**Method Notes**")
@@ -222,7 +260,14 @@ def render_result(result: SizingResult) -> None:
     if spec:
         with st.expander("Vana spesifikasyonu (est.)", expanded=False):
             st.write(f"- Onerilen ANSI sinifi: {spec['pressure_class_recommended']}")
+            if "derated_mawp_bar" in spec:
+                t_sp = spec.get("temperature_c", 20.0)
+                mat_grp = spec.get("material_group", "WCB")
+                st.write(f"- ASME B16.34 MAWP (Derated): {spec['derated_mawp_bar']:.1f} bar @ {t_sp:.1f} °C ({mat_grp})")
             st.write(f"- Onerilen sizdirmazlik sinifi: {spec['leakage_class_recommended']}")
+            if "allowable_leakage" in spec and isinstance(spec["allowable_leakage"], dict):
+                al = spec["allowable_leakage"]
+                st.write(f"- Izin verilen sizinti debisi: {al.get('max_rate', 0.0):.4f} {al.get('rate_unit', '')} ({al.get('note', '')})")
             st.write(f"- Onerilen fail-safe: {spec['fail_safe_recommended']}")
 
     if result.get("warning"):
@@ -254,11 +299,35 @@ def render_project_tools(service: str, payload: dict) -> None:
 def render_report_tools() -> None:
     if st.session_state.last_report:
         st.sidebar.download_button(
-            "Raporu indir",
+            "Raporu indir (MD)",
             st.session_state.last_report,
             file_name="control_valve_sizing_report.md",
             mime="text/markdown",
         )
+    if st.session_state.last_result:
+        from reporting import build_isa20_html_report, build_isa20_report
+
+        res = st.session_state.last_result
+        fluid = (
+            st.session_state.get("liquid_preset_label", "Su")
+            if res["service"] == "liquid"
+            else ("Doğal Gaz" if res["service"] == "gas" else "Buhar")
+        )
+        isa_md = build_isa20_report(res, tag="CV-101", fluid_name=fluid)
+        isa_html = build_isa20_html_report(res, tag="CV-101", fluid_name=fluid)
+        st.sidebar.download_button(
+            "ISA-20 Datasheet (HTML / Excel)",
+            isa_html,
+            file_name="isa20_control_valve_datasheet.html",
+            mime="text/html",
+        )
+        st.sidebar.download_button(
+            "ISA-20 Datasheet (Markdown)",
+            isa_md,
+            file_name="isa20_control_valve_datasheet.md",
+            mime="text/markdown",
+        )
+
 
 
 def render_source_library() -> None:
@@ -366,6 +435,28 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
             flow_characteristic=st.session_state.flow_characteristic,
         )
         _live_render("Liquid", result, fluid_summary)
+        sigma_val = result.get("cavitation_index") if result else None
+        if sigma_val is not None:
+            from trim_guidance import evaluate_cavitation_severity
+
+            cav_res = evaluate_cavitation_severity(
+                sigma=float(sigma_val),
+                delta_p_bar=inlet_pressure - outlet_pressure,
+                p1_bar_a=inlet_pressure,
+                pv_bar_a=float(st.session_state.liquid_pv),
+            )
+            with st.expander("Kavitasyon & Ağır Hizmet Trim Analizi (ISA-RP75.23)", expanded=False):
+                c_c1, c_c2, c_c3 = st.columns(3)
+                c_c1.metric("Kavitasyon İndeksi (σ)", f"{cav_res.sigma:.3f}")
+                c_c2.metric("Şiddet Seviyesi", cav_res.severity_level)
+                c_c3.metric("Önerilen Kademe", f"{cav_res.stages_recommended} Kademe")
+                st.info(f"**Önerilen Trim:** {cav_res.trim_recommendation}")
+                if cav_res.stages_recommended > 1:
+                    st.markdown(f"**Kademe Başına Maks İzin Verilen ΔP:** {cav_res.max_allowable_dp_per_stage_bar:.1f} bar")
+                for w in cav_res.warnings:
+                    st.warning(w)
+                for n in cav_res.engineering_notes:
+                    st.caption(f"• {n}")
     except Exception as exc:
         st.error(f"Sivi sizing hesaplamasi yapilirken hata olustu: {exc}")
         st.session_state.last_result = None
@@ -503,6 +594,27 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
                 flow_characteristic=st.session_state.flow_characteristic,
             )
             _live_render("Gas", result, fluid_summary)
+            with st.expander("Joule-Thomson & Gaz Hidrat Analizi", expanded=False):
+                try:
+                    from joule_thomson import calc_joule_thomson_drop
+
+                    jt_res = calc_joule_thomson_drop("Methane", inlet_pressure, outlet_pressure, temperature_c)
+                    jt_c1, jt_c2, jt_c3, jt_c4 = st.columns(4)
+                    jt_c1.metric("Cikis T2 (JT)", f"{jt_res.t2_c:.1f} \u00b0C", delta=f"-{jt_res.delta_t_c:.1f} \u00b0C")
+                    jt_c2.metric("JT Katsayisi", f"{jt_res.mu_jt_c_per_bar:.3f} \u00b0C/bar")
+                    jt_c3.metric("Hidrat Sicakligi", f"{jt_res.t_hydrate_c:.1f} \u00b0C")
+                    jt_c4.metric("Min On Isitici", f"{jt_res.t_preheat_min_c:.1f} \u00b0C")
+                    if jt_res.hydrate_risk:
+                        st.error(
+                            f"Gaz hidrat (kristallesme) riski! Cikis sicakligi {jt_res.t2_c:.1f} \u00b0C, "
+                            f"hidrat esigine ({jt_res.t_hydrate_c:.1f} \u00b0C) cok yakin!"
+                        )
+                    if jt_res.freezing_risk:
+                        st.warning(f"Donma riski: Vana cikisinda sicaklik {jt_res.t2_c:.1f} \u00b0C <= 0 \u00b0C.")
+                    for w in jt_res.warnings:
+                        st.caption(f"- {w}")
+                except Exception as jt_exc:
+                    st.caption(f"J-T analizi yapilamadi: {jt_exc}")
         except Exception as exc:
             st.error(f"Gaz sizing hesaplamasi yapilirken hata olustu: {exc}")
             st.session_state.last_result = None
@@ -528,6 +640,18 @@ def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
     outlet_pressure = pressure_to_bar_a(
         c4.number_input(f"Cikis P [{pres_label}]", key="steam_p2", min_value=0.001, step=0.1), pres_unit
     )
+
+    from fluid_properties import evaluate_steam_state, get_saturated_steam_temperature
+
+    t_sat = get_saturated_steam_temperature(inlet_pressure)
+    lock_sat = st.checkbox(f"Doymus buhar sicakligini otomatik kilitle (T = Tsat = {t_sat:.1f} \u00b0C)", value=False, key="steam_lock_sat")
+    if lock_sat:
+        temperature_c = t_sat
+
+    steam_eval = evaluate_steam_state(inlet_pressure, temperature_c)
+    st.info(f"Buhar Durumu: {steam_eval['phase_label']} (Doyma Sicakligi Tsat = {t_sat:.1f} \u00b0C)")
+    for w in steam_eval["warnings"]:
+        st.warning(w)
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}")
@@ -698,6 +822,206 @@ def main() -> None:
     else:
         render_steam_section(vendor_key)
 
+    with st.expander("Coklu Calisma Durumu (Multi-Case Sizing: Min / Normal / Max)", expanded=False):
+        st.markdown(
+            "IEC 60534 standartlarina gore vananin Minimum, Normal ve Maksimum debi durumlarinda "
+            "eszamanli kontrol edilebilirligi (Min %10+, Normal %40-75, Max <%85 aciklik) analiz edilir."
+        )
+        cur_serv = st.session_state.service.lower()
+        flow_key = "liquid_flow_m3h" if cur_serv == "liquid" else ("gas_flow_nm3h" if cur_serv == "gas" else "steam_flow_kgh")
+        def_flow = float(st.session_state.get(flow_key, 100.0))
+        def_p1 = float(st.session_state.get(f"{cur_serv}_p1", 8.0))
+        def_p2 = float(st.session_state.get(f"{cur_serv}_p2", 5.0))
+
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            st.markdown("**Minimum Durum (Startup / Min)**")
+            mc_min_q = st.number_input("Min Debi", value=max(def_flow * 0.4, 0.1), key="mc_min_q")
+            mc_min_p1 = st.number_input("Min P1 [bar]", value=def_p1, key="mc_min_p1")
+            mc_min_p2 = st.number_input("Min P2 [bar]", value=def_p2, key="mc_min_p2")
+        with mc2:
+            st.markdown("**Normal Durum (Duty Point)**")
+            mc_norm_q = st.number_input("Normal Debi", value=max(def_flow, 0.1), key="mc_norm_q")
+            mc_norm_p1 = st.number_input("Normal P1 [bar]", value=def_p1, key="mc_norm_p1")
+            mc_norm_p2 = st.number_input("Normal P2 [bar]", value=def_p2, key="mc_norm_p2")
+        with mc3:
+            st.markdown("**Maksimum Durum (Design / Max)**")
+            mc_max_q = st.number_input("Max Debi", value=max(def_flow * 1.3, 0.1), key="mc_max_q")
+            mc_max_p1 = st.number_input("Max P1 [bar]", value=max(def_p1 * 0.95, 0.1), key="mc_max_p1")
+            mc_max_p2 = st.number_input("Max P2 [bar]", value=def_p2, key="mc_max_p2")
+
+        if st.button("Coklu Durum Boyutlandirma Analizi Yap"):
+            from multi_case import OperatingCase, size_multicase
+
+            temp_c = float(st.session_state.get(f"{cur_serv}_temp_c", 25.0))
+            cases = [
+                OperatingCase("Min", mc_min_q, mc_min_p1, mc_min_p2, temp_c),
+                OperatingCase("Normal", mc_norm_q, mc_norm_p1, mc_norm_p2, temp_c),
+                OperatingCase("Max", mc_max_q, mc_max_p1, mc_max_p2, temp_c),
+            ]
+            mc_fluid_data: dict[str, Any] = {}
+            if cur_serv == "liquid":
+                mc_fluid_data = {
+                    "density_kg_m3": st.session_state.liquid_density,
+                    "vapor_pressure_bar_a": st.session_state.liquid_pv,
+                    "critical_pressure_bar_a": st.session_state.liquid_pc,
+                    "viscosity_pa_s": st.session_state.liquid_mu,
+                }
+            elif cur_serv == "gas":
+                mc_fluid_data = {
+                    "molecular_weight": 28.96,
+                    "specific_heat_ratio": 1.40,
+                    "viscosity_pa_s": 1.8e-5,
+                    "z": 1.0,
+                }
+            else:
+                mc_fluid_data = {"specific_heat_ratio": 1.30, "z": 1.0}
+
+            vendor = get_vendor_definition(vendor_key)
+            mc_fluid_data["fl"] = vendor.fl or 0.9
+            mc_fluid_data["xt"] = vendor.xt or 0.7
+            mc_fluid_data["fd"] = vendor.fd or 1.0
+
+            mc_res = size_multicase(
+                cur_serv,
+                cases,
+                mc_fluid_data,
+                valve_series=list(vendor.sizes),
+                flow_characteristic=st.session_state.flow_characteristic,
+            )
+            st.success(mc_res.overall_summary)
+            st.metric("Turndown Orani (Qmax / Qmin)", f"{mc_res.turndown_ratio:.1f}:1")
+            cand_rows = []
+            for c in mc_res.candidates:
+                cand_rows.append({
+                    "Vana": f"DN{c.valve.dn_mm} ({c.valve.inch})",
+                    "Rated Cv": c.valve.cv_rated,
+                    "Min Aciklik": f"%{c.opening_min_pct:.1f}",
+                    "Normal Aciklik": f"%{c.opening_norm_pct:.1f}",
+                    "Max Aciklik": f"%{c.opening_max_pct:.1f}",
+                    "Degerlendirme": c.status_label,
+                    "Onerilen": "\u2605 EVET" if c.is_recommended else "",
+                })
+            st.dataframe(pd.DataFrame(cand_rows), hide_index=True)
+            for w in mc_res.warnings:
+                st.warning(w)
+
+    with st.expander("Salmastra ve Kaçak Emisyon Analizi (ISO 15848-1 / API 641)", expanded=False):
+        from packing_emissions import recommend_packing_system
+
+        pack_service = st.session_state.service.lower()
+        pack_fluid = (
+            st.session_state.get("liquid_fluid", "Su")
+            if pack_service == "liquid"
+            else (st.session_state.get("gas_preset", "Doğal Gaz") if pack_service == "gas" else "Buhar")
+        )
+        pack_temp = float(st.session_state.get(f"{pack_service}_temp_c", 25.0))
+        pack_pres = float(st.session_state.get(f"{pack_service}_p1", 10.0))
+
+        pk_col1, pk_col2 = st.columns(2)
+        with pk_col1:
+            fluid_in = st.text_input("Akışkan Adı", value=pack_fluid, key="pack_fluid_in")
+            temp_in = st.number_input("Çalışma Sıcaklığı [°C]", value=pack_temp, key="pack_temp_in")
+            pres_in = st.number_input("Giriş Basıncı [bar(a)]", value=pack_pres, key="pack_pres_in")
+        with pk_col2:
+            is_toxic = st.checkbox("Zehirli / Kanserojen Akışkan (Lethal / Toxic Service)", value=False, key="pack_is_toxic")
+            is_sour = st.checkbox("Ekşi Gaz / H2S Ortamı (NACE MR0175 / ISO 15156)", value=False, key="pack_is_sour")
+
+        pk_res = recommend_packing_system(
+            service=pack_service,
+            fluid_name=fluid_in,
+            temperature_c=temp_in,
+            pressure_bar_a=pres_in,
+            is_toxic_or_lethal=is_toxic,
+            is_sour_gas=is_sour,
+        )
+
+        pk_c1, pk_c2, pk_c3 = st.columns(3)
+        pk_c1.metric("Emisyon Sınıfı", pk_res.emission_class.split("/")[0].strip())
+        pk_c2.metric("Sızdırmazlık Sınırı", f"< {pk_res.leakage_tightness_ppmv:.0f} ppmv")
+        pk_c3.metric("Yangın Emniyeti", "API 607 Yangına Dayanıklı" if pk_res.fire_safe else "Yangın Korumasız")
+
+        st.info(f"**Önerilen Salmastra Sistemi:** {pk_res.packing_type}")
+        st.markdown(f"**Sıcaklık Aralığı:** {pk_res.temperature_range_c[0]:.0f} °C ... {pk_res.temperature_range_c[1]:.0f} °C")
+        st.markdown(f"**Standart & Tasarım:** {pk_res.description}")
+        if pk_res.nace_mr0175_compliant:
+            st.success("NACE MR0175 / ISO 15156 gereksinimleri (mil sertliği ≤ 22 HRC vb.) karşılanmaktadır.")
+        for r in pk_res.recommendations:
+            st.caption(f"• {r}")
+
+    with st.expander("Boru Hattı Güvenliği & PSV Tahliye Debisi (API 14E / API 520)", expanded=False):
+        from safety_piping import calc_wide_open_relief_capacity, check_erosional_velocity
+
+        cur_s = st.session_state.service.lower()
+        res_cv = float(st.session_state.last_result["rated_cv"]) if st.session_state.last_result else 50.0
+        res_p1 = float(st.session_state.get(f"{cur_s}_p1", 10.0))
+        res_p2 = float(st.session_state.get(f"{cur_s}_p2", 4.0))
+
+        bp_c1, bp_c2 = st.columns(2)
+        with bp_c1:
+            st.markdown("**API 14E Erozyonel Hız Sınırı**")
+            bp_vel = st.number_input("Boru Akış Hızı [m/s]", value=4.5, step=0.1, key="bp_vel")
+            bp_rho = st.number_input("Akışkan Yoğunluğu [kg/m³]", value=1000.0, step=10.0, key="bp_rho")
+            bp_c_fact = st.selectbox(
+                "API 14E C Katsayısı",
+                [100.0, 125.0],
+                format_func=lambda c: f"c={c:.0f} ({'Sürekli Servis' if c == 100 else 'Temiz Aralıklı'})",
+            )
+            eros_eval = check_erosional_velocity(bp_vel, bp_rho, c_factor=bp_c_fact)
+            if eros_eval.is_velocity_exceeded:
+                st.error(f"Erozyon Limiti Aşıldı! Limit: {eros_eval.erosional_limit_m_s:.2f} m/s (Oran: %{eros_eval.velocity_ratio*100:.0f})")
+            else:
+                st.success(f"Hız Güvenli: {bp_vel:.2f} m/s <= {eros_eval.erosional_limit_m_s:.2f} m/s")
+            for w in eros_eval.warnings:
+                st.caption(f"- {w}")
+
+        with bp_c2:
+            st.markdown("**API 520 Vana Tam Açık Tahliye Yükü**")
+            bp_cv = st.number_input("Nominal Rated Cv", value=res_cv, step=5.0, key="bp_cv")
+            bp_prel = st.number_input("PSV Tahliye Basıncı [bar(a)]", value=max(res_p2 * 1.1, 1.0), step=0.5, key="bp_prel")
+            fl_data: dict[str, float] = {}
+            if cur_s == "liquid":
+                fl_data = {"specific_gravity": 1.0, "fl": 0.9, "vapor_pressure_bar_a": 0.023}
+            elif cur_s == "gas":
+                fl_data = {"molecular_weight": 28.96, "temperature_c": 20.0, "xt": 0.70, "specific_heat_ratio": 1.40}
+            else:
+                fl_data = {"density_kg_m3": 5.0, "xt": 0.70}
+
+            relief_eval = calc_wide_open_relief_capacity(cur_s, bp_cv, res_p1, bp_prel, fl_data)
+            st.metric("PSV Arıza Tahliye Debisi", f"{relief_eval.wide_open_flow_rate:.1f} {relief_eval.flow_unit}")
+            if relief_eval.is_choked:
+                st.info("Vana tam açık durumda sonik/kavitasyonel boğulma rejimindedir.")
+            for sn in relief_eval.safety_notes:
+                st.caption(f"- {sn}")
+
+    with st.expander("Gelişmiş Malzeme & Bonnet Seçimi (ASME B31.3 / NACE / API 941)", expanded=False):
+        from valve_selection import recommend_alloy_material, recommend_bonnet_type
+
+        mat_srv = st.session_state.service.lower()
+        mat_temp = float(st.session_state.get(f"{mat_srv}_temp_c", 25.0))
+        mat_fluid = st.text_input(
+            "Akışkan",
+            value="Doğal Gaz" if mat_srv == "gas" else ("Su" if mat_srv == "liquid" else "Buhar"),
+            key="mat_fluid",
+        )
+        mat_col1, mat_col2 = st.columns(2)
+        with mat_col1:
+            mat_is_sour = st.checkbox("Ekşi Gaz / H2S Servisi (NACE MR0175)", value=False, key="mat_sour")
+        with mat_col2:
+            mat_is_h2 = st.checkbox("Hidrojen / Sentez Gazı (API 941 Nelson)", value=False, key="mat_h2")
+
+        rec_bonnet = recommend_bonnet_type(mat_temp, mat_srv, mat_fluid)
+        rec_alloy = recommend_alloy_material(mat_srv, mat_fluid, mat_temp, is_sour=mat_is_sour, is_h2=mat_is_h2)
+
+        st.markdown(f"**Önerilen Bonnet Tipi:** {rec_bonnet}")
+        m_c1, m_c2, m_c3 = st.columns(3)
+        m_c1.metric("Gövde Malzemesi", rec_alloy.body_material.split("(")[0].strip())
+        m_c2.metric("Trim Malzemesi", rec_alloy.trim_material.split("+")[0].strip())
+        m_c3.metric("Mil Malzemesi", rec_alloy.stem_material.split("(")[0].strip())
+        st.info(f"**Tasarım Standardı:** {rec_alloy.design_standard}")
+        for mr in rec_alloy.recommendations:
+            st.caption(f"• {mr}")
+
     with st.expander("Termal Genlesme (boru hatti)", expanded=False):
         from thermal_expansion import (
             get_material_label,
@@ -712,7 +1036,7 @@ def main() -> None:
         te_t2 = st.number_input("Isletme sicakligi [C]", min_value=-50.0, value=90.0, step=1.0)
         if st.button("Termal genlesme hesapla"):
             delta_t = te_t2 - te_t1
-            expansion_mm = pipe_linear_expansion(te_len, delta_t, te_mat) * 1000.0
+            expansion_mm = pipe_linear_expansion(te_len, delta_t, te_mat)
             stress_mpa = pipe_thermal_stress(delta_t, te_mat)
             c1, c2, c3 = st.columns(3)
             c1.metric("Uzama [mm]", f"{expansion_mm:.2f}")

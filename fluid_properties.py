@@ -12,6 +12,7 @@ All property-lookup functions implement a cascade fallback chain:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -610,3 +611,69 @@ def get_liquid_preset(name: str) -> dict[str, Any]:
     if name not in LIQUID_PRESETS:
         raise ValueError(f"Bilinmeyen sivi preset'i: {name}")
     return LIQUID_PRESETS[name].copy()
+
+
+def get_saturated_steam_temperature(pressure_bar_a: float) -> float:
+    """Return saturation temperature in Celsius for water/steam at given absolute pressure in bar."""
+    p = float(pressure_bar_a)
+    if p >= 220.64:
+        return 373.95
+    p_pa = max(p * 1e5, 611.65)
+    try:
+        return float(CP.PropsSI("T", "P", p_pa, "Q", 1.0, "Water") - 273.15)
+    except Exception:
+        return 100.0 + 28.0 * math.log(max(p, 0.1))
+
+
+def get_saturated_steam_pressure(temperature_c: float) -> float:
+    """Return saturation pressure in bar(a) for water/steam at given temperature in Celsius."""
+    t = float(temperature_c)
+    if t >= 373.95:
+        return 220.64
+    t_k = max(t + 273.15, 273.16)
+    try:
+        return float(CP.PropsSI("P", "T", t_k, "Q", 1.0, "Water") / 1e5)
+    except Exception:
+        t_sat_ref = 100.0
+        return float(math.exp((t - t_sat_ref) / 28.0))
+
+
+def evaluate_steam_state(pressure_bar_a: float, temperature_c: float) -> dict[str, Any]:
+    """Evaluate thermodynamic phase state of water/steam with superheat margin and erosion warnings."""
+    t_sat = get_saturated_steam_temperature(pressure_bar_a)
+    delta_t_sh = float(temperature_c) - t_sat
+    warnings: list[str] = []
+
+    if delta_t_sh > 2.0:
+        phase = "superheated"
+        phase_label = f"K\u0131zg\u0131n Buhar (\u0394T = +{delta_t_sh:.1f} \u00b0C)"
+        if temperature_c > 400.0:
+            warnings.append(
+                f"Y\u00fcksek s\u0131cakl\u0131k ({temperature_c:.1f} \u00b0C): Ala\u015f\u0131ml\u0131 g\u00f6vde (WC6/WC9) "
+                f"ve y\u00fcksek s\u0131cakl\u0131k grafit salmastra zorunludur."
+            )
+    elif delta_t_sh < -2.0:
+        phase = "wet_steam"
+        phase_label = f"\u0130slak Buhar / \u0130ki Fazl\u0131 (\u0394T = {delta_t_sh:.1f} \u00b0C)"
+        warnings.append(
+            f"\u0130slak buhar uyar\u0131s\u0131: S\u0131cakl\u0131k doyma de\u011ferinin ({t_sat:.1f} \u00b0C) alt\u0131nda. "
+            f"Y\u00fcksek h\u0131zl\u0131 s\u0131v\u0131 damlac\u0131klar\u0131 vana triminde ve boruda a\u011f\u0131r erozyona yol a\u00e7ar!"
+        )
+    else:
+        phase = "saturated"
+        phase_label = f"Doymu\u015f Buhar (\u0394T = {delta_t_sh:+.1f} \u00b0C)"
+        warnings.append(
+            "Doymu\u015f buhar: Bas\u0131n\u00e7 d\u00fc\u015f\u00fc\u015f\u00fc k\u0131smi yo\u011fu\u015fmaya neden olabilir. "
+            "Sertle\u015ftirilmi\u015f trim (Stellite / CoCr) kullan\u0131m\u0131 tavsiye edilir."
+        )
+
+    return {
+        "phase": phase,
+        "phase_label": phase_label,
+        "t_sat_c": t_sat,
+        "delta_t_superheat": delta_t_sh,
+        "is_wet": phase == "wet_steam",
+        "is_superheated": phase == "superheated",
+        "warnings": warnings,
+    }
+

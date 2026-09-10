@@ -214,14 +214,15 @@ def gas_flow_to_nm3h(
         p_bar = pressure_bar_a if pressure_bar_a is not None else 1.0
         t_c = temperature_c if temperature_c is not None else 15.0
         t_k = t_c + 273.15
-        return float(value) * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) * z
+        return float(value) * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / max(z, 1e-6)
     if unit == "kgh":
         if not density_kg_m3 or density_kg_m3 <= 0:
             raise ValueError("kgh birimi icin gaz yogunlugu gereklidir.")
         p_bar = pressure_bar_a if pressure_bar_a is not None else 1.0
         t_c = temperature_c if temperature_c is not None else 15.0
         t_k = t_c + 273.15
-        return float(value) / density_kg_m3 * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) * z
+        actual_m3h = float(value) / density_kg_m3
+        return actual_m3h * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / max(z, 1e-6)
     raise ValueError(f"Bilinmeyen gaz debi birimi: {unit}")
 
 
@@ -246,7 +247,7 @@ def gas_flow_from_nm3h(
         p_bar = pressure_bar_a if pressure_bar_a is not None else 1.0
         t_c = temperature_c if temperature_c is not None else 15.0
         t_k = t_c + 273.15
-        return float(value_nm3h) / (p_bar / NORMAL_P_BAR) / (NORMAL_T_K / t_k) / z
+        return float(value_nm3h) * (NORMAL_P_BAR / p_bar) * (t_k / NORMAL_T_K) * z
     if unit == "kgh":
         if not density_kg_m3 or density_kg_m3 <= 0:
             raise ValueError("kgh birimi icin gaz yogunlugu gereklidir.")

@@ -295,3 +295,28 @@ def test_desktop_gas_properties_fallback_defaults():
     assert z == 1.0
     assert k == 1.30
     assert mu == 1e-5
+
+
+def test_desktop_has_new_dialog_methods():
+    from app_desktop import ValveSizingApp
+
+    assert hasattr(ValveSizingApp, "_open_joule_thomson_dialog")
+    assert hasattr(ValveSizingApp, "_open_multicase_dialog")
+    assert hasattr(ValveSizingApp, "_open_cavitation_dialog")
+    assert hasattr(ValveSizingApp, "_open_packing_dialog")
+    assert hasattr(ValveSizingApp, "_open_isa20_dialog")
+    assert hasattr(ValveSizingApp, "_export_isa20")
+    assert hasattr(ValveSizingApp, "_open_safety_piping_dialog")
+    assert hasattr(ValveSizingApp, "_open_material_selection_dialog")
+
+
+def test_desktop_code_contains_new_tools():
+    code = APP_FILE.read_text(encoding="utf-8")
+    assert "Joule-Thomson ve Gaz Hidrat Analizi" in code
+    assert "Coklu Calisma Durumu (Multi-Case Sizing)" in code
+    assert "Kavitasyon Kademe Analizi (ISA-RP75.23)" in code
+    assert "Salmastra ve Kacak Emisyon (ISO 15848-1)" in code
+    assert "ISA-20 Sartname Veri Sayfasi (Datasheet)" in code
+    assert "Boru Guvenligi ve PSV Tahliye Debisi (API 14E / API 520)" in code
+    assert "Gelismis Malzeme ve Bonnet Secimi (NACE / API 941)" in code
+

@@ -3,6 +3,7 @@ import logging
 import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from config import GAS_PRESET_NAMES, GAS_PRESETS
 from fluid_properties import LIQUID_PRESETS, evaluate_gas_mixture, get_liquid_preset, get_pure_fluid_state, list_coolprop_fluids
@@ -111,8 +112,31 @@ class ValveSizingApp:
         file_menu.add_command(label="Projeyi Kaydet (JSON)", command=self._save_project)
         file_menu.add_command(label="Projeyi Yukle (JSON)", command=self._load_project)
         file_menu.add_separator()
+        file_menu.add_command(label="Hesaplama Raporu Kaydet (Markdown)", command=self._save_report)
+        file_menu.add_command(label="ISA-20 Datasheet Kaydet (MD / HTML)", command=self._export_isa20)
+        file_menu.add_separator()
         file_menu.add_command(label="Cikis", command=self.root.quit)
         menubar.add_cascade(label="Dosya", menu=file_menu)
+
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(label="Termal Genlesme (Boru Hatti)", command=self._open_thermal_expansion_dialog)
+        tools_menu.add_command(label="Joule-Thomson ve Gaz Hidrat Analizi", command=self._open_joule_thomson_dialog)
+        tools_menu.add_command(label="Coklu Calisma Durumu (Multi-Case Sizing)", command=self._open_multicase_dialog)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Kavitasyon Kademe Analizi (ISA-RP75.23)", command=self._open_cavitation_dialog)
+        tools_menu.add_command(label="Salmastra ve Kacak Emisyon (ISO 15848-1)", command=self._open_packing_dialog)
+        tools_menu.add_command(label="ISA-20 Sartname Veri Sayfasi (Datasheet)", command=self._open_isa20_dialog)
+        tools_menu.add_separator()
+        tools_menu.add_command(
+            label="Boru Guvenligi ve PSV Tahliye Debisi (API 14E / API 520)",
+            command=self._open_safety_piping_dialog,
+        )
+        tools_menu.add_command(
+            label="Gelismis Malzeme ve Bonnet Secimi (NACE / API 941)",
+            command=self._open_material_selection_dialog,
+        )
+        menubar.add_cascade(label="Araclar", menu=tools_menu)
+
         self.root.config(menu=menubar)
 
     def _build_ui(self) -> None:
@@ -769,12 +793,15 @@ class ValveSizingApp:
         p2 = pressure_to_bar_a(self.inputs["steam_p2"].get(), self.steam_pres_unit.get())
         temp_c = temperature_to_c(self.inputs["steam_temp_c"].get(), self.steam_temp_unit.get())
         try:
+            from fluid_properties import evaluate_steam_state
+
+            steam_eval = evaluate_steam_state(p1, temp_c)
             props = get_pure_fluid_state("Water", p1, temp_c)
             gamma = props["specific_heat_ratio"]
             z_value = props["z"]
             self.steam_k_display.set(f"{gamma:.5f}")
             self.steam_z_display.set(f"{z_value:.5f}")
-            self.steam_status_text.set("")
+            self.steam_status_text.set(f"{steam_eval['phase_label']} (Tsat={steam_eval['t_sat_c']:.1f} \u00b0C)")
         except Exception as exc:
             gamma = 1.30
             z_value = 1.0
@@ -893,14 +920,659 @@ class ValveSizingApp:
                 lines.append(f"  - {item}")
 
         thrust = result.get("actuator_thrust_n")
-        if isinstance(thrust, dict):
-            lines.append(f"Tahmini akt. kuvveti [N]: {thrust.get('total_n', 0.0):.1f} (tahmini)")
+        act_sel = result.get("actuator_selection")
+        if act_sel and isinstance(act_sel, dict) and act_sel.get("model"):
+            thrust_val = thrust.get("total_n", 0.0) if isinstance(thrust, dict) else (thrust or 0.0)
+            lines.append(f"Tahmini akt. kuvveti [N]: {thrust_val:.1f}")
+            margin = act_sel.get("thrust_margin_pct", 0.0)
+            stroke_status = "Yeterli" if act_sel.get("stroke_ok") else "Yetersiz"
+            lines.append(f"Onerilen aktorator     : {act_sel['model']} (+%{margin:.0f} marj, strok: {stroke_status})")
+        spec = result.get("valve_spec")
+        if spec:
+            lines.append("")
+            lines.append("Vana Spesifikasyonu:")
+            lines.append(f"  Onerilen ANSI sinifi  : {spec.get('pressure_class_recommended', '-')}")
+            if "derated_mawp_bar" in spec:
+                t_sp = spec.get("temperature_c", 20.0)
+                mat_grp = spec.get("material_group", "WCB")
+                lines.append(f"  ASME B16.34 MAWP      : {spec['derated_mawp_bar']:.1f} bar @ {t_sp:.1f} \u00b0C ({mat_grp})")
+            lines.append(f"  Onerilen sizdirmazlik : {spec.get('leakage_class_recommended', '-')}")
+            if "allowable_leakage" in spec and isinstance(spec["allowable_leakage"], dict):
+                al = spec["allowable_leakage"]
+                lines.append(f"  Izin verilen sizinti  : {al.get('max_rate', 0.0):.4f} {al.get('rate_unit', '')}")
+            lines.append(f"  Onerilen fail-safe    : {spec.get('fail_safe_recommended', '-')}")
 
         if result.get("warning"):
             lines.extend(["", f"Uyari: {result['warning']}"])
 
         self.result_box.delete("1.0", tk.END)
         self.result_box.insert("1.0", "\n".join(lines))
+
+    def _open_thermal_expansion_dialog(self) -> None:
+        from thermal_expansion import (
+            get_material_label,
+            get_material_options,
+            pipe_linear_expansion,
+            pipe_thermal_stress,
+        )
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Termal Genlesme (Boru Hatti)")
+        dlg.geometry("480x380")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="Boru Malzemesi:").grid(row=0, column=0, sticky="w", pady=4)
+        mat_options = get_material_options()
+        mat_labels = [get_material_label(k) for k in mat_options]
+        mat_var = tk.StringVar(value=mat_labels[0])
+        mat_combo = ttk.Combobox(frame, values=mat_labels, textvariable=mat_var, state="readonly", width=28)
+        mat_combo.grid(row=0, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Boru Uzunlugu [m]:").grid(row=1, column=0, sticky="w", pady=4)
+        len_var = tk.DoubleVar(value=10.0)
+        ttk.Entry(frame, textvariable=len_var).grid(row=1, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Montaj Sicakligi [°C]:").grid(row=2, column=0, sticky="w", pady=4)
+        t1_var = tk.DoubleVar(value=10.0)
+        ttk.Entry(frame, textvariable=t1_var).grid(row=2, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Isletme Sicakligi [°C]:").grid(row=3, column=0, sticky="w", pady=4)
+        t2_var = tk.DoubleVar(value=90.0)
+        ttk.Entry(frame, textvariable=t2_var).grid(row=3, column=1, sticky="ew", pady=4)
+
+        res_frame = ttk.LabelFrame(frame, text="Sonuclar", padding=10)
+        res_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+
+        res_text = tk.StringVar(value="Hesaplamak icin asagidaki butona basin.")
+        ttk.Label(res_frame, textvariable=res_text, font=("Consolas", 10), justify="left").pack(anchor="w")
+
+        def _calc() -> None:
+            try:
+                selected_label = mat_var.get()
+                mat_key = mat_options[mat_labels.index(selected_label)]
+                length_m = len_var.get()
+                t1 = t1_var.get()
+                t2 = t2_var.get()
+                delta_t = t2 - t1
+                exp_mm = pipe_linear_expansion(length_m, delta_t, mat_key)
+                stress_mpa = pipe_thermal_stress(delta_t, mat_key)
+                res_text.set(
+                    f"Sicaklik Farki (dT) : {delta_t:.1f} °C\n"
+                    f"Boru Uzamasi       : {exp_mm:.2f} mm\n"
+                    f"Termal Gerilme     : {stress_mpa:.1f} MPa"
+                )
+            except Exception as exc:
+                res_text.set(f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+        ttk.Button(btn_frame, text="Hesapla", command=_calc).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+
+    def _open_joule_thomson_dialog(self) -> None:
+        from joule_thomson import calc_joule_thomson_drop
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Joule-Thomson ve Gaz Hidrat Analizi")
+        dlg.geometry("520x460")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="Gaz Tipi:").grid(row=0, column=0, sticky="w", pady=4)
+        gas_var = tk.StringVar(value="Methane")
+        ttk.Combobox(
+            frame,
+            values=["Methane", "NaturalGas", "Nitrogen", "CarbonDioxide", "Hydrogen"],
+            textvariable=gas_var,
+            state="readonly",
+            width=22,
+        ).grid(row=0, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Giris Basinci P1 [bar]:").grid(row=1, column=0, sticky="w", pady=4)
+        p1_val = float(self.inputs["gas_p1"].get() if self.service_type.get() == "gas" else 50.0)
+        p1_var = tk.DoubleVar(value=p1_val)
+        ttk.Entry(frame, textvariable=p1_var).grid(row=1, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Cikis Basinci P2 [bar]:").grid(row=2, column=0, sticky="w", pady=4)
+        p2_val = float(self.inputs["gas_p2"].get() if self.service_type.get() == "gas" else 10.0)
+        p2_var = tk.DoubleVar(value=p2_val)
+        ttk.Entry(frame, textvariable=p2_var).grid(row=2, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Giris Sicakligi T1 [\u00b0C]:").grid(row=3, column=0, sticky="w", pady=4)
+        t1_val = float(self.inputs["gas_temp_c"].get() if self.service_type.get() == "gas" else 20.0)
+        t1_var = tk.DoubleVar(value=t1_val)
+        ttk.Entry(frame, textvariable=t1_var).grid(row=3, column=1, sticky="ew", pady=4)
+
+        res_frame = ttk.LabelFrame(frame, text="Sonuclar", padding=10)
+        res_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+
+        res_text = tk.StringVar(value="Hesaplamak icin asagidaki butona basin.")
+        ttk.Label(res_frame, textvariable=res_text, font=("Consolas", 10), justify="left").pack(anchor="w")
+
+        def _calc_jt() -> None:
+            try:
+                p1 = p1_var.get()
+                p2 = p2_var.get()
+                t1 = t1_var.get()
+                res = calc_joule_thomson_drop(gas_var.get(), p1, p2, t1)
+                lines = [
+                    f"Cikis Sicakligi (T2) : {res.t2_c:.1f} \u00b0C",
+                    f"Sicaklik Dususu (dT): {res.delta_t_c:.1f} \u00b0C",
+                    f"J-T Katsayisi (mu)  : {res.mu_jt_c_per_bar:.3f} \u00b0C/bar",
+                    f"Hidrat Sicakligi    : {res.t_hydrate_c:.1f} \u00b0C",
+                    f"Hidrat Tehlikesi    : {'VAR (TEHLIKE!)' if res.hydrate_risk else 'YOK (Guvenli)'}",
+                    f"Donma Tehlikesi     : {'VAR (Buzlanma)' if res.freezing_risk else 'YOK'}",
+                    f"Min On Isitma (T)   : {res.t_preheat_min_c:.1f} \u00b0C",
+                ]
+                res_text.set("\n".join(lines))
+            except Exception as exc:
+                res_text.set(f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=6)
+        ttk.Button(btn_frame, text="Hesapla", command=_calc_jt).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+
+    def _open_multicase_dialog(self) -> None:
+        from multi_case import OperatingCase, size_multicase
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Coklu Calisma Durumu (Multi-Case Sizing: Min / Normal / Max)")
+        dlg.geometry("700x580")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        cur_service = self.service_type.get()
+        ttk.Label(
+            frame,
+            text=f"Aktif Servis: {cur_service.upper()}",
+            font=("Segoe UI", 11, "bold"),
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        flow_key = "liquid_flow_m3h" if cur_service == "liquid" else ("gas_flow_nm3h" if cur_service == "gas" else "steam_flow_kgh")
+        p1_key = f"{cur_service}_p1"
+        p2_key = f"{cur_service}_p2"
+
+        base_flow = float(self.inputs[flow_key].get())
+        base_p1 = float(self.inputs[p1_key].get())
+        base_p2 = float(self.inputs[p2_key].get())
+
+        ttk.Label(frame, text="Min Debi:").grid(row=1, column=0, sticky="w", pady=3)
+        min_q_var = tk.DoubleVar(value=max(base_flow * 0.4, 0.1))
+        ttk.Entry(frame, textvariable=min_q_var, width=14).grid(row=1, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Normal Debi:").grid(row=2, column=0, sticky="w", pady=3)
+        norm_q_var = tk.DoubleVar(value=max(base_flow, 0.1))
+        ttk.Entry(frame, textvariable=norm_q_var, width=14).grid(row=2, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Max Debi:").grid(row=3, column=0, sticky="w", pady=3)
+        max_q_var = tk.DoubleVar(value=max(base_flow * 1.3, 0.1))
+        ttk.Entry(frame, textvariable=max_q_var, width=14).grid(row=3, column=1, sticky="w", pady=3)
+
+        res_box = tk.Text(frame, height=16, font=("Consolas", 9), wrap="none")
+        res_box.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=10)
+        frame.rowconfigure(4, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc_mc() -> None:
+            try:
+                temp_c = float(self.inputs[f"{cur_service}_temp_c"].get())
+                cases = [
+                    OperatingCase("Min", min_q_var.get(), base_p1, base_p2, temp_c),
+                    OperatingCase("Normal", norm_q_var.get(), base_p1, base_p2, temp_c),
+                    OperatingCase("Max", max_q_var.get(), max(base_p1 * 0.95, 0.1), base_p2, temp_c),
+                ]
+                fluid_data: dict[str, Any] = {}
+                if cur_service == "liquid":
+                    fluid_data = {
+                        "density_kg_m3": self.inputs["liquid_density"].get(),
+                        "vapor_pressure_bar_a": self.inputs["liquid_pv"].get(),
+                        "critical_pressure_bar_a": self.inputs["liquid_pc"].get(),
+                        "viscosity_pa_s": self.inputs["liquid_mu"].get(),
+                    }
+                elif cur_service == "gas":
+                    fluid_data = {
+                        "molecular_weight": 28.96,
+                        "specific_heat_ratio": 1.40,
+                        "viscosity_pa_s": 1.8e-5,
+                        "z": 1.0,
+                    }
+                else:
+                    fluid_data = {"specific_heat_ratio": 1.30, "z": 1.0}
+
+                vendor = get_vendor_definition(self.vendor_key.get())
+                fluid_data["fl"] = vendor.fl or 0.9
+                fluid_data["xt"] = vendor.xt or 0.7
+                fluid_data["fd"] = vendor.fd or 1.0
+
+                mc_res = size_multicase(
+                    cur_service,
+                    cases,
+                    fluid_data,
+                    valve_series=list(vendor.sizes),
+                    flow_characteristic=self.flow_characteristic.get(),
+                )
+                lines = [
+                    f"Ozet: {mc_res.overall_summary}",
+                    f"Turndown Orani (Qmax/Qmin): {mc_res.turndown_ratio:.1f}:1",
+                    "-" * 70,
+                    f"{'Vana':<12} {'Rated Cv':<10} {'Min %':<10} {'Norm %':<10} {'Max %':<10} {'Durum'}",
+                    "-" * 70,
+                ]
+                for c in mc_res.candidates:
+                    flag = " [*]" if c.is_recommended else ""
+                    lines.append(
+                        f"DN{c.valve.dn_mm:<8} {c.valve.cv_rated:<10.1f} {c.opening_min_pct:<10.1f} "
+                        f"{c.opening_norm_pct:<10.1f} {c.opening_max_pct:<10.1f} {c.status_label}{flag}"
+                    )
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=5, column=0, columnspan=3, pady=6)
+        ttk.Button(btn_frame, text="Hesapla", command=_calc_mc).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+
+    def _open_cavitation_dialog(self) -> None:
+        from trim_guidance import evaluate_cavitation_severity
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Kavitasyon ve Agir Hizmet Trim Analizi (ISA-RP75.23)")
+        dlg.geometry("640x520")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        p1_init = float(self.inputs.get("liquid_p1", tk.StringVar(value="10.0")).get())
+        p2_init = float(self.inputs.get("liquid_p2", tk.StringVar(value="5.0")).get())
+        pv_init = float(self.inputs.get("liquid_pv", tk.StringVar(value="0.0234")).get())
+
+        ttk.Label(frame, text="Giris Basinci P1 [bar(a)]:").grid(row=0, column=0, sticky="w", pady=4)
+        p1_var = tk.DoubleVar(value=p1_init)
+        ttk.Entry(frame, textvariable=p1_var, width=16).grid(row=0, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Cikis Basinci P2 [bar(a)]:").grid(row=1, column=0, sticky="w", pady=4)
+        p2_var = tk.DoubleVar(value=p2_init)
+        ttk.Entry(frame, textvariable=p2_var, width=16).grid(row=1, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Buharlasma Basinci Pv [bar(a)]:").grid(row=2, column=0, sticky="w", pady=4)
+        pv_var = tk.DoubleVar(value=pv_init)
+        ttk.Entry(frame, textvariable=pv_var, width=16).grid(row=2, column=1, sticky="w", pady=4)
+
+        res_box = tk.Text(frame, height=14, width=65, font=("Consolas", 10))
+        res_box.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
+        frame.rowconfigure(3, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc_cav() -> None:
+            try:
+                p1 = p1_var.get()
+                p2 = p2_var.get()
+                pv = pv_var.get()
+                dp = max(p1 - p2, 0.001)
+                sigma = (p1 - pv) / dp if dp > 0 else 999.0
+                res = evaluate_cavitation_severity(sigma, dp, p1, pv)
+                lines = [
+                    "=" * 60,
+                    "KAVITASYON & AGIR HIZMET TRIM DEGERLENDIRMESI (ISA-RP75.23)",
+                    "=" * 60,
+                    f"Kavitasyon Indeksi (\u03c3)     : {res.sigma:.3f}",
+                    f"Siddet Rejimi                 : {res.severity_level}",
+                    f"Onerilen Kademe Sayisi        : {res.stages_recommended} Kademe",
+                    f"Onerilen Trim Tipi            : {res.trim_recommendation}",
+                    f"Kademe Basi Max Izin Delta P  : {res.max_allowable_dp_per_stage_bar:.1f} bar",
+                    "-" * 60,
+                ]
+                if res.warnings:
+                    lines.append("UYARILAR:")
+                    for w in res.warnings:
+                        lines.append(f"  [!] {w}")
+                    lines.append("-" * 60)
+                if res.engineering_notes:
+                    lines.append("MUHENDISLIK NOTLARI:")
+                    for n in res.engineering_notes:
+                        lines.append(f"  * {n}")
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=6)
+        ttk.Button(btn_frame, text="Analiz Et", command=_calc_cav).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc_cav()
+
+    def _open_packing_dialog(self) -> None:
+        from packing_emissions import recommend_packing_system
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Salmastra ve Kacak Emisyon Analizi (ISO 15848-1 / API 641)")
+        dlg.geometry("640x520")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        cur_service = self.service_type.get()
+        p1_key = f"{cur_service}_p1"
+        t_key = f"{cur_service}_temp_c"
+        p_init = float(self.inputs.get(p1_key, tk.StringVar(value="10.0")).get())
+        t_init = float(self.inputs.get(t_key, tk.StringVar(value="25.0")).get())
+
+        ttk.Label(frame, text="Akiskan Tipi:").grid(row=0, column=0, sticky="w", pady=3)
+        fluid_var = tk.StringVar(value="Su" if cur_service == "liquid" else ("Dogal Gaz" if cur_service == "gas" else "Buhar"))
+        ttk.Entry(frame, textvariable=fluid_var, width=22).grid(row=0, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Calisma Sicakligi [\u00b0C]:").grid(row=1, column=0, sticky="w", pady=3)
+        temp_var = tk.DoubleVar(value=t_init)
+        ttk.Entry(frame, textvariable=temp_var, width=16).grid(row=1, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Giris Basinci [bar(a)]:").grid(row=2, column=0, sticky="w", pady=3)
+        pres_var = tk.DoubleVar(value=p_init)
+        ttk.Entry(frame, textvariable=pres_var, width=16).grid(row=2, column=1, sticky="w", pady=3)
+
+        toxic_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Zehirli / Tehlikeli Akiskan (Lethal Service)", variable=toxic_var).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=3
+        )
+
+        sour_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Eksi Gaz / H2S Ortami (NACE MR0175)", variable=sour_var).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=3
+        )
+
+        res_box = tk.Text(frame, height=13, width=65, font=("Consolas", 10))
+        res_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 8))
+        frame.rowconfigure(5, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc_pack() -> None:
+            try:
+                res = recommend_packing_system(
+                    service=cur_service,
+                    fluid_name=fluid_var.get(),
+                    temperature_c=temp_var.get(),
+                    pressure_bar_a=pres_var.get(),
+                    is_toxic_or_lethal=toxic_var.get(),
+                    is_sour_gas=sour_var.get(),
+                )
+                lines = [
+                    "=" * 60,
+                    "SALMASTRA VE KACAK EMISYON DEGERLENDIRMESI",
+                    "=" * 60,
+                    f"Onerilen Salmastra : {res.packing_type}",
+                    f"Emisyon Sinifi     : {res.emission_class}",
+                    f"Sizdirmazlik Siniri: < {res.leakage_tightness_ppmv:.0f} ppmv",
+                    f"Yangin Emniyeti    : {'API 607 Yangina Dayanikli' if res.fire_safe else 'Standard'}",
+                    f"NACE MR0175 Uyumu  : {'Uyumlu (HRC <= 22)' if res.nace_mr0175_compliant else 'Standart Malzeme'}",
+                    f"Sicaklik Araligi   : {res.temperature_range_c[0]:.0f} \u00b0C ... {res.temperature_range_c[1]:.0f} \u00b0C",
+                    "-" * 60,
+                    f"Tasarim Notu: {res.description}",
+                    "-" * 60,
+                ]
+                for r in res.recommendations:
+                    lines.append(f"  * {r}")
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=6)
+        ttk.Button(btn_frame, text="Degerlendir", command=_calc_pack).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc_pack()
+
+    def _open_isa20_dialog(self) -> None:
+        if not hasattr(self, "last_result") or self.last_result is None:
+            messagebox.showinfo("Bilgi", "Once ana ekranda vana boyutlandirma hesaplamasi yapin.")
+            return
+
+        from reporting import build_isa20_html_report, build_isa20_report
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("ISA Form 20 Kontrol Vanasi Sartnamesi (Datasheet)")
+        dlg.geometry("760x620")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=14)
+        frame.pack(fill="both", expand=True)
+
+        service_map = {"liquid": "Liquid", "gas": "Gas", "steam": "Steam"}
+        srv = service_map.get(self.service_type.get(), "Liquid")
+        fluid_str = (
+            self.inputs.get("liquid_fluid", tk.StringVar(value="Water")).get()
+            if self.service_type.get() == "liquid"
+            else ("NaturalGas" if self.service_type.get() == "gas" else "Steam")
+        )
+
+        md_text = build_isa20_report(self.last_result, tag="CV-101", service_desc=f"{srv} Control Valve", fluid_name=fluid_str)
+
+        text_box = tk.Text(frame, wrap="word", font=("Consolas", 10))
+        text_box.grid(row=0, column=0, columnspan=3, sticky="nsew", pady=(0, 10))
+        text_box.insert("1.0", md_text)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _save_md() -> None:
+            fp = filedialog.asksaveasfilename(
+                defaultextension=".md",
+                filetypes=[("Markdown", "*.md"), ("All files", "*.*")],
+                title="ISA-20 Datasheet Markdown Olarak Kaydet",
+            )
+            if fp:
+                try:
+                    with open(fp, "w", encoding="utf-8") as f:
+                        f.write(md_text)
+                    messagebox.showinfo("Basarili", f"Datasheet kaydedildi: {fp}")
+                except Exception as e:
+                    messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+
+        def _save_html() -> None:
+            fp = filedialog.asksaveasfilename(
+                defaultextension=".html",
+                filetypes=[("HTML / Excel", "*.html"), ("All files", "*.*")],
+                title="ISA-20 Datasheet HTML Olarak Kaydet",
+            )
+            if fp:
+                try:
+                    html_content = build_isa20_html_report(
+                        self.last_result, tag="CV-101", service_desc=f"{srv} Control Valve", fluid_name=fluid_str
+                    )
+                    with open(fp, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    messagebox.showinfo("Basarili", f"Datasheet kaydedildi: {fp}")
+                except Exception as e:
+                    messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=1, column=0, columnspan=3, pady=4)
+        ttk.Button(btn_frame, text="Markdown Kaydet (.md)", command=_save_md).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="HTML / Excel Kaydet (.html)", command=_save_html).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=6)
+
+    def _export_isa20(self) -> None:
+        self._open_isa20_dialog()
+
+    def _open_safety_piping_dialog(self) -> None:
+        from safety_piping import calc_wide_open_relief_capacity, check_erosional_velocity
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Boru Guvenligi ve PSV Tahliye Debisi (API 14E / API 520)")
+        dlg.geometry("680x560")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        cur_service = self.service_type.get()
+        p1_val = float(self.inputs.get(f"{cur_service}_p1", tk.StringVar(value="10.0")).get())
+        p2_val = float(self.inputs.get(f"{cur_service}_p2", tk.StringVar(value="5.0")).get())
+        cv_val = float(self.last_result["rated_cv"]) if hasattr(self, "last_result") and self.last_result else 50.0
+
+        ttk.Label(frame, text="Vana Rated Cv:").grid(row=0, column=0, sticky="w", pady=3)
+        cv_var = tk.DoubleVar(value=cv_val)
+        ttk.Entry(frame, textvariable=cv_var, width=14).grid(row=0, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Giris Basinci P1 [bar(a)]:").grid(row=1, column=0, sticky="w", pady=3)
+        p1_var = tk.DoubleVar(value=p1_val)
+        ttk.Entry(frame, textvariable=p1_var, width=14).grid(row=1, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="PSV Tahliye Basinci [bar(a)]:").grid(row=2, column=0, sticky="w", pady=3)
+        prel_var = tk.DoubleVar(value=max(p2_val * 1.1, 1.0))
+        ttk.Entry(frame, textvariable=prel_var, width=14).grid(row=2, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Boru Akis Hizi [m/s]:").grid(row=3, column=0, sticky="w", pady=3)
+        vel_var = tk.DoubleVar(value=4.5)
+        ttk.Entry(frame, textvariable=vel_var, width=14).grid(row=3, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Akiskan Yogunlugu [kg/m3]:").grid(row=4, column=0, sticky="w", pady=3)
+        rho_var = tk.DoubleVar(value=1000.0 if cur_service == "liquid" else (15.0 if cur_service == "gas" else 5.0))
+        ttk.Entry(frame, textvariable=rho_var, width=14).grid(row=4, column=1, sticky="w", pady=3)
+
+        res_box = tk.Text(frame, height=14, width=70, font=("Consolas", 10))
+        res_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 8))
+        frame.rowconfigure(5, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc_safety() -> None:
+            try:
+                cv = cv_var.get()
+                p1 = p1_var.get()
+                prel = prel_var.get()
+                v = vel_var.get()
+                rho = rho_var.get()
+
+                eros = check_erosional_velocity(v, rho)
+                fl_data = {"specific_gravity": 1.0, "molecular_weight": 28.96, "density_kg_m3": rho, "xt": 0.70}
+                rel = calc_wide_open_relief_capacity(cur_service, cv, p1, prel, fl_data)
+
+                lines = [
+                    "=" * 65,
+                    "BORU GUVENLIGI VE PSV TAHLIYE KAPASITESI (API 14E / API 520)",
+                    "=" * 65,
+                    f"Mevcut Boru Hizi             : {eros.actual_velocity_m_s:.2f} m/s",
+                    f"API 14E Erozyonel Hiz Limiti : {eros.erosional_limit_m_s:.2f} m/s",
+                    f"Erozyon Limiti Asildi mi?    : {'EVET (TEHLIKE!)' if eros.is_velocity_exceeded else 'HAYIR (Guvenli)'}",
+                    f"Hiz Orani (v / ve)           : %{eros.velocity_ratio * 100.0:.1f}",
+                ]
+                if eros.min_recommended_pipe_dn_mm > 0:
+                    lines.append(f"Onerilen Min Boru Capi       : DN{eros.min_recommended_pipe_dn_mm}")
+                lines.extend([
+                    "-" * 65,
+                    f"PSV Ariza Tahliye Debisi     : {rel.wide_open_flow_rate:.1f} {rel.flow_unit}",
+                    f"Akis Bogulmasi (Choking)     : {'EVET' if rel.is_choked else 'HAYIR'}",
+                    "-" * 65,
+                ])
+                for w in eros.warnings:
+                    lines.append(f"  [!] {w}")
+                for sn in rel.safety_notes:
+                    lines.append(f"  * {sn}")
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=4)
+        ttk.Button(btn_frame, text="Hesapla", command=_calc_safety).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc_safety()
+
+    def _open_material_selection_dialog(self) -> None:
+        from valve_selection import recommend_alloy_material, recommend_bonnet_type
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Gelismis Malzeme ve Bonnet Secimi (ASME B31.3 / NACE / API 941)")
+        dlg.geometry("680x520")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        cur_service = self.service_type.get()
+        t_val = float(self.inputs.get(f"{cur_service}_temp_c", tk.StringVar(value="25.0")).get())
+
+        ttk.Label(frame, text="Akiskan Adi:").grid(row=0, column=0, sticky="w", pady=3)
+        fluid_var = tk.StringVar(value="Dogal Gaz" if cur_service == "gas" else ("Su" if cur_service == "liquid" else "Buhar"))
+        ttk.Entry(frame, textvariable=fluid_var, width=22).grid(row=0, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Calisma Sicakligi [\u00b0C]:").grid(row=1, column=0, sticky="w", pady=3)
+        temp_var = tk.DoubleVar(value=t_val)
+        ttk.Entry(frame, textvariable=temp_var, width=14).grid(row=1, column=1, sticky="w", pady=3)
+
+        sour_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Eksi Gaz / H2S Ortami (NACE MR0175)", variable=sour_var).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=3
+        )
+
+        h2_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Hidrojen / Sentez Gazi (API 941 Nelson)", variable=h2_var).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=3
+        )
+
+        res_box = tk.Text(frame, height=14, width=70, font=("Consolas", 10))
+        res_box.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(8, 8))
+        frame.rowconfigure(4, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc_mat() -> None:
+            try:
+                t = temp_var.get()
+                f_name = fluid_var.get()
+                bonnet = recommend_bonnet_type(t, cur_service, f_name)
+                alloy = recommend_alloy_material(cur_service, f_name, t, is_sour=sour_var.get(), is_h2=h2_var.get())
+
+                lines = [
+                    "=" * 65,
+                    "MALZEME VE BONNET SPESIFIKASYONU",
+                    "=" * 65,
+                    f"Onerilen Bonnet Tipi : {bonnet}",
+                    f"Govde Malzemesi      : {alloy.body_material}",
+                    f"Trim Malzemesi       : {alloy.trim_material}",
+                    f"Mil Malzemesi        : {alloy.stem_material}",
+                    f"Tasarim Standardi    : {alloy.design_standard}",
+                    f"NACE MR0175 Uyumu    : {'EVET' if alloy.nace_compliant else 'Standart'}",
+                    f"Sicaklik Sinirlari   : {alloy.temperature_limits_c[0]:.0f} \u00b0C ... {alloy.temperature_limits_c[1]:.0f} \u00b0C",
+                    "-" * 65,
+                ]
+                for r in alloy.recommendations:
+                    lines.append(f"  * {r}")
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=4)
+        ttk.Button(btn_frame, text="Degerlendir", command=_calc_mat).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc_mat()
+
 
     def _get_display_value(self, var: tk.Variable, fmt: str = ".4f") -> str:
         try:

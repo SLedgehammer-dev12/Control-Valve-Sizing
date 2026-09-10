@@ -772,3 +772,55 @@ def test_trim_guidance_default_when_clean():
 
     recs = recommend_trim("gas", opening_percent=50.0, pressure_drop_ratio_x=0.2)
     assert any("Standart trim" in r for r in recs)
+
+
+def test_actuator_selection_in_sizing_results():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25, 8, 5, 998, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    act_sel = result.get("actuator_selection")
+    assert act_sel is not None
+    assert "model" in act_sel
+    assert act_sel["selected"] is True
+    assert act_sel["thrust_margin_pct"] > 0
+    assert act_sel["stroke_ok"] is True
+
+
+def test_liquid_inlet_below_vapor_pressure_warning():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=25.0,
+            inlet_pressure_bar_a=1.02,
+            outlet_pressure_bar_a=0.5,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=1.05,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert "buhar basincina" in result["warning"]
+
+
+def test_liquid_inlet_below_ff_pv_raises():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    with pytest.raises(ValueError, match="kaynayarak giriyor"):
+        size_liquid_valve(
+            LiquidSizingInput(
+                flow_m3h=25.0,
+                inlet_pressure_bar_a=1.0,
+                outlet_pressure_bar_a=0.5,
+                density_kg_m3=998.0,
+                vapor_pressure_bar_a=2.0,
+                critical_pressure_bar_a=220.64,
+                viscosity_pa_s=0.00089,
+                fl=vendor.fl or 0.85,
+                fd=vendor.fd or 1.0,
+            ),
+            valve_series=list(vendor.sizes),
+        )
