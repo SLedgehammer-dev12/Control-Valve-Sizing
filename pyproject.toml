@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "control-valve-sizing"
-version = "3.2.0"
+version = "3.3.0"
 description = "IEC 60534 / ISA tabanli kontrol vanasi boyutlandirma (desktop Tkinter + web Streamlit)"
 readme = "README.md"
 requires-python = ">=3.12"

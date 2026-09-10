@@ -2,6 +2,19 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.3.0] — 2026-09-10
+
+### Added
+- 52 industrial benchmark verification scenarios (`verify_50_scenarios.py` + `test_50_scenarios.py`): 52 real-world scenarios across 5 key sectors (Power & Steam, Upstream/Midstream Oil & Gas, Petrochem & Refining, Clean Energy & Cryogenics, Chemical & Heavy Industry) with 100% pass rate
+- Multi-case operating envelope sizing (`multi_case.py` + `test_multi_case.py`) per IEC 60534: Min / Normal / Max operational cases, rangeability check, travel % analysis, and operating envelope summary
+- Joule-Thomson isenthalpic expansion and hydrate risk evaluation (`joule_thomson.py` + `test_joule_thomson.py`): downstream temperature T2, Towler-Mokhatab (2005) hydrate equilibrium curves, minimum preheater temperature
+- Valve stem packing and fugitive emissions selection (`packing_emissions.py`): ISO 15848-1 Class AH/BH, API 641, TA-Luft (VDI 2440), Live-loaded PTFE chevron, die-formed graphite, and Bellows Seal for toxic/lethal media
+- Piping safety and downstream PSV relief load sizing (`safety_piping.py` + `test_safety_piping.py`): API RP 14E erosional velocity limits and API 520 / ISA-75.01 control valve wide-open failure discharge capacity
+- ISA Form 20 (ISA-S20.50) control valve specification datasheet generator (`datasheet_isa20.py`): procurement-ready technical datasheets in Markdown and HTML format
+- Acoustic mitigation options (`valve_noise.py`): Whisper trim (-18 dBA), acoustic insulation jacket (-10 dBA), diffuser plate (-14 dBA), and Acoustic-Induced Vibration (AIV > 110 dBA) fatigue alerts
+- Advanced bonnet and metallurgy selection (`valve_selection.py`): Cryogenic extended bonnet (-196 °C / -46 °C), radiation finned, high-temperature bonnets; NACE MR0175, API 941 Nelson curves (Cr-Mo WC6/WC9), Duplex 2205, Monel 400
+- Dual UI integration (`app_desktop.py` & `app_web.py`): new panels and dialogs for acoustic mitigation, piping safety checks, multi-case expanders, and ISA-20 datasheet export
+
 ## [3.2.0] — 2026-08-20
 
 ### Added
