@@ -18,6 +18,7 @@ from typing import Any, cast
 
 from fluids.control_valve import size_control_valve_g, size_control_valve_l
 
+from actuator_sizing import estimate_valve_stroke_mm, select_actuator, total_required_thrust
 from trim_guidance import recommend_trim
 from two_phase import cavitation_index as _iec_cavitation_index
 from two_phase import (
@@ -40,6 +41,7 @@ from units import (
     NORMAL_P_BAR,
     NORMAL_T_K,
 )
+from valve_noise import predict_noise_gas, predict_noise_liquid
 from valve_selection import build_valve_spec
 
 logger = logging.getLogger(__name__)
@@ -344,10 +346,6 @@ def _predict_valve_noise(
 ) -> float | None:
     """Estimate valve noise level [dB(A)] via IEC 60534-8 wrapper. Returns None on failure."""
     try:
-        from valve_noise import predict_noise_gas, predict_noise_liquid
-    except ImportError:
-        return None
-    try:
         p1_pa = p1_bar * 1e5
         p2_pa = p2_bar * 1e5
         if service == "liquid":
@@ -376,17 +374,12 @@ def _predict_actuator_thrust(
 ) -> dict[str, float] | None:
     """Estimate actuator thrust requirement. Returns None on failure."""
     try:
-        from actuator_sizing import total_required_thrust
-    except ImportError:
-        return None
-    try:
-        result = total_required_thrust(
+        return total_required_thrust(
             port_diameter_mm=valve_dn_mm,
             inlet_pressure_bar=inlet_pressure_bar,
             outlet_pressure_bar=outlet_pressure_bar,
             shutoff_pressure_bar=inlet_pressure_bar,
         )
-        return result
     except Exception:
         return None
 
@@ -399,7 +392,6 @@ def _predict_actuator_selection(
     if not thrust_result or "total_n" not in thrust_result:
         return None
     try:
-        from actuator_sizing import estimate_valve_stroke_mm, select_actuator
         stroke_mm = estimate_valve_stroke_mm(valve_dn_mm)
         return select_actuator(thrust_result["total_n"], stroke_mm)
     except Exception:

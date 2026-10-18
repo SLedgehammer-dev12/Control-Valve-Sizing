@@ -583,6 +583,13 @@ def test_estimate_opening_equal_percentage_bounds():
     assert estimate_opening(25.0, 50.0) == pytest.approx(0.82301, abs=1e-3)
 
 
+def test_estimate_opening_fallback():
+    from valve_sizing import estimate_opening
+
+    assert estimate_opening(25.0, 50.0, rangeability=1.0) == 0.5
+    assert estimate_opening(25.0, 50.0, characteristic="custom") == 0.5
+
+
 def test_min_controllable_cv():
     from valve_sizing import DEFAULT_RANGEABILITY, estimate_min_controllable_cv
     assert estimate_min_controllable_cv(100.0) == pytest.approx(100.0 / DEFAULT_RANGEABILITY)

@@ -355,3 +355,38 @@ class TestPintRegistry:
         q = 491.67 * ureg.degR
         kelvin = q.to(ureg.kelvin).magnitude
         assert abs(kelvin - 273.15) < 0.1
+
+
+class TestUnitEdgeCasesAndErrors:
+    def test_liquid_flow_from_m3h_kgh(self):
+        from units import liquid_flow_from_m3h
+
+        assert liquid_flow_from_m3h(10.0, "kgh", density_kg_m3=1000.0) == 10000.0
+        with pytest.raises(ValueError, match="yogunlugu gereklidir"):
+            liquid_flow_from_m3h(10.0, "kgh")
+        with pytest.raises(ValueError, match="Bilinmeyen sivi debi birimi"):
+            liquid_flow_from_m3h(10.0, "invalid_unit")
+
+    def test_gas_flow_from_nm3h_kgh_and_errors(self):
+        from units import gas_flow_from_nm3h
+
+        val_kgh = gas_flow_from_nm3h(100.0, "kgh", density_kg_m3=1.25)
+        assert val_kgh > 0.0
+        with pytest.raises(ValueError, match="yogunlugu gereklidir"):
+            gas_flow_from_nm3h(100.0, "kgh")
+        with pytest.raises(ValueError, match="Bilinmeyen gaz debi birimi"):
+            gas_flow_from_nm3h(100.0, "invalid_unit")
+
+    def test_steam_flow_from_kgh_errors(self):
+        from units import steam_flow_from_kgh
+
+        with pytest.raises(ValueError, match="Bilinmeyen buhar debi birimi"):
+            steam_flow_from_kgh(1000.0, "invalid_unit")
+
+    def test_temperature_and_pressure_from_errors(self):
+        from units import pressure_from_bar_a, temperature_from_c
+
+        with pytest.raises(ValueError, match="Bilinmeyen sicaklik birimi"):
+            temperature_from_c(25.0, "invalid_unit")
+        with pytest.raises(ValueError, match="Bilinmeyen basinc birimi"):
+            pressure_from_bar_a(1.0, "invalid_unit")
