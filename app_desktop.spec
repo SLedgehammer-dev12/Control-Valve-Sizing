@@ -42,6 +42,7 @@ a = Analysis(
         "reporting",
         "units",
         # Phase 2 + 3 modules
+        "valve_curve",
         "valve_noise",
         "actuator_sizing",
         "thermal_expansion",

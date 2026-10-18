@@ -271,7 +271,7 @@ def test_pyproject_packaging_metadata():
     assert "valve-sizing-desktop" in cfg["project"]["scripts"]
     assert "valve_sizing" in cfg["tool"]["setuptools"]["py-modules"]
     assert "app_web" in cfg["tool"]["setuptools"]["py-modules"]
-    for m in ["datasheet_isa20", "joule_thomson", "multi_case", "packing_emissions", "safety_piping"]:
+    for m in ["datasheet_isa20", "joule_thomson", "multi_case", "packing_emissions", "safety_piping", "valve_curve"]:
         assert m in cfg["tool"]["setuptools"]["py-modules"]
 
 
@@ -310,6 +310,7 @@ def test_desktop_has_new_dialog_methods():
     assert hasattr(ValveSizingApp, "_export_isa20")
     assert hasattr(ValveSizingApp, "_open_safety_piping_dialog")
     assert hasattr(ValveSizingApp, "_open_material_selection_dialog")
+    assert hasattr(ValveSizingApp, "_open_characteristic_curve_dialog")
 
 
 def test_desktop_code_contains_new_tools():
@@ -321,4 +322,6 @@ def test_desktop_code_contains_new_tools():
     assert "ISA-20 Sartname Veri Sayfasi (Datasheet)" in code
     assert "Boru Guvenligi ve PSV Tahliye Debisi (API 14E / API 520)" in code
     assert "Gelismis Malzeme ve Bonnet Secimi (NACE / API 941)" in code
+    assert "Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)" in code
+
 

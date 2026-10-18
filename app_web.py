@@ -23,6 +23,7 @@ from units import (
     temperature_from_c,
     temperature_to_c,
 )
+from valve_curve import generate_characteristic_curve
 from valve_sizing import (
     SOURCE_LIBRARY,
     GasSizingInput,
@@ -275,6 +276,37 @@ def render_result(result: SizingResult) -> None:
                 al = spec["allowable_leakage"]
                 st.write(f"- Izin verilen sizinti debisi: {al.get('max_rate', 0.0):.4f} {al.get('rate_unit', '')} ({al.get('note', '')})")
             st.write(f"- Onerilen fail-safe: {spec['fail_safe_recommended']}")
+
+    char_type = st.session_state.get("flow_characteristic", "equal_percentage")
+    curve = generate_characteristic_curve(
+        rated_cv=float(result["rated_cv"]),
+        required_cv=float(result["required_cv"]),
+        characteristic=char_type,
+    )
+    with st.expander("Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)", expanded=True):
+        op = curve.operating_point
+        c_k1, c_k2, c_k3, c_k4 = st.columns(4)
+        c_k1.metric("Çalışma Açıklığı", f"%{op.opening_pct:.1f}")
+        c_k2.metric("Kontrol Bölgesi", op.controllability_zone)
+        c_k3.metric("Kazanç dCv/dh", f"{op.point_gain:.2f}")
+        c_k4.metric("Kapasite Oranı", f"%{op.relative_cv_pct:.1f}")
+
+        if op.warnings:
+            for w in op.warnings:
+                st.warning(f"⚠️ {w}")
+        else:
+            st.success("✅ Çalışma noktası ideal kontrol aralığında (%20 - %80 açıklık).")
+
+        chart_df = pd.DataFrame([
+            {"Açıklık [%]": pt.opening_pct, "Vana Cv (Eğri)": pt.cv, "Gereken Cv": op.required_cv}
+            for pt in curve.points
+        ]).set_index("Açıklık [%]")
+        st.line_chart(chart_df, use_container_width=True)
+
+        with st.expander("Ayrık Karakteristik Tablosu (51 Nokta)", expanded=False):
+            tbl_df = pd.DataFrame([p.to_dict() for p in curve.points])
+            tbl_df.columns = ["Açıklık [%]", "Cv", "Kv", "Kazanç (dCv/dh)"]
+            st.dataframe(tbl_df, hide_index=True)
 
     if result.get("warning"):
         st.warning(result["warning"])
@@ -788,7 +820,7 @@ def main() -> None:
     st.sidebar.number_input("Tasarim marji [%]", key="design_margin", min_value=0.0, max_value=100.0, step=5.0)
     st.sidebar.selectbox(
         "Akis karakteristigi",
-        ("equal_percentage", "linear"),
+        ("equal_percentage", "linear", "quick_opening"),
         key="flow_characteristic",
     )
     render_source_library()

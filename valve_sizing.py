@@ -222,7 +222,7 @@ def kv_to_cv(kv: float) -> float:
     return float(kv) * KV_TO_CV
 
 
-FLOW_CHARACTERISTICS = ("linear", "equal_percentage")
+FLOW_CHARACTERISTICS = ("linear", "equal_percentage", "quick_opening")
 
 DEFAULT_RANGEABILITY = 50.0
 
@@ -238,13 +238,17 @@ def estimate_opening(
     linear: opening = Cv_req/Cv_rated
     equal-percentage: Cv(theta) = Cv_rated * R^(theta-1), so theta is obtained
     by inverting the characteristic. Values are clamped to [0, 1].
+    quick_opening: opening = (Cv_req/Cv_rated)^2.
     """
     if rated_cv <= 0 or required_cv <= 0:
         return 0.0
     ratio = min(required_cv / rated_cv, 1.0)
-    if characteristic == "linear":
+    char = characteristic.lower()
+    if char == "linear":
         return ratio
-    if characteristic == "equal_percentage" and rangeability > 1.0:
+    if char in ("quick_opening", "quick", "qo"):
+        return ratio ** 2
+    if char in ("equal_percentage", "eqpct", "eq_pct") and rangeability > 1.0:
         opening = 1.0 + math.log(max(ratio, 1e-9)) / math.log(rangeability)
         return max(0.0, min(opening, 1.0))
     return ratio
@@ -259,8 +263,10 @@ def estimate_min_controllable_cv(
 
     equal-percentage: rated / rangeability (Cv(R) at ~0% travel).
     linear: 1% of rated Cv (typical positioner/actuator resolution limit).
+    quick_opening: 1% of rated Cv.
     """
-    if characteristic == "linear":
+    char = characteristic.lower()
+    if char in ("linear", "quick_opening", "quick", "qo"):
         return rated_cv * 0.01
     if rangeability > 1.0:
         return rated_cv / rangeability

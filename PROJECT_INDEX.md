@@ -1,6 +1,6 @@
 # Project Index: Control Valve Sizing (v3.3.0)
 
-> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 463/463 PASS (93.71% cov) | Scenarios: 52/52 PASS
+> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 479/479 PASS (93.71% cov) | Scenarios: 52/52 PASS
 
 ## 1. Architectural Overview
 
@@ -58,6 +58,7 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 | `datasheet_isa20.py` | ISA Form 20 specification sheet | `ISA20DataSheet`, `build_isa20_datasheet()` |
 | `reporting.py` | Markdown & HTML generation | `build_report()`, `build_isa20_report()`, `build_isa20_html_report()` |
 | `project_io.py` | Project JSON serialization | `dump_project_json()`, `load_project_json()` |
+| `valve_curve.py` | Flow characteristic curves & controllability | `CharacteristicPoint`, `OperatingPointAnalysis`, `CharacteristicCurve`, `generate_characteristic_curve()`, `evaluate_operating_point()` |
 | `app_desktop.py` | Tkinter desktop GUI | `ValveSizingApp`, `main()` |
 | `app_web.py` | Streamlit web application | `main()` |
 

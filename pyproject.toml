@@ -54,6 +54,7 @@ py-modules = [
     "trim_guidance",
     "two_phase",
     "units",
+    "valve_curve",
     "valve_noise",
     "valve_selection",
     "valve_sizing",

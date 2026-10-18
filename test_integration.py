@@ -348,6 +348,9 @@ def test_streamlit_advanced_sections_and_metrics():
     assert "Gövde Malzemesi" in metric_labels
     assert "Trim Malzemesi" in metric_labels
     assert "Mil Malzemesi" in metric_labels
+    assert "Çalışma Açıklığı" in metric_labels
+    assert "Kontrol Bölgesi" in metric_labels
+    assert "Kazanç dCv/dh" in metric_labels
 
     at.sidebar.radio[0].set_value("Gas")
     at.run()

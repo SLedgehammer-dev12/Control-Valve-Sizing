@@ -23,6 +23,7 @@ from units import (
     temperature_from_c,
     temperature_to_c,
 )
+from valve_curve import evaluate_operating_point, generate_characteristic_curve
 from valve_sizing import GasSizingInput, LiquidSizingInput, SteamSizingInput, size_gas_valve, size_liquid_valve, size_steam_valve
 from vendor_catalog import get_vendor_definition, get_vendor_options
 
@@ -119,6 +120,10 @@ class ValveSizingApp:
         menubar.add_cascade(label="Dosya", menu=file_menu)
 
         tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(
+            label="Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)",
+            command=self._open_characteristic_curve_dialog,
+        )
         tools_menu.add_command(label="Termal Genlesme (Boru Hatti)", command=self._open_thermal_expansion_dialog)
         tools_menu.add_command(label="Joule-Thomson ve Gaz Hidrat Analizi", command=self._open_joule_thomson_dialog)
         tools_menu.add_command(label="Coklu Calisma Durumu (Multi-Case Sizing)", command=self._open_multicase_dialog)
@@ -192,7 +197,7 @@ class ValveSizingApp:
         ttk.Combobox(
             top_card,
             textvariable=self.flow_characteristic,
-            values=("equal_percentage", "linear"),
+            values=("equal_percentage", "linear", "quick_opening"),
             state="readonly",
             width=16,
         ).grid(row=1, column=6, padx=(0, 12), pady=8, sticky="w")
@@ -854,6 +859,12 @@ class ValveSizingApp:
 
         self.last_result = result
         self.last_fluid_summary = fluid_summary
+        char_name = self.flow_characteristic.get()
+        op_analysis = evaluate_operating_point(
+            required_cv=result["required_cv"],
+            rated_cv=result["rated_cv"],
+            characteristic=char_name,
+        )
         lines = [
             f"Servis                  : {result['service']}",
             f"Gerekli Cv              : {result['required_cv']:.3f}",
@@ -863,7 +874,8 @@ class ValveSizingApp:
             f"Rated Kv                : {result['rated_kv']:.3f}",
             f"Basinc dusumu [bar]     : {result['delta_p_bar']:.3f}",
             f"Bogulma durumu          : {'Evet' if result['is_choked'] else 'Hayir'}",
-            f"Tasarim acikligi [%]    : {result['opening_percent']:.1f} (karakteristik: {self.flow_characteristic.get()})",
+            f"Tasarim acikligi [%]    : {result['opening_percent']:.1f} (karakteristik: {char_name})",
+            f"Kontrol Bolgesi         : {op_analysis.controllability_zone} (Kazanc: {op_analysis.point_gain:.2f})",
             f"Tasarim marji [%]       : {result['design_margin_pct']:.1f}",
             f"Cv orani (marjli/rated) : {result['cv_ratio']:.3f}",
         ]
@@ -941,6 +953,12 @@ class ValveSizingApp:
                 al = spec["allowable_leakage"]
                 lines.append(f"  Izin verilen sizinti  : {al.get('max_rate', 0.0):.4f} {al.get('rate_unit', '')}")
             lines.append(f"  Onerilen fail-safe    : {spec.get('fail_safe_recommended', '-')}")
+
+        if op_analysis.warnings:
+            lines.append("")
+            lines.append("Kontrol Edilebilirlik:")
+            for w in op_analysis.warnings:
+                lines.append(f"  [!] {w}")
 
         if result.get("warning"):
             lines.extend(["", f"Uyari: {result['warning']}"])
@@ -1628,6 +1646,103 @@ class ValveSizingApp:
         ttk.Button(btn_frame, text="Degerlendir", command=_calc_mat).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
         _calc_mat()
+
+    def _open_characteristic_curve_dialog(self) -> None:
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Vana Karakteristik Eğrisi ve Kontrol Analizi (IEC 60534-2-4)")
+        dlg.geometry("760x600")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=14)
+        frame.pack(fill="both", expand=True)
+
+        init_rated = 50.0
+        init_req = 25.0
+        init_char = self.flow_characteristic.get()
+        if hasattr(self, "last_result") and self.last_result:
+            init_rated = float(self.last_result.get("rated_cv", 50.0))
+            init_req = float(self.last_result.get("required_cv", 25.0))
+
+        ttk.Label(frame, text="Rated Cv (Anma Kapasitesi):").grid(row=0, column=0, sticky="w", pady=4)
+        rated_var = tk.DoubleVar(value=round(init_rated, 2))
+        ttk.Entry(frame, textvariable=rated_var, width=16).grid(row=0, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Gereken Tasarım Cv:").grid(row=1, column=0, sticky="w", pady=4)
+        req_var = tk.DoubleVar(value=round(init_req, 2))
+        ttk.Entry(frame, textvariable=req_var, width=16).grid(row=1, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Karakteristik Tipi:").grid(row=2, column=0, sticky="w", pady=4)
+        char_var = tk.StringVar(value=init_char)
+        ttk.Combobox(
+            frame,
+            textvariable=char_var,
+            values=("equal_percentage", "linear", "quick_opening"),
+            state="readonly",
+            width=18,
+        ).grid(row=2, column=1, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Rangeability (Kısılabilirlik R):").grid(row=3, column=0, sticky="w", pady=4)
+        r_var = tk.DoubleVar(value=50.0)
+        ttk.Entry(frame, textvariable=r_var, width=16).grid(row=3, column=1, sticky="w", pady=4)
+
+        res_box = tk.Text(frame, height=18, width=78, font=("Consolas", 10))
+        res_box.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
+        frame.rowconfigure(4, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc() -> None:
+            try:
+                cv_r = rated_var.get()
+                cv_req = req_var.get()
+                c_type = char_var.get()
+                r_val = r_var.get()
+                curve = generate_characteristic_curve(
+                    rated_cv=cv_r,
+                    required_cv=cv_req,
+                    characteristic=c_type,
+                    rangeability=r_val,
+                )
+                op = curve.operating_point
+                lines = [
+                    "=" * 72,
+                    "VANA AKIS KARAKTERISTIK EGRISI VE KONTROL ANALIZI (IEC 60534-2-4)",
+                    "=" * 72,
+                    f"Karakteristik Tipi   : {op.characteristic.upper()}",
+                    f"Rated Cv / Req Cv    : {op.rated_cv:.2f} / {op.required_cv:.2f} (Kapasite: %{op.relative_cv_pct:.1f})",
+                    f"Rangeability (R)     : {curve.rangeability:.1f}:1",
+                    f"Calisma Noktasi      : Aciklik %{op.opening_pct:.1f} | Kazanc dCv/dh: {op.point_gain:.2f}",
+                    f"Kontrol Bolgesi      : {op.controllability_zone}",
+                    f"Kontrol Edilebilir   : {'EVET' if op.is_controllable else 'HAYIR'}",
+                    "-" * 72,
+                ]
+                if op.warnings:
+                    lines.append("UYARILAR VE TAVSIYELER:")
+                    for w in op.warnings:
+                        lines.append(f"  [!] {w}")
+                    lines.append("-" * 72)
+                else:
+                    lines.append("  [OK] Calisma noktasi ideal kontrol bolgesindedir (%20 - %80 aciklik).")
+                    lines.append("-" * 72)
+
+                lines.append(f"{'Aciklik [%]':<14}{'Cv':<14}{'Kv':<14}{'Kazanc dCv/dh':<16}")
+                lines.append("-" * 58)
+                for pt in curve.points[::2]:
+                    marker = " <== (Calisma Noktasi)" if abs(pt.opening_pct - op.opening_pct) < 2.0 else ""
+                    lines.append(f"{pt.opening_pct:>8.1f}%     {pt.cv:>8.2f}      {pt.kv:>8.2f}      {pt.gain:>10.2f}{marker}")
+
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata olustu: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=4)
+        ttk.Button(btn_frame, text="Hesapla ve Listele", command=_calc).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc()
+
 
 
     def _get_display_value(self, var: tk.Variable, fmt: str = ".4f") -> str:
