@@ -155,7 +155,45 @@ def test_reporting_safety_piping():
         p1_bar_a=15.0,
         p_relief_bar_a=6.0,
         fluid_data={"molecular_weight": 28.0, "temperature_c": 30.0, "xt": 0.70},
+        actual_flow_m3_s=0.08,
     )
     assert "# BORU GUVENLIGI VE TAHLIYE KAPASITESI" in rep
     assert "API RP 14E" in rep
     assert "API RP 520" in rep
+    assert "Önerilen Minimum Çıkış Boru Çapı:" in rep
+
+
+def test_trim_guidance_flow_regimes_without_cavitation_index():
+    from trim_guidance import recommend_trim
+
+    recs_choked = recommend_trim("liquid", flow_regime="choked-cavitating")
+    assert any("Anti-kavitasyon trimi" in r for r in recs_choked)
+
+    recs_risk = recommend_trim("liquid", flow_regime="cavitating-risk")
+    assert any("kademeli" in r for r in recs_risk)
+
+
+def test_valve_selection_derated_mawp_and_leakage_edge_cases():
+    from valve_selection import allowable_leakage_rate, derated_mawp_bar
+
+    # Unknown material group falls back to WCB
+    mawp_unknown_mat = derated_mawp_bar("CL150", 20.0, material_group="UNKNOWN_ALLOY")
+    assert mawp_unknown_mat > 18.0
+
+    # Unlisted pressure class falls back to ambient mapping
+    mawp_unlisted_cls = derated_mawp_bar("CL4500", 20.0)
+    assert mawp_unlisted_cls > 0.0
+
+    # High temperature clamp at maximum ASME B16.34 table entry (CF8M maintains rating, WCB clamps to 0)
+    assert derated_mawp_bar("CL300", 600.0, material_group="CF8M") > 0.0
+    assert derated_mawp_bar("CL300", 600.0, material_group="WCB") == 0.0
+
+    # Leakage class III
+    leak_iii = allowable_leakage_rate(50.0, "III", port_diameter_mm=50.0, delta_p_bar=4.0)
+    assert leak_iii["class"] == "III"
+    assert "Rated Cv x %0.1" in leak_iii["note"]
+
+    # Unknown leakage class
+    leak_unk = allowable_leakage_rate(50.0, "VII", port_diameter_mm=50.0, delta_p_bar=4.0)
+    assert leak_unk["max_rate"] == 0.0
+

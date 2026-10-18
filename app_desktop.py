@@ -1107,30 +1107,47 @@ class ValveSizingApp:
         base_p1 = float(self.inputs[p1_key].get())
         base_p2 = float(self.inputs[p2_key].get())
 
-        ttk.Label(frame, text="Min Debi:").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(frame, text="Vaka", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text="Debi", font=("Segoe UI", 9, "bold")).grid(row=1, column=1, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text="P1 [bar(a)]", font=("Segoe UI", 9, "bold")).grid(row=1, column=2, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text="P2 [bar(a)]", font=("Segoe UI", 9, "bold")).grid(row=1, column=3, sticky="w", pady=2, padx=4)
+
+        ttk.Label(frame, text="Min:").grid(row=2, column=0, sticky="w", pady=2, padx=4)
         min_q_var = tk.DoubleVar(value=max(base_flow * 0.4, 0.1))
-        ttk.Entry(frame, textvariable=min_q_var, width=14).grid(row=1, column=1, sticky="w", pady=3)
+        ttk.Entry(frame, textvariable=min_q_var, width=12).grid(row=2, column=1, sticky="w", pady=2, padx=4)
+        min_p1_var = tk.DoubleVar(value=base_p1)
+        ttk.Entry(frame, textvariable=min_p1_var, width=10).grid(row=2, column=2, sticky="w", pady=2, padx=4)
+        min_p2_var = tk.DoubleVar(value=base_p2)
+        ttk.Entry(frame, textvariable=min_p2_var, width=10).grid(row=2, column=3, sticky="w", pady=2, padx=4)
 
-        ttk.Label(frame, text="Normal Debi:").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Label(frame, text="Normal:").grid(row=3, column=0, sticky="w", pady=2, padx=4)
         norm_q_var = tk.DoubleVar(value=max(base_flow, 0.1))
-        ttk.Entry(frame, textvariable=norm_q_var, width=14).grid(row=2, column=1, sticky="w", pady=3)
+        ttk.Entry(frame, textvariable=norm_q_var, width=12).grid(row=3, column=1, sticky="w", pady=2, padx=4)
+        norm_p1_var = tk.DoubleVar(value=base_p1)
+        ttk.Entry(frame, textvariable=norm_p1_var, width=10).grid(row=3, column=2, sticky="w", pady=2, padx=4)
+        norm_p2_var = tk.DoubleVar(value=base_p2)
+        ttk.Entry(frame, textvariable=norm_p2_var, width=10).grid(row=3, column=3, sticky="w", pady=2, padx=4)
 
-        ttk.Label(frame, text="Max Debi:").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Label(frame, text="Max:").grid(row=4, column=0, sticky="w", pady=2, padx=4)
         max_q_var = tk.DoubleVar(value=max(base_flow * 1.3, 0.1))
-        ttk.Entry(frame, textvariable=max_q_var, width=14).grid(row=3, column=1, sticky="w", pady=3)
+        ttk.Entry(frame, textvariable=max_q_var, width=12).grid(row=4, column=1, sticky="w", pady=2, padx=4)
+        max_p1_var = tk.DoubleVar(value=max(base_p1 * 0.95, 0.1))
+        ttk.Entry(frame, textvariable=max_p1_var, width=10).grid(row=4, column=2, sticky="w", pady=2, padx=4)
+        max_p2_var = tk.DoubleVar(value=base_p2)
+        ttk.Entry(frame, textvariable=max_p2_var, width=10).grid(row=4, column=3, sticky="w", pady=2, padx=4)
 
         res_box = tk.Text(frame, height=16, font=("Consolas", 9), wrap="none")
-        res_box.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=10)
-        frame.rowconfigure(4, weight=1)
+        res_box.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=10)
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(1, weight=1)
 
         def _calc_mc() -> None:
             try:
                 temp_c = float(self.inputs[f"{cur_service}_temp_c"].get())
                 cases = [
-                    OperatingCase("Min", min_q_var.get(), base_p1, base_p2, temp_c),
-                    OperatingCase("Normal", norm_q_var.get(), base_p1, base_p2, temp_c),
-                    OperatingCase("Max", max_q_var.get(), max(base_p1 * 0.95, 0.1), base_p2, temp_c),
+                    OperatingCase("Min", min_q_var.get(), min_p1_var.get(), min_p2_var.get(), temp_c),
+                    OperatingCase("Normal", norm_q_var.get(), norm_p1_var.get(), norm_p2_var.get(), temp_c),
+                    OperatingCase("Max", max_q_var.get(), max_p1_var.get(), max_p2_var.get(), temp_c),
                 ]
                 fluid_data: dict[str, Any] = {}
                 if cur_service == "liquid":
@@ -1141,14 +1158,38 @@ class ValveSizingApp:
                         "viscosity_pa_s": self.inputs["liquid_mu"].get(),
                     }
                 elif cur_service == "gas":
+                    try:
+                        k_val = float(self.k_calculated_display.get())
+                    except (ValueError, TypeError):
+                        k_val = 1.30
+                    try:
+                        mu_val = float(self.viscosity_calculated_display.get())
+                    except (ValueError, TypeError):
+                        mu_val = 1e-5
+                    try:
+                        z_val = float(self.z_calculated_display.get())
+                    except (ValueError, TypeError):
+                        z_val = 1.0
+                    try:
+                        mw_val = float(self.inputs["gas_mw"].get())
+                    except (ValueError, TypeError):
+                        mw_val = 28.96
                     fluid_data = {
-                        "molecular_weight": 28.96,
-                        "specific_heat_ratio": 1.40,
-                        "viscosity_pa_s": 1.8e-5,
-                        "z": 1.0,
+                        "molecular_weight": mw_val,
+                        "specific_heat_ratio": k_val,
+                        "viscosity_pa_s": mu_val,
+                        "z": z_val,
                     }
                 else:
-                    fluid_data = {"specific_heat_ratio": 1.30, "z": 1.0}
+                    try:
+                        k_val = float(self.steam_k_display.get())
+                    except (ValueError, TypeError):
+                        k_val = 1.30
+                    try:
+                        z_val = float(self.steam_z_display.get())
+                    except (ValueError, TypeError):
+                        z_val = 1.0
+                    fluid_data = {"specific_heat_ratio": k_val, "z": z_val}
 
                 vendor = get_vendor_definition(self.vendor_key.get())
                 fluid_data["fl"] = vendor.fl or 0.9
@@ -1162,6 +1203,7 @@ class ValveSizingApp:
                     valve_series=list(vendor.sizes),
                     flow_characteristic=self.flow_characteristic.get(),
                 )
+                self.last_multicase_result = mc_res
                 lines = [
                     f"Ozet: {mc_res.overall_summary}",
                     f"Turndown Orani (Qmax/Qmin): {mc_res.turndown_ratio:.1f}:1",
@@ -1182,7 +1224,7 @@ class ValveSizingApp:
                 res_box.insert("1.0", f"Hata: {exc}")
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=6)
+        btn_frame.grid(row=6, column=0, columnspan=4, pady=6)
         ttk.Button(btn_frame, text="Hesapla", command=_calc_mc).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
 
@@ -1360,13 +1402,23 @@ class ValveSizingApp:
 
         service_map = {"liquid": "Liquid", "gas": "Gas", "steam": "Steam"}
         srv = service_map.get(self.service_type.get(), "Liquid")
-        fluid_str = (
-            self.inputs.get("liquid_fluid", tk.StringVar(value="Water")).get()
-            if self.service_type.get() == "liquid"
-            else ("NaturalGas" if self.service_type.get() == "gas" else "Steam")
-        )
+        if self.service_type.get() == "liquid":
+            fluid_str = self.liquid_preset_label.get() or "Water"
+        elif self.service_type.get() == "gas":
+            gas_comp = self.inputs.get("gas_composition")
+            fluid_str = gas_comp.get() if gas_comp else "NaturalGas"
+        else:
+            fluid_str = "Steam"
 
-        md_text = build_isa20_report(self.last_result, tag="CV-101", service_desc=f"{srv} Control Valve", fluid_name=fluid_str)
+        last_mc = getattr(self, "last_multicase_result", None)
+        mc_cases = last_mc.to_isa20_process_cases() if last_mc else None
+        md_text = build_isa20_report(
+            self.last_result,
+            tag="CV-101",
+            service_desc=f"{srv} Control Valve",
+            fluid_name=fluid_str,
+            multicase_cases=mc_cases,
+        )
 
         text_box = tk.Text(frame, wrap="word", font=("Consolas", 10))
         text_box.grid(row=0, column=0, columnspan=3, sticky="nsew", pady=(0, 10))
@@ -1397,7 +1449,11 @@ class ValveSizingApp:
             if fp:
                 try:
                     html_content = build_isa20_html_report(
-                        self.last_result, tag="CV-101", service_desc=f"{srv} Control Valve", fluid_name=fluid_str
+                        self.last_result,
+                        tag="CV-101",
+                        service_desc=f"{srv} Control Valve",
+                        fluid_name=fluid_str,
+                        multicase_cases=mc_cases,
                     )
                     with open(fp, "w", encoding="utf-8") as f:
                         f.write(html_content)

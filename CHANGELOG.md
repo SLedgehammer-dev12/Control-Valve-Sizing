@@ -2,6 +2,22 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [Unreleased]
+
+### Fixed
+- Two-phase flashing: corrected Clausius-Clapeyron $dT_{sat}/dP$ denominator scaling in `two_phase.py` and eliminated dead unreachable check.
+- Fugitive emissions: refined toxic media detection in `packing_emissions.py` so utility fluids with "co" substrings ("cooling water", "condensate", "compressed air") are not falsely classified as toxic.
+- Valve bonnet selection: restricted cryogenic extended bonnet recommendation in `valve_selection.py` to sub-zero service ($T < -46\text{ }^\circ\text{C}$ or cryogenic liquefied gases).
+- Sizing data pipeline: propagated operating parameters (`flow`, `p1`, `p2`, `temperature_c`, `density`, `viscosity_cp`) from sizing functions to `extra` dictionary in `valve_sizing.py`, ensuring ISA-20 datasheets and markdown reports display actual process conditions.
+- Safety piping: handled $P_1 \le P_{relief}$ flow reversal cleanly in `safety_piping.py` and added `actual_flow_m3_s` parameter to `build_safety_piping_report`.
+- Multi-case fluid properties: replaced hardcoded Air properties for gas and steam multi-case sizing in `app_web.py` and `app_desktop.py` with real-time evaluated CoolProp thermodynamics ($MW$, $k$, $Z$, $\mu$).
+- Joule-Thomson analysis: dynamically resolved dominant gas component from current mixture in web UI and fixed temperature sign formatting in `joule_thomson.py`.
+- UI Parity & Multi-case ISA-20: added `MultiCaseAnalysis.to_isa20_process_cases()`, forwarded `multicase_cases` through `reporting.py`, and updated both web and desktop UIs to export multi-case operational envelopes into ISA Form 20 datasheets.
+- Build & Packaging: added missing v3.3.0 modules to `pyproject.toml` `py-modules` and `app_desktop.spec` `hiddenimports`.
+
+### Added
+- Dedicated unit test suites: `test_datasheet_isa20.py` and `test_packing_emissions.py` (total test suite expanded to 447 tests, 100% pass rate, 91.42% statement coverage, 14 modules at 100% coverage).
+
 ## [3.3.0] — 2026-09-10
 
 ### Added

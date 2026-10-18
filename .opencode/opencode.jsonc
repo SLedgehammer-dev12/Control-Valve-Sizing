@@ -20,5 +20,8 @@
         }
       }
     }
-  }
+  },
+  "plugin": [
+    "@dietrichgebert/ponytail"
+  ]
 }

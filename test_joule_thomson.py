@@ -46,3 +46,9 @@ def test_invalid_pressures_raise():
 
     with pytest.raises(ValueError, match="sıfırdan büyük"):
         calc_joule_thomson_drop("Methane", 10.0, 0.0, 20.0)
+
+
+def test_unknown_fluid_fallback_calculation():
+    res = calc_joule_thomson_drop("UnknownCustomGas", 30.0, 10.0, 25.0)
+    assert res.t2_c < res.t1_c
+    assert res.delta_t_c == pytest.approx(4.0, abs=0.5)

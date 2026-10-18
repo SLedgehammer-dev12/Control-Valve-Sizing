@@ -222,7 +222,8 @@ def recommend_bonnet_type(temperature_c: float, service: str = "liquid", fluid_n
     """Recommend control valve bonnet design based on operating temperature and media."""
     t = float(temperature_c)
     fluid_lower = fluid_name.lower().strip()
-    if t < -46.0 or any(k in fluid_lower for k in ("lng", "methane", "liquid nitrogen", "kriyojenik", "cryogenic", "oxygen")):
+    is_cryo_fluid = any(k in fluid_lower for k in ("lng", "liquid nitrogen", "liquid oxygen", "kriyojenik", "cryogenic"))
+    if t < -46.0 or (t < 0.0 and is_cryo_fluid):
         return "Kriyojenik Uzatılmış Boyun (Cryogenic Extended Bonnet, SS316)"
     if t > 450.0:
         return "Yüksek Sıcaklık Uzatılmış Boyun (High-Temp Extension Bonnet, WC6/316H)"

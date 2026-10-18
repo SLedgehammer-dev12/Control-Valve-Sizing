@@ -80,6 +80,25 @@ class MultiCaseAnalysis:
     overall_summary: str
     warnings: list[str]
 
+    def to_isa20_process_cases(self, candidate: MultiCaseCandidate | None = None) -> list[dict[str, Any]]:
+        """Convert operating case results into ISA Form 20 process condition rows."""
+        target = candidate or self.recommended or (self.candidates[0] if self.candidates else None)
+        flow_unit = "m3/h" if self.service == "liquid" else ("Nm3/h" if self.service == "gas" else "kg/h")
+        rows: list[dict[str, Any]] = []
+        for case in self.cases:
+            detail = target.case_details.get(case.name) if target else None
+            rows.append({
+                "name": case.name,
+                "flow": case.flow,
+                "flow_unit": flow_unit,
+                "p1_bar_a": case.p1_bar_a,
+                "p2_bar_a": case.p2_bar_a,
+                "temperature_c": case.temperature_c,
+                "required_cv": detail.required_cv if detail else 0.0,
+                "opening_percent": detail.opening_pct if detail else 0.0,
+            })
+        return rows
+
 
 def _build_case_input(
     service: str,

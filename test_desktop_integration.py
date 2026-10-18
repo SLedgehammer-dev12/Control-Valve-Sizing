@@ -271,6 +271,8 @@ def test_pyproject_packaging_metadata():
     assert "valve-sizing-desktop" in cfg["project"]["scripts"]
     assert "valve_sizing" in cfg["tool"]["setuptools"]["py-modules"]
     assert "app_web" in cfg["tool"]["setuptools"]["py-modules"]
+    for m in ["datasheet_isa20", "joule_thomson", "multi_case", "packing_emissions", "safety_piping"]:
+        assert m in cfg["tool"]["setuptools"]["py-modules"]
 
 
 def test_desktop_gas_properties_raise_on_error():

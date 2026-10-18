@@ -6,6 +6,7 @@ API 641, TA-Luft (VDI 2440), and NACE MR0175 / ISO 15156.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -34,9 +35,11 @@ def recommend_packing_system(
     """Recommend control valve packing system based on temperature, media toxicity, and fugitive emission standards."""
     fluid_lower = fluid_name.lower().strip()
     is_sour = is_sour_gas or any(k in fluid_lower for k in ("h2s", "sour", "acid", "kükürt", "kukurt"))
-    is_toxic = is_toxic_or_lethal or any(
-        k in fluid_lower for k in ("chlorine", "klor", "benzene", "benzen", "phosgene", "fosgen", "ammonia", "amonyak", "co", "karbonmonoksit")
+    toxic_keywords = (
+        "chlorine", "klor", "benzene", "benzen", "phosgene", "fosgen",
+        "ammonia", "amonyak", "carbon monoxide", "karbonmonoksit", "karbon monoksit",
     )
+    is_toxic = is_toxic_or_lethal or any(k in fluid_lower for k in toxic_keywords) or bool(re.search(r"\bco\b", fluid_lower))
 
     recs: list[str] = []
 

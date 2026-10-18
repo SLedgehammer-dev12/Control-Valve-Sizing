@@ -196,12 +196,9 @@ def flash_fraction(
     t_k = inlet_temperature_c + 273.15
     r_kj_kgk = max(gas_constant_kj_kgk, 0.01)
     p_avg_bar = max((inlet_pressure_bar + outlet_pressure_bar) / 2.0, 0.01)
-    dtdp = (r_kj_kgk * t_k * t_k) / (p_avg_bar * 1e2 * h_vap_j_kg * 1e-3)
+    dtdp = (r_kj_kgk * t_k * t_k) / (p_avg_bar * h_vap_j_kg * 1e-3)
     delta_p_bar = inlet_pressure_bar - outlet_pressure_bar
     delta_t_sat = dtdp * delta_p_bar
-    t_sat_out = inlet_temperature_c - delta_t_sat
-    if t_sat_out >= inlet_temperature_c:
-        return 0.0
     x = liquid_cp_j_kgk * delta_t_sat / h_vap_j_kg
     return max(0.0, min(x, 1.0))
 

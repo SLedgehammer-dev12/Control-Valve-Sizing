@@ -105,3 +105,32 @@ def test_alloy_material_recommendations():
 
     seawater = recommend_alloy_material("liquid", "Seawater", 25.0)
     assert "Duplex 2205" in seawater.body_material or "Monel" in seawater.body_material
+
+
+def test_api520_wide_open_relief_p1_le_prelief():
+    res = calc_wide_open_relief_capacity(
+        service="gas",
+        rated_cv=50.0,
+        inlet_pressure_bar_a=5.0,
+        relief_pressure_bar_a=6.0,
+    )
+    assert res.wide_open_flow_rate == 0.0
+    assert "Akış gerçekleşmez" in res.safety_notes[0]
+
+
+def test_bonnet_ambient_gas_not_cryogenic():
+    methane_ambient = recommend_bonnet_type(25.0, service="gas", fluid_name="Methane")
+    assert "Standart" in methane_ambient
+    assert "Kriyojenik" not in methane_ambient
+
+
+def test_api14e_large_pipe_dn():
+    large = check_erosional_velocity(
+        actual_velocity_m_s=8.0,
+        density_kg_m3=1000.0,
+        actual_flow_m3_s=3.0,
+    )
+    assert large.is_velocity_exceeded is True
+    assert large.min_recommended_pipe_dn_mm > 600
+
+

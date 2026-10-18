@@ -72,3 +72,53 @@ def test_invalid_cases_raise():
     with pytest.raises(ValueError, match="gecerli pozitif debi"):
         cases = [OperatingCase(name="Zero", flow=0.0, p1_bar_a=5.0, p2_bar_a=2.0, temperature_c=20.0)]
         size_multicase("liquid", cases, {})
+
+    with pytest.raises(ValueError, match="Desteklenmeyen servis tipi"):
+        valid_cases = [OperatingCase(name="Test", flow=10.0, p1_bar_a=5.0, p2_bar_a=2.0, temperature_c=20.0)]
+        size_multicase("unknown_service", valid_cases, {})
+
+
+def test_turndown_exceeds_rangeability_warning():
+    cases = [
+        OperatingCase(name="Min", flow=1.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+        OperatingCase(name="Normal", flow=50.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+        OperatingCase(name="Max", flow=120.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+    ]
+    fluid_data = {"density_kg_m3": 1000.0, "fl": 0.9}
+    res = size_multicase("liquid", cases, fluid_data, rangeability=50.0)
+    assert res.turndown_ratio == 120.0
+    assert any("Turndown orani" in w for w in res.warnings)
+
+
+def test_acceptable_non_perfect_candidates():
+    from valve_sizing import ValveSize
+
+    custom_series = [ValveSize(dn_mm=50, inch='2"', cv_rated=50.0)]
+    cases = [
+        OperatingCase(name="Min", flow=3.0, p1_bar_a=5.0, p2_bar_a=4.0, temperature_c=20.0),
+        OperatingCase(name="Normal", flow=15.0, p1_bar_a=5.0, p2_bar_a=4.0, temperature_c=20.0),
+        OperatingCase(name="Max", flow=28.0, p1_bar_a=5.0, p2_bar_a=4.0, temperature_c=20.0),
+    ]
+    fluid_data = {"density_kg_m3": 1000.0, "fl": 0.9}
+    res = size_multicase("liquid", cases, fluid_data, valve_series=custom_series)
+    assert res.recommended is not None
+    assert res.recommended.status_label == "Kabul Edilebilir"
+
+
+def test_to_isa20_process_cases():
+    cases = [
+        OperatingCase(name="Min", flow=10.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+        OperatingCase(name="Normal", flow=30.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+        OperatingCase(name="Max", flow=50.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+    ]
+    fluid_data = {"density_kg_m3": 1000.0, "fl": 0.9}
+    res = size_multicase("liquid", cases, fluid_data)
+    rows = res.to_isa20_process_cases()
+    assert len(rows) == 3
+    assert rows[0]["name"] == "Min"
+    assert rows[0]["flow"] == 10.0
+    assert rows[0]["flow_unit"] == "m3/h"
+    assert rows[1]["name"] == "Normal"
+    assert rows[2]["name"] == "Max"
+
+

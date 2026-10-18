@@ -220,6 +220,8 @@ def build_isa20_report(
     pid_no: str = "",
     fluid_name: str = "",
     body_material: str = "WCB",
+    multicase_cases: list[dict[str, Any]] | None = None,
+    bonnet_type: str = "Standard",
 ) -> str:
     """Generate an ISA-20 datasheet report in Markdown format."""
     from datasheet_isa20 import build_isa20_datasheet, generate_isa20_markdown
@@ -241,6 +243,8 @@ def build_isa20_report(
         sizing_result=result,
         body_material=body_material,
         packing_guidance=packing,
+        multicase_cases=multicase_cases,
+        bonnet_type=bonnet_type,
     )
     return generate_isa20_markdown(sheet)
 
@@ -253,6 +257,8 @@ def build_isa20_html_report(
     pid_no: str = "",
     fluid_name: str = "",
     body_material: str = "WCB",
+    multicase_cases: list[dict[str, Any]] | None = None,
+    bonnet_type: str = "Standard",
 ) -> str:
     """Generate an ISA-20 datasheet report in HTML/Excel format."""
     from datasheet_isa20 import build_isa20_datasheet, generate_isa20_html
@@ -274,6 +280,8 @@ def build_isa20_html_report(
         sizing_result=result,
         body_material=body_material,
         packing_guidance=packing,
+        multicase_cases=multicase_cases,
+        bonnet_type=bonnet_type,
     )
     return generate_isa20_html(sheet)
 
@@ -286,11 +294,12 @@ def build_safety_piping_report(
     p1_bar_a: float,
     p_relief_bar_a: float,
     fluid_data: dict[str, float] | None = None,
+    actual_flow_m3_s: float | None = None,
 ) -> str:
     """Generate an API 14E erosional velocity and API 520 wide-open relief report in Markdown."""
     from safety_piping import calc_wide_open_relief_capacity, check_erosional_velocity
 
-    eros = check_erosional_velocity(velocity_m_s, density_kg_m3)
+    eros = check_erosional_velocity(velocity_m_s, density_kg_m3, actual_flow_m3_s=actual_flow_m3_s)
     relief = calc_wide_open_relief_capacity(service, rated_cv, p1_bar_a, p_relief_bar_a, fluid_data)
 
     lines = [

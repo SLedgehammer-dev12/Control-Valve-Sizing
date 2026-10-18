@@ -322,3 +322,16 @@ def test_build_multicase_report():
     assert "Turndown" in rep
     assert "DN" in rep
 
+
+def test_project_io_invalid_schema_version():
+    import pytest
+
+    from project_io import migrate_project_payload
+
+    with pytest.raises(ValueError, match="gecersiz bir schema_version"):
+        migrate_project_payload({"schema_version": 0})
+
+    with pytest.raises(ValueError, match="gecersiz bir schema_version"):
+        migrate_project_payload({"schema_version": "v1"})
+
+

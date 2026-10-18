@@ -41,6 +41,7 @@ class TestCavitationIndex:
 
         assert xfz_cavitation_factor(10.0, 8.0, 10.0) == 0.0
         assert xfz_cavitation_factor(10.0, 8.0, 12.0) == 0.0
+        assert xfz_cavitation_factor(10.0, 8.0, 2.0) == 0.25
 
     def test_severity_classification(self):
         assert cavitation_severity(1.5) == "Kavitasyon yok"
@@ -89,7 +90,7 @@ class TestFlashFraction:
 
     def test_flash_positive(self):
         x = flash_fraction(10.0, 2.0, 180.0, 4200.0, 2.0e6)
-        assert 0.0 <= x <= 1.0
+        assert 0.10 <= x <= 0.15
 
     def test_non_positive_latent_heat(self):
         assert flash_fraction(10.0, 2.0, 180.0, 4200.0, 0.0) == 0.0

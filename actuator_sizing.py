@@ -177,7 +177,8 @@ def total_required_thrust(
     unbalance = required_thrust_unbalance(port_diameter_mm, inlet_pressure_bar, outlet_pressure_bar, seat_diameter_mm)
     packing = required_thrust_packing(stem_diameter_mm, packing_friction_n_m)
     shutoff = required_thrust_shutoff(port_diameter_mm, shutoff_pressure_bar, seat_diameter_mm) if shutoff_pressure_bar else 0.0
-    total = unbalance + packing + shutoff
+    pressure_thrust = max(unbalance, shutoff)
+    total = pressure_thrust + packing
     return {"unbalance_n": unbalance, "shutoff_n": shutoff, "packing_n": packing, "total_n": total}
 
 

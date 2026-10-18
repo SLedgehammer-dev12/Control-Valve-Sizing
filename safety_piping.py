@@ -110,9 +110,21 @@ def calc_wide_open_relief_capacity(
     p1 = max(float(inlet_pressure_bar_a), 0.01)
     p_rel = max(float(relief_pressure_bar_a), 0.0)
     data = fluid_data or {}
-
-    dp = max(p1 - p_rel, 0.001)
     srv = service.lower().strip()
+    if p1 <= p_rel:
+        return ReliefCapacityAnalysis(
+            service=service,
+            rated_cv=cv,
+            inlet_pressure_bar_a=p1,
+            relief_pressure_bar_a=p_rel,
+            differential_pressure_bar=0.0,
+            wide_open_flow_rate=0.0,
+            flow_unit="m\u00b3/h" if srv == "liquid" else ("Nm\u00b3/h" if srv == "gas" else "kg/h"),
+            is_choked=False,
+            safety_notes=["Giriş basıncı tahliye basıncından küçük veya eşit (P1 <= Prelief). Akış gerçekleşmez."],
+        )
+
+    dp = p1 - p_rel
     is_choked = False
     notes: list[str] = []
 

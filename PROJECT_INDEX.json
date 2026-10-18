@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "project_name": "control-valve-sizing",
+  "version": "3.3.0",
+  "indexed_at": "2026-10-18T03:15:00+03:00",
+  "staleness_threshold_days": 7,
+  "freshness_score": 100,
+  "metrics": {
+    "test_count": 447,
+    "test_coverage_percent": 91.42,
+    "industrial_scenarios_count": 52,
+    "industrial_scenarios_pass_rate": 100.0,
+    "iec_benchmarks_count": 12,
+    "iec_benchmarks_pass_rate": 100.0,
+    "circular_dependencies_count": 0
+  },
+  "entry_points": [
+    {
+      "name": "desktop_gui",
+      "file": "app_desktop.py",
+      "symbol": "main",
+      "cli_script": "valve-sizing-desktop",
+      "framework": "Tkinter"
+    },
+    {
+      "name": "web_gui",
+      "file": "app_web.py",
+      "symbol": "main",
+      "cli_script": "valve-sizing-web",
+      "framework": "Streamlit"
+    },
+    {
+      "name": "industrial_verification_suite",
+      "file": "verify_50_scenarios.py",
+      "symbol": "main",
+      "description": "52 industrial scenario evaluation across 5 engineering sectors"
+    },
+    {
+      "name": "iec_verification_suite",
+      "file": "verify_scenarios.py",
+      "symbol": "main",
+      "description": "12 standard IEC benchmark scenarios verification runner"
+    }
+  ],
+  "module_coupling": {
+    "valve_sizing": { "fan_in": 12, "fan_out": 7, "instability": 0.37 },
+    "vendor_catalog": { "fan_in": 8, "fan_out": 1, "instability": 0.11 },
+    "fluid_properties": { "fan_in": 8, "fan_out": 0, "instability": 0.00 },
+    "valve_selection": { "fan_in": 7, "fan_out": 0, "instability": 0.00 },
+    "reporting": { "fan_in": 6, "fan_out": 4, "instability": 0.40 },
+    "safety_piping": { "fan_in": 6, "fan_out": 0, "instability": 0.00 },
+    "trim_guidance": { "fan_in": 6, "fan_out": 0, "instability": 0.00 },
+    "valve_noise": { "fan_in": 6, "fan_out": 0, "instability": 0.00 },
+    "units": { "fan_in": 5, "fan_out": 0, "instability": 0.00 },
+    "project_io": { "fan_in": 5, "fan_out": 0, "instability": 0.00 },
+    "joule_thomson": { "fan_in": 5, "fan_out": 0, "instability": 0.00 },
+    "packing_emissions": { "fan_in": 5, "fan_out": 0, "instability": 0.00 },
+    "config": { "fan_in": 6, "fan_out": 0, "instability": 0.00 },
+    "multi_case": { "fan_in": 4, "fan_out": 1, "instability": 0.20 },
+    "datasheet_isa20": { "fan_in": 3, "fan_out": 4, "instability": 0.57 },
+    "thermal_expansion": { "fan_in": 3, "fan_out": 0, "instability": 0.00 },
+    "two_phase": { "fan_in": 2, "fan_out": 0, "instability": 0.00 },
+    "actuator_sizing": { "fan_in": 2, "fan_out": 0, "instability": 0.00 },
+    "app_desktop": { "fan_in": 1, "fan_out": 14, "instability": 0.93 },
+    "app_web": { "fan_in": 0, "fan_out": 15, "instability": 1.00 }
+  }
+}

@@ -42,9 +42,14 @@ py-modules = [
     "app_desktop",
     "app_web",
     "config",
+    "datasheet_isa20",
     "fluid_properties",
+    "joule_thomson",
+    "multi_case",
+    "packing_emissions",
     "project_io",
     "reporting",
+    "safety_piping",
     "thermal_expansion",
     "trim_guidance",
     "two_phase",
@@ -58,6 +63,7 @@ py-modules = [
 [tool.ruff]
 line-length = 150
 target-version = "py312"
+exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "ARG"]
@@ -72,7 +78,7 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 disallow_untyped_defs = false
 check_untyped_defs = false
-exclude = []
+exclude = ["vendor"]
 
 [tool.coverage.run]
 source = ["."]

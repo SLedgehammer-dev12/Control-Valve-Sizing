@@ -313,8 +313,13 @@ def render_report_tools() -> None:
             if res["service"] == "liquid"
             else ("Doğal Gaz" if res["service"] == "gas" else "Buhar")
         )
-        isa_md = build_isa20_report(res, tag="CV-101", fluid_name=fluid)
-        isa_html = build_isa20_html_report(res, tag="CV-101", fluid_name=fluid)
+        mc_cases = (
+            st.session_state.last_multicase.to_isa20_process_cases()
+            if getattr(st.session_state, "last_multicase", None)
+            else None
+        )
+        isa_md = build_isa20_report(res, tag="CV-101", fluid_name=fluid, multicase_cases=mc_cases)
+        isa_html = build_isa20_html_report(res, tag="CV-101", fluid_name=fluid, multicase_cases=mc_cases)
         st.sidebar.download_button(
             "ISA-20 Datasheet (HTML / Excel)",
             isa_html,
@@ -547,6 +552,7 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
     else:
         try:
             summary = evaluate_gas_mixture(st.session_state.gas_rows, basis, inlet_pressure, temperature_c)
+            st.session_state.gas_summary = summary
             flow_nm3h = gas_flow_to_nm3h(
                 flow_value,
                 flow_unit,
@@ -598,7 +604,13 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
                 try:
                     from joule_thomson import calc_joule_thomson_drop
 
-                    jt_res = calc_joule_thomson_drop("Methane", inlet_pressure, outlet_pressure, temperature_c)
+                    dominant_fluid = "Methane"
+                    if st.session_state.gas_rows:
+                        dominant_fluid = max(
+                            st.session_state.gas_rows,
+                            key=lambda r: float(r.get("fraction_pct", 0.0) or 0.0),
+                        ).get("component", "Methane")
+                    jt_res = calc_joule_thomson_drop(dominant_fluid, inlet_pressure, outlet_pressure, temperature_c)
                     jt_c1, jt_c2, jt_c3, jt_c4 = st.columns(4)
                     jt_c1.metric("Cikis T2 (JT)", f"{jt_res.t2_c:.1f} \u00b0C", delta=f"-{jt_res.delta_t_c:.1f} \u00b0C")
                     jt_c2.metric("JT Katsayisi", f"{jt_res.mu_jt_c_per_bar:.3f} \u00b0C/bar")
@@ -662,6 +674,8 @@ def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
         props = get_pure_fluid_state("Water", inlet_pressure, temperature_c)
         gamma = props["specific_heat_ratio"]
         z_value = props["z"]
+        st.session_state.steam_k = gamma
+        st.session_state.steam_z = z_value
         st.caption(f"Water/steam referansi ile hesaplandi: k={gamma:.5f}, Z={z_value:.5f}")
     except Exception as exc:
         st.warning(f"Steam referans ozellikleri okunamadi: {exc}")
@@ -868,14 +882,25 @@ def main() -> None:
                     "viscosity_pa_s": st.session_state.liquid_mu,
                 }
             elif cur_serv == "gas":
-                mc_fluid_data = {
-                    "molecular_weight": 28.96,
-                    "specific_heat_ratio": 1.40,
-                    "viscosity_pa_s": 1.8e-5,
-                    "z": 1.0,
-                }
+                gas_s = getattr(st.session_state, "gas_summary", None)
+                if gas_s:
+                    mc_fluid_data = {
+                        "molecular_weight": gas_s.average_molecular_weight,
+                        "specific_heat_ratio": gas_s.specific_heat_ratio or 1.30,
+                        "viscosity_pa_s": gas_s.viscosity_pa_s or 1.8e-5,
+                        "z": gas_s.z or 1.0,
+                    }
+                else:
+                    mc_fluid_data = {
+                        "molecular_weight": 28.96,
+                        "specific_heat_ratio": 1.40,
+                        "viscosity_pa_s": 1.8e-5,
+                        "z": 1.0,
+                    }
             else:
-                mc_fluid_data = {"specific_heat_ratio": 1.30, "z": 1.0}
+                steam_k = getattr(st.session_state, "steam_k", 1.30)
+                steam_z = getattr(st.session_state, "steam_z", 1.0)
+                mc_fluid_data = {"specific_heat_ratio": steam_k, "z": steam_z}
 
             vendor = get_vendor_definition(vendor_key)
             mc_fluid_data["fl"] = vendor.fl or 0.9
@@ -889,6 +914,7 @@ def main() -> None:
                 valve_series=list(vendor.sizes),
                 flow_characteristic=st.session_state.flow_characteristic,
             )
+            st.session_state.last_multicase = mc_res
             st.success(mc_res.overall_summary)
             st.metric("Turndown Orani (Qmax / Qmin)", f"{mc_res.turndown_ratio:.1f}:1")
             cand_rows = []
@@ -911,7 +937,7 @@ def main() -> None:
 
         pack_service = st.session_state.service.lower()
         pack_fluid = (
-            st.session_state.get("liquid_fluid", "Su")
+            st.session_state.get("liquid_preset_label", "Su")
             if pack_service == "liquid"
             else (st.session_state.get("gas_preset", "Doğal Gaz") if pack_service == "gas" else "Buhar")
         )

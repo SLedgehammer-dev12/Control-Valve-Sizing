@@ -142,7 +142,7 @@ def calc_joule_thomson_drop(
 
     summary_parts = [
         f"Giri\u015f: {t1_c:.1f} \u00b0C, \u00c7\u0131k\u0131\u015f: {t2_c:.1f} \u00b0C "
-        f"(\u0394T_JT: -{delta_t_c:.1f} \u00b0C, \u03bc_JT: {mu_jt:.3f} \u00b0C/bar)."
+        f"(\u0394T_JT: {-delta_t_c:+.1f} \u00b0C, \u03bc_JT: {mu_jt:.3f} \u00b0C/bar)."
     ]
     if hydrate_risk or freezing_risk:
         summary_parts.append(f"Ön ısıtıcı tavsiyesi: Giriş sıcaklığı en az {t_preheat_min:.1f} °C olmalıdır.")
