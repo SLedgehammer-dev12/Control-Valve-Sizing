@@ -68,8 +68,8 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 - **Web UI**: `streamlit run app_web.py` or entry point `valve-sizing-web`
 - **Industrial Benchmarks (52 Scenarios)**: `python verify_50_scenarios.py`
 - **IEC Standard Benchmarks (12 Scenarios)**: `python verify_scenarios.py`
-- **Automated Test Suite**: `python -m pytest -q` (463 tests)
-- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 93.71%)
+- **Automated Test Suite**: `python -m pytest -q` (490 tests)
+- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 94.29%)
 - **Code Linter**: `ruff check .` (target line length: 150)
 
 ## 4. Key Architectural Patterns

@@ -325,3 +325,11 @@ def test_desktop_code_contains_new_tools():
     assert "Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)" in code
 
 
+def test_desktop_cavitation_dialog_multistage_trim():
+    code = APP_FILE.read_text(encoding="utf-8")
+    assert "design_multistage_cavitation_trim" in code
+    assert "KADEME BASINC VE AKIS PROFILI TABLOSU" in code
+    assert "Kademe Secimi" in code
+
+
+

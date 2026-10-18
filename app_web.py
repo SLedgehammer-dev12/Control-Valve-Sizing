@@ -1019,6 +1019,75 @@ def main() -> None:
             for w in mc_res.warnings:
                 st.warning(w)
 
+    with st.expander("Kavitasyon ve Çok Kademeli Anti-Kavitasyon Trim Tasarımı (ISA-RP75.23 / IEC 60534)", expanded=False):
+        st.markdown(
+            "Yüksek basınç düşüşlü sıvı servislerinde kavitasyon hasarını ve gürültüyü önlemek için "
+            "basınç düşüşü $N$ kademeli direnç elemanlarına (Multi-Stage Letdown) paylaştırılır."
+        )
+        from trim_guidance import design_multistage_cavitation_trim
+
+        cur_s = st.session_state.service.lower()
+        if cur_s == "liquid":
+            def_p1 = float(st.session_state.liquid_p1)
+            def_p2 = float(st.session_state.liquid_p2)
+            def_pv = float(st.session_state.liquid_pv)
+        else:
+            def_p1 = 50.0
+            def_p2 = 10.0
+            def_pv = 0.5
+
+        c_col1, c_col2, c_col3 = st.columns(3)
+        c_p1 = c_col1.number_input("Giriş Basıncı P1 [bar(a)]", value=def_p1, key="cav_p1_in")
+        c_p2 = c_col2.number_input("Çıkış Basıncı P2 [bar(a)]", value=def_p2, key="cav_p2_in")
+        c_pv = c_col3.number_input("Buhar Basıncı Pv [bar(a)]", value=def_pv, key="cav_pv_in")
+
+        c_sub1, c_sub2 = st.columns(2)
+        init_cv = float(st.session_state.last_result["required_cv"]) if st.session_state.last_result else 25.0
+        c_cv = c_sub1.number_input("Tasarım Cv", value=init_cv, key="cav_cv_in")
+        stage_opts = ["Otomatik (Minimum Güvenli Kademe)", "1 Kademe", "2 Kademe", "3 Kademe", "4 Kademe", "6 Kademe"]
+        c_mode = c_sub2.selectbox("Kademe Seçimi", stage_opts, key="cav_stage_mode")
+
+        req_stg = None
+        if c_mode != "Otomatik (Minimum Güvenli Kademe)":
+            req_stg = int(c_mode.split()[0])
+
+        cav_design = design_multistage_cavitation_trim(
+            p1_bar_a=c_p1,
+            p2_bar_a=c_p2,
+            pv_bar_a=c_pv,
+            required_cv=c_cv,
+            requested_stages=req_stg,
+        )
+
+        cm1, cm2, cm3, cm4 = st.columns(4)
+        cm1.metric("Kavitasyon İndeksi (σ)", f"{cav_design.single_stage_sigma:.2f}")
+        cm2.metric("Kademe Sayısı", f"{cav_design.stages_count} Kademe")
+        cm3.metric("Kavitasyon Durumu", "Önlendi (Güvenli)" if cav_design.is_cavitation_eliminated else "Kavitasyon Riski!")
+        cm4.metric("Gürültü Azaltma", f"-{cav_design.noise_reduction_dba:.1f} dB(A)")
+
+        st.info(f"**Önerilen Trim Yapısı:** {cav_design.trim_description}")
+
+        if cav_design.warnings:
+            for w in cav_design.warnings:
+                st.warning(f"⚠️ {w}")
+        else:
+            st.success("✅ Tüm kademelerde vena contracta basıncı buharlaşma sınırının üzerindedir; kavitasyon tamamen bertaraf edilmiştir.")
+
+        st_rows = [
+            {
+                "Kademe": f"Kademe {s.stage_number}",
+                "Giriş P [bar]": f"{s.inlet_pressure_bar_a:.2f}",
+                "Çıkış P [bar]": f"{s.outlet_pressure_bar_a:.2f}",
+                "ΔP [bar]": f"{s.delta_p_bar:.2f}",
+                "P_vc (Vena Contracta) [bar]": f"{s.vena_contracta_pressure_bar_a:.2f}",
+                "Buhar Marjı [bar]": f"{s.margin_to_vapor_bar:.2f}",
+                "Kavitasyon?": "EVET" if s.is_cavitating else "HAYIR",
+                "Kademe Cv": f"{s.stage_cv:.2f}",
+            }
+            for s in cav_design.stages
+        ]
+        st.dataframe(pd.DataFrame(st_rows), hide_index=True)
+
     with st.expander("Salmastra ve Kaçak Emisyon Analizi (ISO 15848-1 / API 641)", expanded=False):
         from packing_emissions import recommend_packing_system
 

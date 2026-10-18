@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,74 @@ class CavitationAnalysis:
     max_allowable_dp_per_stage_bar: float
     warnings: list[str]
     engineering_notes: list[str]
+
+
+@dataclass(frozen=True)
+class StageDetail:
+    """Individual pressure drop stage in a multi-stage anti-cavitation trim."""
+
+    stage_number: int
+    inlet_pressure_bar_a: float
+    outlet_pressure_bar_a: float
+    delta_p_bar: float
+    vena_contracta_pressure_bar_a: float
+    vapor_pressure_bar_a: float
+    margin_to_vapor_bar: float
+    is_cavitating: bool
+    stage_cv: float
+    fl: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage_number": self.stage_number,
+            "inlet_pressure_bar_a": self.inlet_pressure_bar_a,
+            "outlet_pressure_bar_a": self.outlet_pressure_bar_a,
+            "delta_p_bar": self.delta_p_bar,
+            "vena_contracta_pressure_bar_a": self.vena_contracta_pressure_bar_a,
+            "vapor_pressure_bar_a": self.vapor_pressure_bar_a,
+            "margin_to_vapor_bar": self.margin_to_vapor_bar,
+            "is_cavitating": self.is_cavitating,
+            "stage_cv": self.stage_cv,
+            "fl": self.fl,
+        }
+
+
+@dataclass(frozen=True)
+class MultiStageTrimDesign:
+    """Multi-stage anti-cavitation trim design and pressure profile analysis."""
+
+    p1_bar_a: float
+    p2_bar_a: float
+    total_delta_p_bar: float
+    pv_bar_a: float
+    required_cv: float
+    stages_count: int
+    is_cavitation_eliminated: bool
+    noise_reduction_dba: float
+    min_recommended_stages: int
+    single_stage_sigma: float
+    stages: tuple[StageDetail, ...]
+    trim_description: str
+    warnings: tuple[str, ...]
+    engineering_notes: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "p1_bar_a": self.p1_bar_a,
+            "p2_bar_a": self.p2_bar_a,
+            "total_delta_p_bar": self.total_delta_p_bar,
+            "pv_bar_a": self.pv_bar_a,
+            "required_cv": self.required_cv,
+            "stages_count": self.stages_count,
+            "is_cavitation_eliminated": self.is_cavitation_eliminated,
+            "noise_reduction_dba": self.noise_reduction_dba,
+            "min_recommended_stages": self.min_recommended_stages,
+            "single_stage_sigma": self.single_stage_sigma,
+            "stages": [s.to_dict() for s in self.stages],
+            "trim_description": self.trim_description,
+            "warnings": list(self.warnings),
+            "engineering_notes": list(self.engineering_notes),
+        }
 
 
 def evaluate_cavitation_severity(
@@ -145,3 +214,117 @@ def recommend_trim(
     if not recs:
         recs.append("Standart trim yeterli gorunuyor; ozel trim gereksinimi tespit edilmedi.")
     return recs
+
+
+def design_multistage_cavitation_trim(
+    p1_bar_a: float,
+    p2_bar_a: float,
+    pv_bar_a: float,
+    required_cv: float = 25.0,
+    fl_per_stage: float = 0.90,
+    requested_stages: int | None = None,
+) -> MultiStageTrimDesign:
+    """Design multi-stage anti-cavitation letdown trim and calculate stage pressure profiles."""
+    p1 = max(float(p1_bar_a), 0.01)
+    p2 = max(float(p2_bar_a), 0.001)
+    pv = max(float(pv_bar_a), 0.0)
+    dp_total = max(p1 - p2, 0.001)
+    cv_req = max(float(required_cv), 0.01)
+    fl = max(0.50, min(0.99, float(fl_per_stage)))
+
+    sigma_single = (p1 - pv) / dp_total if dp_total > 0 else 999.0
+    warnings: list[str] = []
+    notes: list[str] = []
+
+    if p2 <= pv:
+        warnings.append(
+            f"Çıkış basıncı P2 ({p2:.3f} bar) buhar basıncının ({pv:.3f} bar) altındadır. "
+            "Sistem flashing (buharlaşma) rejimindedir; kademeli trim flashing oluşumunu önleyemez. "
+            "Angle body ve Stellite sert kaplama gereklidir."
+        )
+
+    fl_sq = fl ** 2
+    if p2 > pv and dp_total > 0:
+        req_n = math.ceil((dp_total * (1.0 - fl_sq)) / (fl_sq * (p2 - pv)))
+        min_stages = max(1, min(6, req_n))
+    else:
+        min_stages = 1
+
+    if requested_stages is not None and requested_stages >= 1:
+        n_stages = max(1, min(6, int(requested_stages)))
+    elif sigma_single > 1.5:
+        n_stages = 1
+    elif sigma_single > 1.1:
+        n_stages = max(2, min_stages)
+    else:
+        n_stages = max(3, min(6, max(min_stages, math.ceil(dp_total / 25.0))))
+
+    dp_stage = dp_total / n_stages
+    stage_cv = cv_req * math.sqrt(n_stages)
+
+    stage_list: list[StageDetail] = []
+    cav_eliminated = p2 > pv
+
+    current_pin = p1
+    for i in range(1, n_stages + 1):
+        p_out = current_pin - dp_stage
+        p_vc = current_pin - (dp_stage / fl_sq)
+        margin = p_vc - pv
+        is_cav = margin <= 0.0
+        if is_cav:
+            cav_eliminated = False
+
+        stage_list.append(
+            StageDetail(
+                stage_number=i,
+                inlet_pressure_bar_a=round(current_pin, 3),
+                outlet_pressure_bar_a=round(p_out, 3),
+                delta_p_bar=round(dp_stage, 3),
+                vena_contracta_pressure_bar_a=round(p_vc, 3),
+                vapor_pressure_bar_a=round(pv, 3),
+                margin_to_vapor_bar=round(margin, 3),
+                is_cavitating=is_cav,
+                stage_cv=round(stage_cv, 2),
+                fl=fl,
+            )
+        )
+        current_pin = p_out
+
+    noise_red = round(15.0 * math.log10(n_stages), 1) if n_stages > 1 else 0.0
+
+    if n_stages == 1:
+        trim_desc = "Tek Kademeli Standart / Sertleştirilmiş Trim"
+        notes.append("Tek kademeli basınç düşümü; kavitasyon indeksi ve akış koşulları izlenmelidir.")
+    elif n_stages == 2:
+        trim_desc = "2-Kademeli Anti-Kavitasyon Kafesi (Cavitrol II / Çift Direnç)"
+        notes.append("2 kademeli letdown ile basınç düşümü paylaştırılarak kavitasyon hasarı önlenir.")
+    elif n_stages <= 4:
+        trim_desc = f"{n_stages}-Kademeli Disk-Stack / Çok Kademeli Kafes (Cavitrol III / Multi-Path)"
+        notes.append(f"{n_stages} direnç kademesiyle akış hızı kontrol altında tutulur ve basınç buharlaşma sınırının üzerinde kalır.")
+    else:
+        trim_desc = f"{n_stages}-Kademeli Ağır Hizmet Labirent Trim (Tortuous Path / Yüksek Basınç Letdown)"
+        notes.append(f"{n_stages} kademeli labirent disk trim aşırı basınç düşüşlerinde (dP > 100 bar) tam kavitasyon ve aşınma koruması sağlar.")
+
+    if not cav_eliminated and p2 > pv:
+        warnings.append(
+            f"{n_stages} kademede bazı kademelerde vena contracta buharlaşma basıncına yakındır. "
+            f"Daha yüksek kademe ({min_stages} kademe) veya daha yüksek FL trimi değerlendiriniz."
+        )
+
+    return MultiStageTrimDesign(
+        p1_bar_a=round(p1, 3),
+        p2_bar_a=round(p2, 3),
+        total_delta_p_bar=round(dp_total, 3),
+        pv_bar_a=round(pv, 3),
+        required_cv=round(cv_req, 3),
+        stages_count=n_stages,
+        is_cavitation_eliminated=cav_eliminated,
+        noise_reduction_dba=noise_red,
+        min_recommended_stages=min_stages,
+        single_stage_sigma=round(sigma_single, 3),
+        stages=tuple(stage_list),
+        trim_description=trim_desc,
+        warnings=tuple(warnings),
+        engineering_notes=tuple(notes),
+    )
+

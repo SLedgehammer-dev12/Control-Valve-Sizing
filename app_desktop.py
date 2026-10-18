@@ -1247,11 +1247,11 @@ class ValveSizingApp:
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
 
     def _open_cavitation_dialog(self) -> None:
-        from trim_guidance import evaluate_cavitation_severity
+        from trim_guidance import design_multistage_cavitation_trim, evaluate_cavitation_severity
 
         dlg = tk.Toplevel(self.root)
-        dlg.title("Kavitasyon ve Agir Hizmet Trim Analizi (ISA-RP75.23)")
-        dlg.geometry("640x520")
+        dlg.title("Kavitasyon ve Cok Kademeli Trim Tasarimi (ISA-RP75.23 / IEC 60534)")
+        dlg.geometry("780x620")
         dlg.resizable(True, True)
         dlg.transient(self.root)
 
@@ -1261,22 +1261,39 @@ class ValveSizingApp:
         p1_init = float(self.inputs.get("liquid_p1", tk.StringVar(value="10.0")).get())
         p2_init = float(self.inputs.get("liquid_p2", tk.StringVar(value="5.0")).get())
         pv_init = float(self.inputs.get("liquid_pv", tk.StringVar(value="0.0234")).get())
+        cv_init = 25.0
+        if hasattr(self, "last_result") and self.last_result:
+            cv_init = float(self.last_result.get("required_cv", 25.0))
 
-        ttk.Label(frame, text="Giris Basinci P1 [bar(a)]:").grid(row=0, column=0, sticky="w", pady=4)
-        p1_var = tk.DoubleVar(value=p1_init)
-        ttk.Entry(frame, textvariable=p1_var, width=16).grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Giris Basinci P1 [bar(a)]:").grid(row=0, column=0, sticky="w", pady=3)
+        p1_var = tk.DoubleVar(value=round(p1_init, 3))
+        ttk.Entry(frame, textvariable=p1_var, width=16).grid(row=0, column=1, sticky="w", pady=3)
 
-        ttk.Label(frame, text="Cikis Basinci P2 [bar(a)]:").grid(row=1, column=0, sticky="w", pady=4)
-        p2_var = tk.DoubleVar(value=p2_init)
-        ttk.Entry(frame, textvariable=p2_var, width=16).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Cikis Basinci P2 [bar(a)]:").grid(row=1, column=0, sticky="w", pady=3)
+        p2_var = tk.DoubleVar(value=round(p2_init, 3))
+        ttk.Entry(frame, textvariable=p2_var, width=16).grid(row=1, column=1, sticky="w", pady=3)
 
-        ttk.Label(frame, text="Buharlasma Basinci Pv [bar(a)]:").grid(row=2, column=0, sticky="w", pady=4)
-        pv_var = tk.DoubleVar(value=pv_init)
-        ttk.Entry(frame, textvariable=pv_var, width=16).grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="Buharlasma Basinci Pv [bar(a)]:").grid(row=2, column=0, sticky="w", pady=3)
+        pv_var = tk.DoubleVar(value=round(pv_init, 4))
+        ttk.Entry(frame, textvariable=pv_var, width=16).grid(row=2, column=1, sticky="w", pady=3)
 
-        res_box = tk.Text(frame, height=14, width=65, font=("Consolas", 10))
-        res_box.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
-        frame.rowconfigure(3, weight=1)
+        ttk.Label(frame, text="Tasarim Cv:").grid(row=3, column=0, sticky="w", pady=3)
+        cv_var = tk.DoubleVar(value=round(cv_init, 2))
+        ttk.Entry(frame, textvariable=cv_var, width=16).grid(row=3, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Kademe Secimi:").grid(row=4, column=0, sticky="w", pady=3)
+        stage_mode_var = tk.StringVar(value="Otomatik (Minimum Guvenli)")
+        ttk.Combobox(
+            frame,
+            textvariable=stage_mode_var,
+            values=("Otomatik (Minimum Guvenli)", "1 Kademe", "2 Kademe", "3 Kademe", "4 Kademe", "6 Kademe"),
+            state="readonly",
+            width=26,
+        ).grid(row=4, column=1, sticky="w", pady=3)
+
+        res_box = tk.Text(frame, height=18, width=88, font=("Consolas", 10))
+        res_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(1, weight=1)
 
         def _calc_cav() -> None:
@@ -1284,29 +1301,65 @@ class ValveSizingApp:
                 p1 = p1_var.get()
                 p2 = p2_var.get()
                 pv = pv_var.get()
+                cv = cv_var.get()
                 dp = max(p1 - p2, 0.001)
                 sigma = (p1 - pv) / dp if dp > 0 else 999.0
-                res = evaluate_cavitation_severity(sigma, dp, p1, pv)
+                sev_res = evaluate_cavitation_severity(sigma, dp, p1, pv)
+
+                stg_mode = stage_mode_var.get()
+                req_stg = None
+                if stg_mode != "Otomatik (Minimum Guvenli)":
+                    req_stg = int(stg_mode.split()[0])
+
+                m_res = design_multistage_cavitation_trim(
+                    p1_bar_a=p1,
+                    p2_bar_a=p2,
+                    pv_bar_a=pv,
+                    required_cv=cv,
+                    requested_stages=req_stg,
+                )
+
+                cav_status = "ONLENDI (GUVENLI)" if m_res.is_cavitation_eliminated else "KAVITASYON RISKI MEVCUT"
+
                 lines = [
-                    "=" * 60,
-                    "KAVITASYON & AGIR HIZMET TRIM DEGERLENDIRMESI (ISA-RP75.23)",
-                    "=" * 60,
-                    f"Kavitasyon Indeksi (\u03c3)     : {res.sigma:.3f}",
-                    f"Siddet Rejimi                 : {res.severity_level}",
-                    f"Onerilen Kademe Sayisi        : {res.stages_recommended} Kademe",
-                    f"Onerilen Trim Tipi            : {res.trim_recommendation}",
-                    f"Kademe Basi Max Izin Delta P  : {res.max_allowable_dp_per_stage_bar:.1f} bar",
-                    "-" * 60,
+                    "=" * 78,
+                    "KAVITASYON & COK KADEMELI TRIM TASARIMI (ISA-RP75.23 / IEC 60534)",
+                    "=" * 78,
+                    f"Kavitasyon Indeksi (\u03c3)        : {sev_res.sigma:.3f}",
+                    f"Siddet Rejimi                 : {sev_res.severity_level}",
+                    f"Onerilen Trim Yapisi          : {m_res.trim_description}",
+                    f"Kademe Sayisi                 : {m_res.stages_count} Kademe (Min Onerilen: {m_res.min_recommended_stages})",
+                    f"Kavitasyon Durumu             : {cav_status}",
+                    f"Gurultu Azaltma Tahmini       : -{m_res.noise_reduction_dba:.1f} dB(A)",
+                    f"Kademe Basi Izin Verilen \u0394P   : {sev_res.max_allowable_dp_per_stage_bar:.1f} bar",
+                    "-" * 78,
+                    "KADEME BASINC VE AKIS PROFILI TABLOSU:",
+                    f"{'Kademe':<8} {'P_in [bar]':<11} {'P_out [bar]':<12} {'\u0394P [bar]':<9} "
+                    f"{'P_vc [bar]':<11} {'Buhar Marji':<12} {'Kavitasyon':<11} {'Kademe Cv':<10}",
+                    "-" * 78,
                 ]
-                if res.warnings:
+                for s in m_res.stages:
+                    cav_flag = "EVET" if s.is_cavitating else "HAYIR"
+                    lines.append(
+                        f"Kademe {s.stage_number:<2} {s.inlet_pressure_bar_a:<11.2f} {s.outlet_pressure_bar_a:<12.2f} "
+                        f"{s.delta_p_bar:<9.2f} {s.vena_contracta_pressure_bar_a:<11.2f} "
+                        f"{s.margin_to_vapor_bar:<12.2f} {cav_flag:<11} {s.stage_cv:<10.2f}"
+                    )
+                lines.append("-" * 78)
+
+                all_warnings = list(sev_res.warnings) + list(m_res.warnings)
+                if all_warnings:
                     lines.append("UYARILAR:")
-                    for w in res.warnings:
+                    for w in all_warnings:
                         lines.append(f"  [!] {w}")
-                    lines.append("-" * 60)
-                if res.engineering_notes:
+                    lines.append("-" * 78)
+
+                all_notes = list(sev_res.engineering_notes) + list(m_res.engineering_notes)
+                if all_notes:
                     lines.append("MUHENDISLIK NOTLARI:")
-                    for n in res.engineering_notes:
+                    for n in all_notes:
                         lines.append(f"  * {n}")
+
                 res_box.delete("1.0", tk.END)
                 res_box.insert("1.0", "\n".join(lines))
             except Exception as exc:
@@ -1314,7 +1367,7 @@ class ValveSizingApp:
                 res_box.insert("1.0", f"Hata: {exc}")
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=6)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=6)
         ttk.Button(btn_frame, text="Analiz Et", command=_calc_cav).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
         _calc_cav()

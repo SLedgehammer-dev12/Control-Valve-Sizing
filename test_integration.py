@@ -355,6 +355,10 @@ def test_streamlit_advanced_sections_and_metrics():
     assert "Kazanç Oranı (Kmax/Kmin)" in metric_labels
     assert "Doğrusallık Durumu" in metric_labels
     assert "Dinamik Kazanç dQ/dh" in metric_labels
+    assert "Kavitasyon İndeksi (σ)" in metric_labels
+    assert "Kademe Sayısı" in metric_labels
+    assert "Kavitasyon Durumu" in metric_labels
+    assert "Gürültü Azaltma" in metric_labels
 
     at.sidebar.radio[0].set_value("Gas")
     at.run()

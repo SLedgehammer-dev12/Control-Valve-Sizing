@@ -1,3 +1,5 @@
+import pytest
+
 from datasheet_isa20 import build_isa20_datasheet, generate_isa20_html, generate_isa20_markdown
 from packing_emissions import recommend_packing_system
 from trim_guidance import evaluate_cavitation_severity
@@ -196,4 +198,87 @@ def test_valve_selection_derated_mawp_and_leakage_edge_cases():
     # Unknown leakage class
     leak_unk = allowable_leakage_rate(50.0, "VII", port_diameter_mm=50.0, delta_p_bar=4.0)
     assert leak_unk["max_rate"] == 0.0
+
+
+def test_multistage_cavitation_trim_automatic_stages():
+    from trim_guidance import design_multistage_cavitation_trim
+
+    # Severe pressure drop: 100 bar down to 5 bar, Pv = 1.0 bar
+    design = design_multistage_cavitation_trim(
+        p1_bar_a=100.0,
+        p2_bar_a=5.0,
+        pv_bar_a=1.0,
+        required_cv=25.0,
+        fl_per_stage=0.90,
+    )
+    assert design.stages_count >= 3
+    assert design.is_cavitation_eliminated is True
+    assert design.noise_reduction_dba > 5.0
+    assert len(design.stages) == design.stages_count
+
+    # Stage flow coefficient verification: Cv_i = Cv * sqrt(N)
+    import math
+
+    expected_stage_cv = 25.0 * math.sqrt(design.stages_count)
+    for s in design.stages:
+        assert s.stage_cv == pytest.approx(expected_stage_cv, rel=1e-2)
+        assert s.is_cavitating is False
+        assert s.margin_to_vapor_bar > 0.0
+
+
+def test_multistage_cavitation_trim_flashing():
+    from trim_guidance import design_multistage_cavitation_trim
+
+    # Flashing conditions (P2 < Pv)
+    flash_design = design_multistage_cavitation_trim(
+        p1_bar_a=15.0,
+        p2_bar_a=1.5,
+        pv_bar_a=2.0,
+        required_cv=10.0,
+    )
+    assert any("Buharlaşma" in w or "flashing" in w.lower() for w in flash_design.warnings)
+    assert flash_design.is_cavitation_eliminated is False
+
+
+def test_multistage_cavitation_trim_to_dict():
+    from trim_guidance import design_multistage_cavitation_trim
+
+    res = design_multistage_cavitation_trim(
+        p1_bar_a=50.0,
+        p2_bar_a=20.0,
+        pv_bar_a=0.5,
+        required_cv=15.0,
+        requested_stages=2,
+    )
+    d = res.to_dict()
+    assert d["stages_count"] == 2
+    assert len(d["stages"]) == 2
+    assert "noise_reduction_dba" in d
+    assert "is_cavitation_eliminated" in d
+    assert d["stages"][0]["stage_number"] == 1
+
+
+def test_multistage_cavitation_trim_branches():
+    from trim_guidance import design_multistage_cavitation_trim
+
+    # Single stage safe
+    res_1 = design_multistage_cavitation_trim(p1_bar_a=10.0, p2_bar_a=8.0, pv_bar_a=0.023)
+    assert res_1.stages_count == 1
+    assert "Tek Kademeli" in res_1.trim_description
+
+    # Constant cavitation 1.1 < sigma <= 1.5
+    res_2 = design_multistage_cavitation_trim(p1_bar_a=15.0, p2_bar_a=3.0, pv_bar_a=0.023)
+    assert res_2.stages_count >= 2
+
+    # Forced 1 stage on severe pressure drop -> cavitating warning
+    res_forced = design_multistage_cavitation_trim(
+        p1_bar_a=100.0,
+        p2_bar_a=10.0,
+        pv_bar_a=0.023,
+        requested_stages=1,
+    )
+    assert res_forced.stages_count == 1
+    assert any("Daha yüksek kademe" in w for w in res_forced.warnings)
+
+
 
