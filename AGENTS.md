@@ -115,9 +115,24 @@ python app_desktop.py
 7. **Sector units are centralized in `units.py`**: unit maps (`TEMPERATURE_UNITS`, `PRESSURE_UNITS`, `LIQUID_FLOW_UNITS`, `GAS_FLOW_UNITS`, `STEAM_FLOW_UNITS`) + converters; both UIs convert to engine units (bar(a), °C, m³/h, Nm³/h, kg/h) at calculation time
 8. **Live calculation**: web recomputes on every rerun (no buttons); desktop traces flow/pressure/temperature vars and unit combos → silent `_calculate(show_errors=False)`
 
+### Agent Ecosystem & Orchestration
+
+This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mode, minimal diffs) and **addyosmani/agent-skills** (lifecycle engineering skills & subagent personas) across both **OpenCode** and **Antigravity**:
+
+1. **Submodules**: `vendor/ponytail` and `vendor/agent-skills`
+2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`), commands in `.opencode/command/` (`build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
+3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/`, and skills in `.agents/skills/`.
+4. **Orchestration Matrix**:
+   - **SPEC / DEFINE**: `spec-driven-development`, `api-and-interface-design`, `idea-refine`
+   - **PLAN**: `planning-and-task-breakdown`, `interview-me`, `constraint-driven-development`
+   - **BUILD**: `incremental-implementation`, `test-driven-development`, `frontend-ui-engineering`
+   - **VERIFY**: `debugging-and-error-recovery`, `browser-testing-with-devtools`, `observability-and-instrumentation`
+   - **AUDIT / REVIEW**: Parallel fan-out running `code-reviewer`, `security-auditor`, `test-engineer`, and `ponytail-review`
+   - **SHIP / MERGE**: `shipping-and-launch`, `ci-cd-and-automation`, `deprecation-and-migration`
+
 ### Test Status
 
-- **438 tests, 100% passing**
-- **Coverage**: 91% (excluding `app_desktop.py` Tkinter GUI)
-- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)
+- **463 tests, 100% passing**
+- **Coverage**: 93.71% (16 core modules at 100% statement coverage)
+- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12/3.13, ruff + mypy + pytest)
 - **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

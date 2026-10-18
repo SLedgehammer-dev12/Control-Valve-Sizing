@@ -1,6 +1,6 @@
 # Project Index: Control Valve Sizing (v3.3.0)
 
-> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 447/447 PASS (91.42% cov) | Scenarios: 52/52 PASS
+> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 463/463 PASS (93.71% cov) | Scenarios: 52/52 PASS
 
 ## 1. Architectural Overview
 
@@ -67,8 +67,8 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 - **Web UI**: `streamlit run app_web.py` or entry point `valve-sizing-web`
 - **Industrial Benchmarks (52 Scenarios)**: `python verify_50_scenarios.py`
 - **IEC Standard Benchmarks (12 Scenarios)**: `python verify_scenarios.py`
-- **Automated Test Suite**: `python -m pytest -q` (447 tests)
-- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 91.42%)
+- **Automated Test Suite**: `python -m pytest -q` (463 tests)
+- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 93.71%)
 - **Code Linter**: `ruff check .` (target line length: 150)
 
 ## 4. Key Architectural Patterns
@@ -78,3 +78,11 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 3. **Steam Gas-Path Equivalence**: High-pressure steam is evaluated by deriving density via CoolProp/IAPWS-97, converting to actual volumetric flow, and routing through the compressible gas sizing equation.
 4. **Cached Thermodynamic Evaluation**: All pure fluid lookups and multi-component Helmholtz energy equations of state use `@lru_cache` to eliminate re-computation latency.
 5. **Acyclic Domain Architecture**: Core domain calculation modules maintain zero inter-dependencies among themselves ($F_o = 0$), ensuring maximum testability and zero circular import risks.
+
+## 5. Dual Agent Ecosystem & Orchestration
+
+This project harmonizes two state-of-the-art agent engineering libraries:
+- **`DietrichGebert/ponytail`** (`vendor/ponytail`): Minimalist senior developer mindset, YAGNI enforcement, smallest working diffs, zero dead code.
+- **`addyosmani/agent-skills`** (`vendor/agent-skills`): Comprehensive lifecycle engineering skills (spec, plan, build, verify, review, ship) and specialized subagent personas (`code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`).
+- **OpenCode & Antigravity Parity**: Both tools share the full skill catalog (`.agents/skills/` and `.opencode/skills/`), agent definitions (`.agents/agents/` and `.opencode/agents/`), rules (`.agents/rules/`), and commands (`.opencode/command/`).
+
