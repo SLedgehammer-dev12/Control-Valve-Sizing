@@ -135,3 +135,102 @@ class TestCurveGenerationAndDictSerialization:
         assert d["cv"] == 25.0
         assert d["kv"] == 21.625
         assert d["gain"] == 57.5
+
+
+class TestInstalledCharacteristic:
+    def test_calc_installed_flow_ratio_boundaries(self):
+        from valve_curve import calc_installed_flow_ratio
+
+        # Full opening: always 1.0
+        assert calc_installed_flow_ratio(1.0, 1.0) == pytest.approx(1.0)
+        assert calc_installed_flow_ratio(1.0, 0.5) == pytest.approx(1.0)
+        assert calc_installed_flow_ratio(1.0, 0.2) == pytest.approx(1.0)
+
+        # Zero opening: always 0.0
+        assert calc_installed_flow_ratio(0.0, 0.5) == 0.0
+
+        # PR = 1.0: installed = inherent
+        assert calc_installed_flow_ratio(0.5, 1.0) == pytest.approx(0.5)
+        assert calc_installed_flow_ratio(0.25, 1.0) == pytest.approx(0.25)
+
+        # PR = 0.25, cv_ratio = 0.50
+        expected = 0.5 / (0.25 + 0.75 * 0.25) ** 0.5
+        assert calc_installed_flow_ratio(0.5, 0.25) == pytest.approx(expected)
+
+    def test_calc_installed_gain(self):
+        from valve_curve import calc_installed_gain
+
+        # PR = 1.0: installed gain equals inherent gain
+        assert calc_installed_gain(1.0, 0.5, 1.0) == pytest.approx(1.0)
+
+        # Zero or negative PR
+        assert calc_installed_gain(1.0, 0.5, 0.0) == 0.0
+
+    def test_generate_installed_characteristic_ideal_authority(self):
+        from valve_curve import generate_installed_characteristic
+
+        res = generate_installed_characteristic(
+            rated_cv=100.0,
+            required_cv=50.0,
+            characteristic="equal_percentage",
+            valve_authority_pr=0.50,
+            num_points=51,
+        )
+        assert res.valve_authority_pr == 0.50
+        assert "İdeal" in res.authority_assessment
+        assert len(res.points) == 51
+        assert res.points[0].installed_flow_pct == 0.0
+        assert res.points[-1].installed_flow_pct == pytest.approx(100.0)
+        assert res.gain_ratio > 0.0
+        assert res.operating_installed_flow_pct > 0.0
+        assert res.operating_installed_gain > 0.0
+
+    def test_generate_installed_characteristic_low_authority_warning(self):
+        from valve_curve import generate_installed_characteristic
+
+        res = generate_installed_characteristic(
+            rated_cv=100.0,
+            required_cv=50.0,
+            characteristic="linear",
+            valve_authority_pr=0.15,
+        )
+        assert "Zayıf" in res.authority_assessment
+        assert any("PR < 0.25" in w or "Vana otoritesi" in w for w in res.warnings)
+
+    def test_installed_analysis_to_dict(self):
+        from valve_curve import generate_installed_characteristic
+
+        res = generate_installed_characteristic(
+            rated_cv=80.0,
+            required_cv=40.0,
+            characteristic="equal_percentage",
+            valve_authority_pr=0.35,
+            num_points=11,
+        )
+        d = res.to_dict()
+        assert d["valve_authority_pr"] == 0.35
+        assert len(d["points"]) == 11
+        assert "gain_ratio" in d
+        assert "is_gain_linear" in d
+        assert "authority_assessment" in d
+
+    def test_distortion_trends(self):
+        from valve_curve import generate_installed_characteristic
+
+        # Equal percentage low PR
+        res_eq_low = generate_installed_characteristic(100.0, 50.0, "equal_percentage", valve_authority_pr=0.10)
+        assert "Aşırı Bozulma" in res_eq_low.distortion_trend
+
+        # Equal percentage high PR
+        res_eq_high = generate_installed_characteristic(100.0, 50.0, "equal_percentage", valve_authority_pr=0.80)
+        assert "Korunuyor" in res_eq_high.distortion_trend
+
+        # Linear high PR
+        res_lin_high = generate_installed_characteristic(100.0, 50.0, "linear", valve_authority_pr=0.75)
+        assert "Korunuyor" in res_lin_high.distortion_trend
+
+        # Quick opening
+        res_qo = generate_installed_characteristic(100.0, 50.0, "quick_opening", valve_authority_pr=0.50)
+        assert "Çabuk Açılan" in res_qo.distortion_trend
+
+

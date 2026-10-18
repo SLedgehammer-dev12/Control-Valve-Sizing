@@ -23,7 +23,7 @@ from units import (
     temperature_from_c,
     temperature_to_c,
 )
-from valve_curve import generate_characteristic_curve
+from valve_curve import generate_characteristic_curve, generate_installed_characteristic
 from valve_sizing import (
     SOURCE_LIBRARY,
     GasSizingInput,
@@ -284,29 +284,78 @@ def render_result(result: SizingResult) -> None:
         characteristic=char_type,
     )
     with st.expander("Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)", expanded=True):
-        op = curve.operating_point
-        c_k1, c_k2, c_k3, c_k4 = st.columns(4)
-        c_k1.metric("Çalışma Açıklığı", f"%{op.opening_pct:.1f}")
-        c_k2.metric("Kontrol Bölgesi", op.controllability_zone)
-        c_k3.metric("Kazanç dCv/dh", f"{op.point_gain:.2f}")
-        c_k4.metric("Kapasite Oranı", f"%{op.relative_cv_pct:.1f}")
+        tab_inh, tab_inst = st.tabs(["Doğal (Inherent) Karakteristik", "Tesisat Kurulu (Installed) & Vana Otoritesi"])
+        with tab_inh:
+            op = curve.operating_point
+            c_k1, c_k2, c_k3, c_k4 = st.columns(4)
+            c_k1.metric("Çalışma Açıklığı", f"%{op.opening_pct:.1f}")
+            c_k2.metric("Kontrol Bölgesi", op.controllability_zone)
+            c_k3.metric("Kazanç dCv/dh", f"{op.point_gain:.2f}")
+            c_k4.metric("Kapasite Oranı", f"%{op.relative_cv_pct:.1f}")
 
-        if op.warnings:
-            for w in op.warnings:
-                st.warning(f"⚠️ {w}")
-        else:
-            st.success("✅ Çalışma noktası ideal kontrol aralığında (%20 - %80 açıklık).")
+            if op.warnings:
+                for w in op.warnings:
+                    st.warning(f"⚠️ {w}")
+            else:
+                st.success("✅ Çalışma noktası ideal kontrol aralığında (%20 - %80 açıklık).")
 
-        chart_df = pd.DataFrame([
-            {"Açıklık [%]": pt.opening_pct, "Vana Cv (Eğri)": pt.cv, "Gereken Cv": op.required_cv}
-            for pt in curve.points
-        ]).set_index("Açıklık [%]")
-        st.line_chart(chart_df, use_container_width=True)
+            chart_df = pd.DataFrame([
+                {"Açıklık [%]": pt.opening_pct, "Vana Cv (Eğri)": pt.cv, "Gereken Cv": op.required_cv}
+                for pt in curve.points
+            ]).set_index("Açıklık [%]")
+            st.line_chart(chart_df, use_container_width=True)
 
-        with st.expander("Ayrık Karakteristik Tablosu (51 Nokta)", expanded=False):
-            tbl_df = pd.DataFrame([p.to_dict() for p in curve.points])
-            tbl_df.columns = ["Açıklık [%]", "Cv", "Kv", "Kazanç (dCv/dh)"]
-            st.dataframe(tbl_df, hide_index=True)
+            with st.expander("Ayrık Karakteristik Tablosu (51 Nokta)", expanded=False):
+                tbl_df = pd.DataFrame([p.to_dict() for p in curve.points])
+                tbl_df.columns = ["Açıklık [%]", "Cv", "Kv", "Kazanç (dCv/dh)"]
+                st.dataframe(tbl_df, hide_index=True)
+
+        with tab_inst:
+            st.caption("Boru hattı sürtünme kaybı ve pompa eğrisi nedeniyle vananın gerçek tesisattaki dinamik tepkisi (Installed Flow Response).")
+            pr_val = st.slider(
+                "Vana Otoritesi PR (ΔP_vana / ΔP_toplam, tam debide)",
+                min_value=0.05,
+                max_value=1.00,
+                value=0.50,
+                step=0.05,
+                help="PR >= 0.50 ideal otoritedir. PR < 0.25 durumunda vana yetkisini kaybeder.",
+                key=f"pr_slider_{result['service']}",
+            )
+            inst = generate_installed_characteristic(
+                rated_cv=float(result["rated_cv"]),
+                required_cv=float(result["required_cv"]),
+                characteristic=char_type,
+                valve_authority_pr=pr_val,
+            )
+            i1, i2, i3, i4 = st.columns(4)
+            i1.metric("Otorite Değerlendirmesi", inst.authority_assessment.split("(")[0].strip())
+            i2.metric("Kazanç Oranı (Kmax/Kmin)", f"{inst.gain_ratio:.1f}:1")
+            i3.metric("Doğrusallık Durumu", "Kararlı (<= 4:1)" if inst.is_gain_linear else "Doğrusal Değil (> 4:1)")
+            i4.metric("Dinamik Kazanç dQ/dh", f"{inst.operating_installed_gain:.2f}")
+
+            st.info(f"**Karakteristik Eğilimi:** {inst.distortion_trend}")
+
+            if inst.warnings:
+                for w in inst.warnings:
+                    st.warning(f"⚠️ {w}")
+            else:
+                st.success("✅ Vana otoritesi yeterlidir; dinamik kazanç kontrol edilebilir sınırlar içerisindedir.")
+
+            inst_chart_df = pd.DataFrame([
+                {
+                    "Açıklık [%]": p.opening_pct,
+                    "Kurulu Debi Q [%]": p.installed_flow_pct,
+                    "Doğal Cv [%]": (p.inherent_cv / float(result["rated_cv"]) * 100.0) if float(result["rated_cv"]) > 0 else 0.0,
+                    "Vana dP Payı [%]": p.valve_dp_ratio * 100.0,
+                }
+                for p in inst.points
+            ]).set_index("Açıklık [%]")
+            st.line_chart(inst_chart_df, use_container_width=True)
+
+            with st.expander("Ayrık Tesisat Tablosu (51 Nokta)", expanded=False):
+                inst_tbl_df = pd.DataFrame([p.to_dict() for p in inst.points])
+                inst_tbl_df.columns = ["Açıklık [%]", "Inherent Cv", "Kurulu Debi Q [%]", "Dinamik Kazanç (dQ/dh)", "Vana dP Oranı"]
+                st.dataframe(inst_tbl_df, hide_index=True)
 
     if result.get("warning"):
         st.warning(result["warning"])

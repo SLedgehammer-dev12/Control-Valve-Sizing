@@ -23,7 +23,7 @@ from units import (
     temperature_from_c,
     temperature_to_c,
 )
-from valve_curve import evaluate_operating_point, generate_characteristic_curve
+from valve_curve import evaluate_operating_point, generate_characteristic_curve, generate_installed_characteristic
 from valve_sizing import GasSizingInput, LiquidSizingInput, SteamSizingInput, size_gas_valve, size_liquid_valve, size_steam_valve
 from vendor_catalog import get_vendor_definition, get_vendor_options
 
@@ -1686,9 +1686,13 @@ class ValveSizingApp:
         r_var = tk.DoubleVar(value=50.0)
         ttk.Entry(frame, textvariable=r_var, width=16).grid(row=3, column=1, sticky="w", pady=4)
 
-        res_box = tk.Text(frame, height=18, width=78, font=("Consolas", 10))
-        res_box.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
-        frame.rowconfigure(4, weight=1)
+        ttk.Label(frame, text="Vana Otoritesi PR (ΔPv/ΔPtot):").grid(row=4, column=0, sticky="w", pady=4)
+        pr_var = tk.DoubleVar(value=0.50)
+        ttk.Entry(frame, textvariable=pr_var, width=16).grid(row=4, column=1, sticky="w", pady=4)
+
+        res_box = tk.Text(frame, height=20, width=82, font=("Consolas", 10))
+        res_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(1, weight=1)
 
         def _calc() -> None:
@@ -1697,39 +1701,56 @@ class ValveSizingApp:
                 cv_req = req_var.get()
                 c_type = char_var.get()
                 r_val = r_var.get()
+                pr_val = pr_var.get()
                 curve = generate_characteristic_curve(
                     rated_cv=cv_r,
                     required_cv=cv_req,
                     characteristic=c_type,
                     rangeability=r_val,
                 )
+                inst = generate_installed_characteristic(
+                    rated_cv=cv_r,
+                    required_cv=cv_req,
+                    characteristic=c_type,
+                    valve_authority_pr=pr_val,
+                    rangeability=r_val,
+                )
                 op = curve.operating_point
                 lines = [
-                    "=" * 72,
-                    "VANA AKIS KARAKTERISTIK EGRISI VE KONTROL ANALIZI (IEC 60534-2-4)",
-                    "=" * 72,
+                    "=" * 78,
+                    "VANA AKIS KARAKTERISTIK VE TESISAT KURULU KONTROL ANALIZI (IEC 60534-2-4)",
+                    "=" * 78,
                     f"Karakteristik Tipi   : {op.characteristic.upper()}",
                     f"Rated Cv / Req Cv    : {op.rated_cv:.2f} / {op.required_cv:.2f} (Kapasite: %{op.relative_cv_pct:.1f})",
                     f"Rangeability (R)     : {curve.rangeability:.1f}:1",
-                    f"Calisma Noktasi      : Aciklik %{op.opening_pct:.1f} | Kazanc dCv/dh: {op.point_gain:.2f}",
+                    f"Calisma Noktasi      : Aciklik %{op.opening_pct:.1f} | Inherent Kazanc: {op.point_gain:.2f}",
                     f"Kontrol Bolgesi      : {op.controllability_zone}",
-                    f"Kontrol Edilebilir   : {'EVET' if op.is_controllable else 'HAYIR'}",
-                    "-" * 72,
+                    "-" * 78,
+                    "TESISAT KURULU (INSTALLED) KONTROL VE VANA OTORITESI:",
+                    f"Vana Otoritesi (PR)  : {inst.valve_authority_pr:.2f} -> {inst.authority_assessment}",
+                    f"Karakteristik Egilimi: {inst.distortion_trend}",
+                    f"Dinamik Kazanc Orani : {inst.gain_ratio:.1f}:1 ({'Kararli <= 4:1' if inst.is_gain_linear else 'Dogrusal Degil > 4:1'})",
+                    f"Calisma Noktasi Debi : %{inst.operating_installed_flow_pct:.1f} | Dinamik Kazanc dQ/dh: {inst.operating_installed_gain:.2f}",
+                    "-" * 78,
                 ]
-                if op.warnings:
+                all_warnings = list(op.warnings) + list(inst.warnings)
+                if all_warnings:
                     lines.append("UYARILAR VE TAVSIYELER:")
-                    for w in op.warnings:
+                    for w in all_warnings:
                         lines.append(f"  [!] {w}")
-                    lines.append("-" * 72)
+                    lines.append("-" * 78)
                 else:
-                    lines.append("  [OK] Calisma noktasi ideal kontrol bolgesindedir (%20 - %80 aciklik).")
-                    lines.append("-" * 72)
+                    lines.append("  [OK] Calisma noktasi ve vana otoritesi ideal proses kontrol araligindadir.")
+                    lines.append("-" * 78)
 
-                lines.append(f"{'Aciklik [%]':<14}{'Cv':<14}{'Kv':<14}{'Kazanc dCv/dh':<16}")
-                lines.append("-" * 58)
-                for pt in curve.points[::2]:
-                    marker = " <== (Calisma Noktasi)" if abs(pt.opening_pct - op.opening_pct) < 2.0 else ""
-                    lines.append(f"{pt.opening_pct:>8.1f}%     {pt.cv:>8.2f}      {pt.kv:>8.2f}      {pt.gain:>10.2f}{marker}")
+                lines.append(f"{'Aciklik':<10}{'Inh Cv':<12}{'Kurulu Q%':<14}{'Dinamik Kazanc':<18}{'Vana dP%':<12}")
+                lines.append("-" * 66)
+                for pt, ipt in zip(curve.points[::2], inst.points[::2], strict=False):
+                    marker = " <== (Calisma)" if abs(pt.opening_pct - op.opening_pct) < 2.0 else ""
+                    lines.append(
+                        f"{pt.opening_pct:>6.1f}%    {pt.cv:>8.2f}    {ipt.installed_flow_pct:>8.1f}%     "
+                        f"{ipt.installed_gain:>10.2f}        %{ipt.valve_dp_ratio * 100:>6.1f}{marker}"
+                    )
 
                 res_box.delete("1.0", tk.END)
                 res_box.insert("1.0", "\n".join(lines))
@@ -1738,7 +1759,7 @@ class ValveSizingApp:
                 res_box.insert("1.0", f"Hata olustu: {exc}")
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=4)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=4)
         ttk.Button(btn_frame, text="Hesapla ve Listele", command=_calc).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
         _calc()

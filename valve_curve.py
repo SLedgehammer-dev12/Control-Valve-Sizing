@@ -82,6 +82,62 @@ class CharacteristicCurve:
         }
 
 
+@dataclass(frozen=True)
+class InstalledPoint:
+    """Discrete point along the installed flow characteristic curve."""
+
+    opening_pct: float
+    inherent_cv: float
+    installed_flow_pct: float
+    installed_gain: float
+    valve_dp_ratio: float
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "opening_pct": self.opening_pct,
+            "inherent_cv": self.inherent_cv,
+            "installed_flow_pct": self.installed_flow_pct,
+            "installed_gain": self.installed_gain,
+            "valve_dp_ratio": self.valve_dp_ratio,
+        }
+
+
+@dataclass(frozen=True)
+class InstalledCharacteristicAnalysis:
+    """Installed flow response and loop controllability analysis for a valve authority PR."""
+
+    characteristic: str
+    rated_cv: float
+    valve_authority_pr: float
+    gain_min: float
+    gain_max: float
+    gain_ratio: float
+    is_gain_linear: bool
+    operating_installed_flow_pct: float
+    operating_installed_gain: float
+    authority_assessment: str
+    distortion_trend: str
+    points: tuple[InstalledPoint, ...]
+    warnings: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "characteristic": self.characteristic,
+            "rated_cv": self.rated_cv,
+            "valve_authority_pr": self.valve_authority_pr,
+            "gain_min": self.gain_min,
+            "gain_max": self.gain_max,
+            "gain_ratio": self.gain_ratio,
+            "is_gain_linear": self.is_gain_linear,
+            "operating_installed_flow_pct": self.operating_installed_flow_pct,
+            "operating_installed_gain": self.operating_installed_gain,
+            "authority_assessment": self.authority_assessment,
+            "distortion_trend": self.distortion_trend,
+            "points": [p.to_dict() for p in self.points],
+            "warnings": list(self.warnings),
+        }
+
+
 def _evaluate_controllability_zone(opening_pct: float) -> tuple[str, bool, list[str]]:
     warnings: list[str] = []
     if opening_pct < 10.0:
@@ -248,3 +304,128 @@ def generate_characteristic_curve(
         points=tuple(pts),
         operating_point=op_analysis,
     )
+
+
+def calc_installed_flow_ratio(cv_ratio: float, valve_authority_pr: float) -> float:
+    """Calculate normalized installed flow Q/Qmax for given Cv/Cv100 and valve authority PR."""
+    if cv_ratio <= 0.0 or valve_authority_pr <= 0.0:
+        return 0.0
+    if cv_ratio >= 1.0:
+        return 1.0
+    pr = max(1e-4, min(1.0, float(valve_authority_pr)))
+    phi_sq = cv_ratio ** 2
+    denom = pr + (1.0 - pr) * phi_sq
+    return float(cv_ratio / math.sqrt(denom))
+
+
+def calc_installed_gain(inherent_gain_ratio: float, cv_ratio: float, valve_authority_pr: float) -> float:
+    """Calculate installed valve gain d(Q/Qmax)/dh for given inherent gain ratio, cv_ratio, and PR."""
+    if valve_authority_pr <= 0.0 or cv_ratio < 0.0:
+        return 0.0
+    pr = max(1e-4, min(1.0, float(valve_authority_pr)))
+    phi_sq = cv_ratio ** 2
+    denom = pr + (1.0 - pr) * phi_sq
+    return float((inherent_gain_ratio * math.sqrt(pr)) / (denom ** 1.5))
+
+
+def generate_installed_characteristic(
+    rated_cv: float,
+    required_cv: float,
+    characteristic: str = "equal_percentage",
+    valve_authority_pr: float = 0.50,
+    rangeability: float = DEFAULT_RANGEABILITY,
+    num_points: int = 51,
+) -> InstalledCharacteristicAnalysis:
+    """Evaluate installed flow characteristic and loop gain distortion for a given valve authority PR."""
+    pr = max(0.01, min(1.0, float(valve_authority_pr)))
+    step = 100.0 / max(num_points - 1, 1)
+    pts: list[InstalledPoint] = []
+    gains_control_range: list[float] = []
+
+    for i in range(num_points):
+        pct = round(i * step, 2)
+        if i == num_points - 1:
+            pct = 100.0
+        cv_val = cv_at_opening(pct, rated_cv, characteristic, rangeability)
+        cv_rat = min(cv_val / rated_cv, 1.0) if rated_cv > 0 else 0.0
+        flow_pct = calc_installed_flow_ratio(cv_rat, pr) * 100.0
+
+        inh_gain = gain_at_opening(pct, rated_cv, characteristic, rangeability)
+        inh_gain_ratio = inh_gain / rated_cv if rated_cv > 0 else 0.0
+        inst_gain = calc_installed_gain(inh_gain_ratio, cv_rat, pr)
+
+        flow_ratio = flow_pct / 100.0
+        dp_ratio = max(0.0, 1.0 - (1.0 - pr) * (flow_ratio ** 2))
+
+        if 20.0 <= pct <= 80.0:
+            gains_control_range.append(inst_gain)
+
+        pts.append(
+            InstalledPoint(
+                opening_pct=pct,
+                inherent_cv=round(cv_val, 3),
+                installed_flow_pct=round(flow_pct, 2),
+                installed_gain=round(inst_gain, 3),
+                valve_dp_ratio=round(dp_ratio, 3),
+            )
+        )
+
+    g_min = min(gains_control_range) if gains_control_range else 1.0
+    g_max = max(gains_control_range) if gains_control_range else 1.0
+    g_ratio = round(g_max / max(g_min, 1e-4), 2)
+    is_linear = g_ratio <= 4.0
+
+    op = evaluate_operating_point(required_cv, rated_cv, characteristic, rangeability)
+    op_cv_ratio = min(op.required_cv / rated_cv, 1.0) if rated_cv > 0 else 0.0
+    op_flow_pct = round(calc_installed_flow_ratio(op_cv_ratio, pr) * 100.0, 2)
+    op_inh_gain_ratio = op.point_gain / rated_cv if rated_cv > 0 else 0.0
+    op_inst_gain = round(calc_installed_gain(op_inh_gain_ratio, op_cv_ratio, pr), 3)
+
+    if pr >= 0.50:
+        auth_str = "İdeal Vana Otoritesi (PR >= 0.50)"
+    elif pr >= 0.25:
+        auth_str = "Kabul Edilebilir Vana Otoritesi (0.25 <= PR < 0.50)"
+    else:
+        auth_str = "Zayıf Vana Otoritesi (PR < 0.25)"
+
+    char_l = characteristic.lower()
+    if char_l in ("equal_percentage", "eqpct", "eq_pct"):
+        if 0.25 <= pr <= 0.55:
+            trend = "Eşit Yüzdeli -> Doğrusallaşma Eğilimi (İdeal Proses Kontrolü)"
+        elif pr < 0.25:
+            trend = "Eşit Yüzdeli -> Aşırı Bozulma (Zayıf Otorite / Doygunluk)"
+        else:
+            trend = "Eşit Yüzdeli Karakteristik Korunuyor"
+    elif char_l in ("linear",):
+        trend = "Doğrusal -> Çabuk Açılana Yakınlaşma (Hassasiyet Kaybı)" if pr < 0.50 else "Doğrusal Karakteristik Korunuyor"
+    else:
+        trend = "Çabuk Açılan (On/Off veya Emniyet Tahliye Amaçlı)"
+
+    warnings: list[str] = []
+    if pr < 0.25:
+        warnings.append(
+            f"Vana otoritesi (PR = {pr:.2f} < 0.25) çok düşüktür; boru hattı sürtünme kaybı vanaya kıyasla baskındır. "
+            "Vana yüksek açılmada akışı kontrol edemez (doygunluk) ve kontrol döngüsü salınıma girebilir."
+        )
+    if not is_linear:
+        warnings.append(
+            f"Kontrol aralığında (%20 - %80) dinamik kazanç oranı ({g_ratio:.1f}:1) ISA-75.11 / EnTech "
+            "önerilen 4:1 sınırını aşıyor; tek bir sabit PID ayarıyla tüm aralıkta kararlı kontrol güçleşir."
+        )
+
+    return InstalledCharacteristicAnalysis(
+        characteristic=characteristic,
+        rated_cv=float(rated_cv),
+        valve_authority_pr=round(pr, 3),
+        gain_min=round(g_min, 3),
+        gain_max=round(g_max, 3),
+        gain_ratio=g_ratio,
+        is_gain_linear=is_linear,
+        operating_installed_flow_pct=op_flow_pct,
+        operating_installed_gain=op_inst_gain,
+        authority_assessment=auth_str,
+        distortion_trend=trend,
+        points=tuple(pts),
+        warnings=tuple(warnings),
+    )
+

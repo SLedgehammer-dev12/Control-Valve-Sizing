@@ -1,6 +1,6 @@
 # Project Index: Control Valve Sizing (v3.3.0)
 
-> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 479/479 PASS (93.71% cov) | Scenarios: 52/52 PASS
+> Generated: 2026-10-18 | Staleness Threshold: 7 days | Tests: 485/485 PASS (94.00% cov) | Scenarios: 52/52 PASS
 
 ## 1. Architectural Overview
 

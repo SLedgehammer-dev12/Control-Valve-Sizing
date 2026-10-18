@@ -351,6 +351,10 @@ def test_streamlit_advanced_sections_and_metrics():
     assert "Çalışma Açıklığı" in metric_labels
     assert "Kontrol Bölgesi" in metric_labels
     assert "Kazanç dCv/dh" in metric_labels
+    assert "Otorite Değerlendirmesi" in metric_labels
+    assert "Kazanç Oranı (Kmax/Kmin)" in metric_labels
+    assert "Doğrusallık Durumu" in metric_labels
+    assert "Dinamik Kazanç dQ/dh" in metric_labels
 
     at.sidebar.radio[0].set_value("Gas")
     at.run()
