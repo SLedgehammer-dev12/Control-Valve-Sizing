@@ -831,3 +831,127 @@ def test_liquid_inlet_below_ff_pv_raises():
             ),
             valve_series=list(vendor.sizes),
         )
+
+
+def test_predict_actuator_fallbacks(monkeypatch):
+    import valve_sizing
+    from valve_sizing import _predict_actuator_selection, _predict_actuator_thrust
+
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("fail")
+
+    monkeypatch.setattr(valve_sizing, "total_required_thrust", _fail)
+    assert _predict_actuator_thrust(50, 10.0, 5.0) is None
+
+    assert _predict_actuator_selection(50, None) is None
+    assert _predict_actuator_selection(50, {}) is None
+    monkeypatch.setattr(valve_sizing, "select_actuator", _fail)
+    assert _predict_actuator_selection(50, {"total_n": 1000.0}) is None
+
+
+def test_size_steam_valve_coolprop_and_ideal_gas_fallbacks(monkeypatch):
+    import CoolProp.CoolProp as CP  # noqa: N817
+
+    import fluid_properties
+    from valve_sizing import SteamSizingInput, size_steam_valve
+
+    inp = SteamSizingInput(
+        flow_kg_h=1000.0,
+        inlet_pressure_bar_a=10.0,
+        outlet_pressure_bar_a=5.0,
+        temperature_c=250.0,
+        specific_heat_ratio=1.3,
+        z=0.95,
+        fl=0.9,
+        fd=0.46,
+        xt=0.72,
+    )
+
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("coolprop down")
+
+    monkeypatch.setattr(fluid_properties, "get_steam_properties_iapws", lambda *_a, **_kw: None)
+    res_coolprop = size_steam_valve(inp)
+    assert res_coolprop.required_cv > 0
+
+    monkeypatch.setattr(CP, "PropsSI", _fail)
+    res_ideal = size_steam_valve(inp)
+    assert res_ideal.required_cv > 0
+    assert "ideal gaz yaklasimi kullanildi" in res_ideal.warning
+
+
+def test_sizing_advisory_and_rangeability_warnings():
+    from valve_sizing import (
+        GasSizingInput,
+        LiquidSizingInput,
+        SteamSizingInput,
+        size_gas_valve,
+        size_liquid_valve,
+        size_steam_valve,
+    )
+
+    liq = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=49.48,
+            inlet_pressure_bar_a=15.0,
+            outlet_pressure_bar_a=12.0,
+            density_kg_m3=1000.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.001,
+            fl=0.9,
+            fd=0.46,
+            pipe_inlet_diameter_mm=50.0,
+            pipe_outlet_diameter_mm=50.0,
+        )
+    )
+    assert "uzun sureli servis icin degerlendirilmelidir" in liq.warning
+
+    gas = size_gas_valve(
+        GasSizingInput(
+            flow_nm3h=0.05,
+            inlet_pressure_bar_a=5.0,
+            outlet_pressure_bar_a=4.5,
+            temperature_c=20.0,
+            molecular_weight=28.96,
+            specific_heat_ratio=1.4,
+            viscosity_pa_s=1.8e-5,
+            z=1.0,
+            fl=0.9,
+            fd=0.46,
+            xt=0.72,
+        )
+    )
+    assert "rangeability disinda" in gas.warning
+
+    stm = size_steam_valve(
+        SteamSizingInput(
+            flow_kg_h=0.5,
+            inlet_pressure_bar_a=5.0,
+            outlet_pressure_bar_a=4.0,
+            temperature_c=200.0,
+            specific_heat_ratio=1.3,
+            z=0.95,
+            fl=0.9,
+            fd=0.46,
+            xt=0.72,
+        )
+    )
+    assert "rangeability disinda" in stm.warning
+
+    stm_mach = size_steam_valve(
+        SteamSizingInput(
+            flow_kg_h=5000.0,
+            inlet_pressure_bar_a=10.0,
+            outlet_pressure_bar_a=2.0,
+            temperature_c=300.0,
+            specific_heat_ratio=1.3,
+            z=0.95,
+            fl=0.9,
+            fd=0.46,
+            xt=0.72,
+            pipe_outlet_diameter_mm=105.0,
+        )
+    )
+    assert "uzeri gurultu acisindan degerlendirilmelidir" in stm_mach.warning
+

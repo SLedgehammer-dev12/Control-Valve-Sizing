@@ -76,8 +76,6 @@ def derated_mawp_bar(pressure_class: str, temperature_c: float, material_group: 
     t = float(temperature_c)
     if t <= temps[1]:
         return cls_ratings[1]
-    if t >= temps[-1]:
-        return cls_ratings[-1]
 
     for i in range(1, len(temps) - 1):
         if temps[i] <= t <= temps[i + 1]:

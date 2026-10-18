@@ -521,8 +521,6 @@ def size_liquid_valve(
         regime = "flashing"
     elif is_choked:
         regime = "choked-cavitating"
-    elif sigma < 1.0:
-        regime = "cavitating-risk"
     else:
         regime = "subcritical"
 
@@ -662,8 +660,6 @@ def size_liquid_valve(
             )
     elif regime == "choked-cavitating":
         warnings.append("Choked liquid flow / kavitasyon riski mevcut. Trim ve malzeme kontrolu gerekli.")
-    elif regime == "cavitating-risk":
-        warnings.append("Kismi kavitasyon riski mevcut. Vendor trim secimi ile kontrol edilmeli.")
 
     result["warning"] = " ".join(warnings)
     result["trim_guidance"] = recommend_trim(

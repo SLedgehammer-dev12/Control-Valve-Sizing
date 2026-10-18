@@ -206,3 +206,68 @@ class TestSteamSaturation:
         assert res["phase"] == "saturated"
         assert any("Stellite" in w for w in res["warnings"])
 
+    def test_saturated_steam_supercritical_and_fallback(self, monkeypatch):
+        from fluid_properties import (
+            CP,
+            get_saturated_steam_pressure,
+            get_saturated_steam_temperature,
+        )
+
+        assert get_saturated_steam_temperature(250.0) == 373.95
+        assert get_saturated_steam_pressure(400.0) == 220.64
+
+        def _fail(*_a, **_k):
+            raise RuntimeError("coolprop down")
+
+        monkeypatch.setattr(CP, "PropsSI", _fail)
+        t_fallback = get_saturated_steam_temperature(10.0)
+        assert t_fallback > 0.0
+        p_fallback = get_saturated_steam_pressure(100.0)
+        assert p_fallback > 0.0
+
+    def test_evaluate_steam_state_high_temperature(self):
+        from fluid_properties import evaluate_steam_state
+
+        res = evaluate_steam_state(10.0, 450.0)
+        assert any("WC6/WC9" in w for w in res["warnings"])
+
+
+class TestFluidPropertiesFallbacks:
+    def test_molecular_weight_fallbacks(self, monkeypatch):
+        import fluid_properties
+        from fluid_properties import get_molecular_weight
+
+        assert get_molecular_weight("nonexistent_molecule_xyz_123") == 28.96
+
+        monkeypatch.setattr(fluid_properties, "_get_mw_coolprop", lambda _f: None)
+        assert get_molecular_weight("benzene") == pytest.approx(78.11, abs=0.5)
+
+    def test_liquid_preset_invalid(self):
+        from fluid_properties import get_liquid_preset
+
+        with pytest.raises(ValueError, match="Bilinmeyen sivi preset"):
+            get_liquid_preset("invalid_liquid")
+
+    def test_evaluate_chemicals_state_path(self, monkeypatch):
+        import fluid_properties
+
+        fluid_properties.get_pure_fluid_state.cache_clear()
+
+        def _fail(*_a, **_k):
+            raise RuntimeError("coolprop down")
+
+        monkeypatch.setattr(fluid_properties.CP, "PropsSI", _fail)
+        monkeypatch.setattr(fluid_properties, "get_thermo_fluid_state", lambda *_a, **_k: None)
+
+        state = fluid_properties.get_pure_fluid_state("Methane", 5.0, 25.0)
+        assert state["density_kg_m3"] > 0
+        assert state["z"] > 0
+
+    def test_chemical_vapor_pressure_bounds_and_errors(self):
+        from fluid_properties import get_chemical_vapor_pressure_bar_a
+
+        assert get_chemical_vapor_pressure_bar_a("water", -100.0) is None
+        assert get_chemical_vapor_pressure_bar_a("water", 1000.0) is None
+        assert get_chemical_vapor_pressure_bar_a("unknown_molecule_xyz", 25.0) is None
+
+
