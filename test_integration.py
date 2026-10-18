@@ -335,3 +335,37 @@ def test_project_io_invalid_schema_version():
         migrate_project_payload({"schema_version": "v1"})
 
 
+def test_streamlit_advanced_sections_and_metrics():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    assert not at.exception
+
+    metric_labels = [m.label for m in at.metric]
+    assert "Emisyon Sınıfı" in metric_labels
+    assert "Sızdırmazlık Sınırı" in metric_labels
+    assert "Yangın Emniyeti" in metric_labels
+    assert "PSV Arıza Tahliye Debisi" in metric_labels
+    assert "Gövde Malzemesi" in metric_labels
+    assert "Trim Malzemesi" in metric_labels
+    assert "Mil Malzemesi" in metric_labels
+
+    at.sidebar.radio[0].set_value("Gas")
+    at.run()
+    assert not at.exception
+    metric_labels_gas = [m.label for m in at.metric]
+    assert "Cikis T2 (JT)" in metric_labels_gas
+    assert "JT Katsayisi" in metric_labels_gas
+    assert "Hidrat Sicakligi" in metric_labels_gas
+
+
+def test_streamlit_gauge_pressure_caption():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    pres_sb = next(sb for sb in at.selectbox if sb.label == "Basinc birimi")
+    pres_sb.set_value("bar(g)")
+    at.run()
+    assert not at.exception
+    captions = [c.value for c in at.caption if hasattr(c, "value")]
+    assert any("atmosfer basinciyla mutlak degere" in c for c in captions)
+
+

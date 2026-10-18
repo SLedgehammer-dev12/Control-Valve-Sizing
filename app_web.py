@@ -240,7 +240,13 @@ def render_result(result: SizingResult) -> None:
 
     with st.expander("Ara değerler", expanded=True):
         inter_df = pd.DataFrame(
-            [{"Parameter": k, "Value": v} for k, v in result.get("intermediate_values", {}).items()]
+            [
+                {
+                    "Parameter": str(k),
+                    "Value": f"{v:.4f}" if isinstance(v, float) else str(v),
+                }
+                for k, v in result.get("intermediate_values", {}).items()
+            ]
         )
         st.dataframe(inter_df, hide_index=True)
 
@@ -785,9 +791,7 @@ def main() -> None:
         ("equal_percentage", "linear"),
         key="flow_characteristic",
     )
-
     render_source_library()
-    render_report_tools()
 
     payload = {
         "service": st.session_state.service,
@@ -835,6 +839,8 @@ def main() -> None:
         render_gas_section(vendor_key)
     else:
         render_steam_section(vendor_key)
+
+    render_report_tools()
 
     with st.expander("Coklu Calisma Durumu (Multi-Case Sizing: Min / Normal / Max)", expanded=False):
         st.markdown(
