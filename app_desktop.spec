@@ -25,6 +25,26 @@ def _as_binary_toc(items):
     return out
 
 
+def _collect_coolprop_binaries():
+    """Collect CoolProp's native library binaries explicitly.
+
+    PyInstaller's collect_dynamic_libs("CoolProp") often misses CoolProp.dll
+    on Windows, causing "DLL load failed: The specified module could not be
+    found" at runtime. We scan the CoolProp package directory directly and
+    include .dll/.pyd/.so/.dylib files next to the CoolProp package in the
+    bundle so the .pyd can load its sibling DLL at runtime.
+    """
+    import CoolProp
+
+    cp_dir = os.path.dirname(CoolProp.__file__)
+    out = []
+    for fname in os.listdir(cp_dir):
+        if fname.endswith((".dll", ".pyd", ".so", ".dylib")):
+            src = os.path.join(cp_dir, fname)
+            out.append((os.path.join("CoolProp", fname), src, "BINARY"))
+    return out
+
+
 a = Analysis(
     ["app_desktop.py"],
     pathex=[],
@@ -103,7 +123,7 @@ a = Analysis(
 )
 
 # Collect native dynamic libraries shipped by the numeric stack
-a.binaries += _as_binary_toc(collect_dynamic_libs("CoolProp"))
+a.binaries += _collect_coolprop_binaries()
 a.binaries += _as_binary_toc(collect_dynamic_libs("fluids"))
 a.binaries += _as_binary_toc(collect_dynamic_libs("chemicals"))
 a.binaries += _as_binary_toc(collect_dynamic_libs("scipy"))
