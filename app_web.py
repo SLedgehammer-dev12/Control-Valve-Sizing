@@ -543,59 +543,63 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     temp_label = TEMPERATURE_UNITS[temp_unit]
     pres_label = PRESSURE_UNITS[pres_unit]
     flow_label = LIQUID_FLOW_UNITS[flow_unit]
-    c1, c2 = st.columns(2)
-    tooltip_label("Sicaklik", "Akiskan giris sicakligi. Viscosity, density ve cavitasyon hesaplamalarinda kullanilir.")
-    temperature_c = temperature_to_c(c1.number_input(f"Sicaklik [{temp_label}]", key="liquid_temp_c", step=1.0), temp_unit)
-    tooltip_label("Giris Basinci (P1)", "Vana giris mutlak basinci. Kavitasyon ve choked flow hesaplamalarinda kullanilir.")
-    inlet_pressure = pressure_to_bar_a(
-        c2.number_input(f"Giris P [{pres_label}]", key="liquid_p1", min_value=0.001, step=0.1), pres_unit
-    )
 
-    density_default = st.session_state.liquid_density
-    pv_default = st.session_state.liquid_pv
-    pc_default = st.session_state.liquid_pc
-    mu_default = st.session_state.liquid_mu
-    fluid_label: str = "Custom liquid"
+    # Fluid Properties Section
+    with st.expander("Akiskan Ozellikleri", expanded=True):
+        c1, c2 = st.columns(2)
+        tooltip_label("Sicaklik", "Akiskan giris sicakligi. Viscosity, density ve cavitasyon hesaplamalarinda kullanilir.")
+        temperature_c = temperature_to_c(c1.number_input(f"Sicaklik [{temp_label}]", key="liquid_temp_c", step=1.0), temp_unit)
+        tooltip_label("Giris Basinci (P1)", "Vana giris mutlak basinci. Kavitasyon ve choked flow hesaplamalarinda kullanilir.")
+        inlet_pressure = pressure_to_bar_a(
+            c2.number_input(f"Giris P [{pres_label}]", key="liquid_p1", min_value=0.001, step=0.1), pres_unit
+        )
 
-    if source == "Preset":
-        preset_map = {v["label"]: k for k, v in LIQUID_PRESETS.items()}
-        label = st.selectbox("Preset", list(preset_map.keys()), key="liquid_preset_label")
-        preset = get_liquid_preset(preset_map[label])
-        density_default = preset["density_kg_m3"]
-        pv_default = preset["vapor_pressure_bar_a"]
-        pc_default = preset["critical_pressure_bar_a"]
-        mu_default = preset["viscosity_pa_s"]
-        fluid_label = str(label)
-    elif source == "CoolProp pure fluid":
-        fluid = st.selectbox("CoolProp fluid", list_coolprop_fluids(), index=list_coolprop_fluids().index("Water"))
-        fluid_label = fluid
-        try:
-            props = get_pure_fluid_state(fluid, inlet_pressure, temperature_c)
-            density_default = props["density_kg_m3"]
-            pv_default = props["vapor_pressure_bar_a"]
-            pc_default = props["critical_pressure_bar_a"]
-            mu_default = props["viscosity_pa_s"]
-            st.caption(
-                f"Oto ozellikler: rho={density_default:.2f} kg/m3, Pv={pressure_from_bar_a(pv_default, pres_unit):.4f} {pres_label}, "
-                f"Pc={pressure_from_bar_a(pc_default, pres_unit):.3f} {pres_label}, mu={mu_default:.6g} Pa.s"
-            )
-        except Exception as exc:
-            st.warning(f"CoolProp ozellikleri okunamadi: {exc}")
+        density_default = st.session_state.liquid_density
+        pv_default = st.session_state.liquid_pv
+        pc_default = st.session_state.liquid_pc
+        mu_default = st.session_state.liquid_mu
+        fluid_label: str = "Custom liquid"
 
-    c3, c4, c5, c6 = st.columns(4)
-    tooltip_label("Yogunluk", "Akiskan yo gunlugu. Mass flow'dan hacimsel debi hesaplamada kullanilir.")
-    density = c3.number_input("Yogunluk [kg/m3]", value=float(density_default), key="liquid_density", min_value=0.001, step=1.0)
-    tooltip_label("Buhar Basinci", "Akiskan o anki sicakliktaki buhar basinci. Kavitasyon ve flashing riski hesaplamada kullanilir.")
-    vapor_pressure = pressure_to_bar_a(
-        c4.number_input(f"Buhar basinci [{pres_label}]", value=float(pv_default), key="liquid_pv", min_value=0.0, step=0.01), pres_unit
-    )
-    tooltip_label("Kritik Basinci", "Akiskan kritik noktasindaki basinc. Critical properties hesaplamada kullanilir.")
-    critical_pressure = pressure_to_bar_a(
-        c5.number_input(f"Kritik basinc [{pres_label}]", value=float(pc_default), key="liquid_pc", min_value=0.001, step=0.1), pres_unit
-    )
-    tooltip_label("Viskozite", "Akismanin ici surukleme katsayisi. Reynolds sayisi ve laminar akis kontrolunde kullanilir.")
-    viscosity = c6.number_input("Viskozite [Pa.s]", value=float(mu_default), key="liquid_mu", min_value=1e-7, step=0.0001, format="%.7f")
+        if source == "Preset":
+            preset_map = {v["label"]: k for k, v in LIQUID_PRESETS.items()}
+            label = st.selectbox("Preset", list(preset_map.keys()), key="liquid_preset_label")
+            preset = get_liquid_preset(preset_map[label])
+            density_default = preset["density_kg_m3"]
+            pv_default = preset["vapor_pressure_bar_a"]
+            pc_default = preset["critical_pressure_bar_a"]
+            mu_default = preset["viscosity_pa_s"]
+            fluid_label = str(label)
+        elif source == "CoolProp pure fluid":
+            fluid = st.selectbox("CoolProp fluid", list_coolprop_fluids(), index=list_coolprop_fluids().index("Water"))
+            fluid_label = fluid
+            try:
+                props = get_pure_fluid_state(fluid, inlet_pressure, temperature_c)
+                density_default = props["density_kg_m3"]
+                pv_default = props["vapor_pressure_bar_a"]
+                pc_default = props["critical_pressure_bar_a"]
+                mu_default = props["viscosity_pa_s"]
+                st.caption(
+                    f"Oto ozellikler: rho={density_default:.2f} kg/m3, Pv={pressure_from_bar_a(pv_default, pres_unit):.4f} {pres_label}, "
+                    f"Pc={pressure_from_bar_a(pc_default, pres_unit):.3f} {pres_label}, mu={mu_default:.6g} Pa.s"
+                )
+            except Exception as exc:
+                st.warning(f"CoolProp ozellikleri okunamadi: {exc}")
 
+        c3, c4, c5, c6 = st.columns(4)
+        tooltip_label("Yogunluk", "Akiskan yo gunlugu. Mass flow'dan hacimsel debi hesaplamada kullanilir.")
+        density = c3.number_input("Yogunluk [kg/m3]", value=float(density_default), key="liquid_density", min_value=0.001, step=1.0)
+        tooltip_label("Buhar Basinci", "Akiskan o anki sicakliktaki buhar basinci. Kavitasyon ve flashing riski hesaplamada kullanilir.")
+        vapor_pressure = pressure_to_bar_a(
+            c4.number_input(f"Buhar basinci [{pres_label}]", value=float(pv_default), key="liquid_pv", min_value=0.0, step=0.01), pres_unit
+        )
+        tooltip_label("Kritik Basinci", "Akiskan kritik noktasindaki basinc. Critical properties hesaplamada kullanilir.")
+        critical_pressure = pressure_to_bar_a(
+            c5.number_input(f"Kritik basinc [{pres_label}]", value=float(pc_default), key="liquid_pc", min_value=0.001, step=0.1), pres_unit
+        )
+        tooltip_label("Viskozite", "Akismanin ici surukleme katsayisi. Reynolds sayisi ve laminar akis kontrolunde kullanilir.")
+        viscosity = c6.number_input("Viskozite [Pa.s]", value=float(mu_default), key="liquid_mu", min_value=1e-7, step=0.0001, format="%.7f")
+
+    # Process Data Section
     st.markdown("**Proses Verileri**")
     p2, q, d1, d2 = st.columns(4)
     tooltip_label("Debi", "Hacimsel debi. Gerekli Cv hesaplamanin temel parametresidir.")
