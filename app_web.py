@@ -331,7 +331,11 @@ def render_result(result: SizingResult) -> None:
         characteristic=char_type,
     )
     with st.expander("Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)", expanded=True):
-        tab_inh, tab_inst = st.tabs(["Doğal (Inherent) Karakteristik", "Tesisat Kurulu (Installed) & Vana Otoritesi"])
+        tab_inh, tab_inst, tab_3d = st.tabs([
+            "Doğal (Inherent) Karakteristik",
+            "Tesisat Kurulu (Installed) & Vana Otoritesi",
+            "3D Karakteristik Eğrisi",
+        ])
         with tab_inh:
             op = curve.operating_point
             c_k1, c_k2, c_k3, c_k4 = st.columns(4)
@@ -403,6 +407,70 @@ def render_result(result: SizingResult) -> None:
                 inst_tbl_df = pd.DataFrame([p.to_dict() for p in inst.points])
                 inst_tbl_df.columns = ["Açıklık [%]", "Inherent Cv", "Kurulu Debi Q [%]", "Dinamik Kazanç (dQ/dh)", "Vana dP Oranı"]
                 st.dataframe(inst_tbl_df, hide_index=True)
+
+        with tab_3d:
+            st.markdown("### 3D Vana Karakteristik Eğrisi")
+            st.markdown("Bu 3D yüzey, vananın açıklık ve tasarım marjına göre gerekli Cv değerlerinin değişimini gösterir.")
+
+            import plotly.graph_objects as go
+
+            # Generate 3D surface data using result data (no vendor dependency needed)
+            openings = list(range(0, 101, 5))
+            margins = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3]
+            z_matrix = []
+
+            for margin_val in margins:
+                row = []
+                for pct_val in openings:
+                    margin_factor = 1.0 + margin_val
+                    flow_factor = pct_val / 100.0
+                    try:
+                        r = size_liquid_valve(
+                            LiquidSizingInput(
+                                flow_m3h=float(result["required_cv"]) * margin_factor * max(0.1, flow_factor),
+                                inlet_pressure_bar_a=float(result.get("p1", 8.0)),
+                                outlet_pressure_bar_a=float(result.get("p2", 5.0)),
+                                density_kg_m3=float(result.get("extra", {}).get("density", 998.0)),
+                                vapor_pressure_bar_a=float(result.get("extra", {}).get("vapor_pressure_bar_a", 0.023)),
+                                critical_pressure_bar_a=float(result.get("extra", {}).get("critical_pressure_bar_a", 220.64)),
+                                viscosity_pa_s=float(result.get("extra", {}).get("viscosity_pa_s", 0.00089)),
+                                fl=float(result.get("extra", {}).get("fl", 0.85)),
+                                fd=float(result.get("extra", {}).get("fd", 1.0)),
+                                pipe_inlet_diameter_mm=float(result.get("extra", {}).get("pipe_inlet_diameter_mm", 50.0)),
+                                pipe_outlet_diameter_mm=float(result.get("extra", {}).get("pipe_outlet_diameter_mm", 50.0)),
+                            ),
+                            valve_series=[],
+                            valve_meta={},
+                            design_margin_pct=margin_val,
+                            flow_characteristic=char_type,
+                        )
+                        row.append(float(r["required_cv"]))
+                    except Exception:
+                        row.append(float(result["required_cv"]))
+                z_matrix.append(row)
+
+            fig_3d = go.Figure(data=[go.Surface(
+                z=z_matrix,
+                x=openings,
+                y=[f"{m*100:.0f}%" for m in margins],
+                colorscale="Viridis",
+                colorbar=dict(title="Gerekli Cv"),
+            )])
+
+            fig_3d.update_layout(
+                title="Gerekli Cv - Açıklık vs Tasarım Marjı 3D Yüzeyi",
+                scene=dict(
+                    xaxis_title="Açıklık [%]",
+                    yaxis_title="Tasarım Marjı [%]",
+                    zaxis_title="Gerekli Cv",
+                ),
+                height=600,
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
+
+            st.plotly_chart(fig_3d, use_container_width=True)
+
+            st.caption("3D yüzey, vananın açıklık ve tasarım marjına bağlı olarak gerekli Cv değerlerinin nasıl değiştiğini gösterir.")
 
     with st.expander("3D Tesisat Karakteristigi (Vana Otoritesi Etkisi)", expanded=False):
         import plotly.graph_objects as go
@@ -975,54 +1043,140 @@ def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
 def main() -> None:
     st.set_page_config(page_title="Control Valve Sizing", page_icon="⚙️", layout="wide")
 
-    # Custom CSS for UI/UX improvements
+    # Custom CSS for modern UI/UX improvements
     st.markdown("""
     <style>
-    .card {
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px 0;
-        background-color: #f9f9f9;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    :root {
+        --primary-color: #2563eb;
+        --primary-hover: #1d4ed8;
+        --secondary-color: #64748b;
+        --success-color: #10b981;
+        --warning-color: #f59e0b;
+        --error-color: #ef4444;
+        --card-bg: #ffffff;
+        --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --border-color: #e2e8f0;
     }
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+
+    .main .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
+    }
+
+    .main-header {
+        text-align: center;
+        margin-bottom: 2rem;
+        padding: 2rem;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        border-radius: 12px;
+        color: white;
+    }
+
+    .main-header h1 {
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 700;
+    }
+
+    .main-header p {
+        margin: 0.5rem 0 0;
+        font-size: 1.1rem;
+        opacity: 0.9;
+    }
+
+    .card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        background-color: #ffffff;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+        box-shadow: 0 8px 12px -1px rgba(0, 0, 0, 0.1), 0 6px 6px -2px rgba(0, 0, 0, 0.1);
+    }
+
     .metric-card {
         text-align: center;
-        padding: 10px;
-        border: 1px solid #eee;
-        border-radius: 5px;
-        margin: 5px;
-        background-color: white;
+        padding: 1rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        margin: 0.5rem;
+        background-color: #ffffff;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
-    @media (max-width: 768px) {
-        .card {
-            padding: 10px;
-            margin: 5px 0;
-        }
-        .stButton button {
-            width: 100%;
-        }
-        .stColumns {
-            flex-direction: column;
-        }
+
+    .metric-card h4 {
+        margin: 0;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
-    .stTextInput, .stNumberInput, .stSelectbox, .stRadio {
-        margin-bottom: 10px;
+
+    .metric-card p {
+        margin: 0.5rem 0 0;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #1e293b;
     }
-    .error-msg {
-        color: red;
-        font-weight: bold;
+
+    .highlight-card {
+        border-left: 4px solid #2563eb;
+        background-color: #f8fafc;
     }
-    .success-msg {
-        color: green;
-        font-weight: bold;
+
+    .warning-card {
+        border-left: 4px solid #f59e0b;
+        background-color: #fffbeb;
     }
+
+    .error-card {
+        border-left: 4px solid #ef4444;
+        background-color: #fef2f2;
+    }
+
+    .success-card {
+        border-left: 4px solid #10b981;
+        background-color: #f0fdf4;
+    }
+
+    .section-header {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #1e293b;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .section-subheader {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #475569;
+        margin-bottom: 0.5rem;
+    }
+
     /* Tooltip styles */
     .tooltip-container {
         display: inline-flex;
         align-items: center;
         gap: 4px;
     }
+
     .tooltip-btn {
         font-size: 14px;
         cursor: help;
@@ -1032,9 +1186,11 @@ def main() -> None:
         padding: 0;
         line-height: 1;
     }
+
     .tooltip-btn:hover {
         color: #1a73e8;
     }
+
     .tooltip-content {
         visibility: hidden;
         position: absolute;
@@ -1051,16 +1207,49 @@ def main() -> None:
         max-width: 300px;
         white-space: pre-wrap;
     }
+
     .tooltip-container:hover .tooltip-content {
         visibility: visible;
     }
+
     .help-label {
         font-weight: 500;
         display: flex;
         align-items: center;
         gap: 6px;
     }
-</style>
+
+    .stTextInput, .stNumberInput, .stSelectbox, .stRadio {
+        margin-bottom: 10px;
+    }
+
+    .error-msg {
+        color: #ef4444;
+        font-weight: bold;
+    }
+
+    .success-msg {
+        color: #10b981;
+        font-weight: bold;
+    }
+
+    @media (max-width: 768px) {
+        .card {
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .metric-card {
+            padding: 0.75rem;
+            margin: 0.5rem;
+        }
+        .stButton button {
+            width: 100%;
+        }
+        .stColumns {
+            flex-direction: column;
+        }
+    }
+    </style>
     """, unsafe_allow_html=True)
 
     _init_state()

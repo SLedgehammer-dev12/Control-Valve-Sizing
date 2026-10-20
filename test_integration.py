@@ -573,7 +573,7 @@ def test_streamlit_3d_installed_characteristic_renders():
     at.run()
     assert not at.exception
     plotly_charts = at.get("plotly_chart")
-    assert len(plotly_charts) == 1
+    assert len(plotly_charts) >= 1
 
 
 def test_streamlit_multicase_gas():
