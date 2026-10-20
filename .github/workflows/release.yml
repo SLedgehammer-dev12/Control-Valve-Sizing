@@ -80,14 +80,22 @@ jobs:
       - name: Verify signature
         run: codesign --verify --deep --strict dist/ControlValveSizing.app
 
-      - name: Package release zip
-        run: ditto -c -k --sequesterRsrc dist/ControlValveSizing.app dist/ControlValveSizing_macos_arm64.zip
+      - name: Package release DMG (versioned name)
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          ditto -c -k --sequesterRsrc dist/ControlValveSizing.app dist/ControlValveSizing_macos_arm64.zip
+          hdiutil create -volname "ControlValveSizing" \
+            -srcfolder dist/ControlValveSizing.app \
+            -ov -format UDZO \
+            "dist/ControlValveSizing_macos_arm64_${VERSION}.dmg"
+          ls -la dist/*.dmg dist/*.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ControlValveSizing-macos-arm64
-          path: dist/ControlValveSizing_macos_arm64.zip
+          path: dist/ControlValveSizing_macos_arm64_*.dmg
           retention-days: 7
 
   release:
@@ -104,7 +112,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: artifacts/**/*.zip artifacts/**/*.dmg
           name: Control Valve Sizing ${{ github.ref_name }}
           body_path: release_notes.md
           generate_release_notes: false
