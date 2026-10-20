@@ -98,6 +98,22 @@ def _unit_selectors(prefix: str, flow_units: dict[str, str]) -> tuple[str, str, 
     )
 
 
+def tooltip_label(label: str, help_text: str, key: str | None = None) -> None:
+    """Render a label with an info tooltip icon."""
+    import html
+    safe_label = html.escape(label)
+    safe_text = html.escape(help_text)
+    key_attr = f' id="{key}"' if key else ""
+    st.markdown(
+        f'<div class="tooltip-container">'
+        f'  <span class="help-label">{safe_label}</span>'
+        f'  <button class="tooltip-btn"{key_attr} title="{safe_text}" aria-label="Yardım: {safe_text}">ⓘ</button>'
+        f'  <div class="tooltip-content">{safe_text}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _live_render(service: str, result: SizingResult, fluid_summary: dict) -> None:
     """Persist and render a freshly computed result (live calculation)."""
     st.session_state.last_result = result
@@ -528,7 +544,9 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     pres_label = PRESSURE_UNITS[pres_unit]
     flow_label = LIQUID_FLOW_UNITS[flow_unit]
     c1, c2 = st.columns(2)
+    tooltip_label("Sicaklik", "Akiskan giris sicakligi. Viscosity, density ve cavitasyon hesaplamalarinda kullanilir.")
     temperature_c = temperature_to_c(c1.number_input(f"Sicaklik [{temp_label}]", key="liquid_temp_c", step=1.0), temp_unit)
+    tooltip_label("Giris Basinci (P1)", "Vana giris mutlak basinci. Kavitasyon ve choked flow hesaplamalarinda kullanilir.")
     inlet_pressure = pressure_to_bar_a(
         c2.number_input(f"Giris P [{pres_label}]", key="liquid_p1", min_value=0.001, step=0.1), pres_unit
     )
@@ -565,23 +583,31 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
             st.warning(f"CoolProp ozellikleri okunamadi: {exc}")
 
     c3, c4, c5, c6 = st.columns(4)
+    tooltip_label("Yogunluk", "Akiskan yo gunlugu. Mass flow'dan hacimsel debi hesaplamada kullanilir.")
     density = c3.number_input("Yogunluk [kg/m3]", value=float(density_default), key="liquid_density", min_value=0.001, step=1.0)
+    tooltip_label("Buhar Basinci", "Akiskan o anki sicakliktaki buhar basinci. Kavitasyon ve flashing riski hesaplamada kullanilir.")
     vapor_pressure = pressure_to_bar_a(
         c4.number_input(f"Buhar basinci [{pres_label}]", value=float(pv_default), key="liquid_pv", min_value=0.0, step=0.01), pres_unit
     )
+    tooltip_label("Kritik Basinci", "Akiskan kritik noktasindaki basinc. Critical properties hesaplamada kullanilir.")
     critical_pressure = pressure_to_bar_a(
         c5.number_input(f"Kritik basinc [{pres_label}]", value=float(pc_default), key="liquid_pc", min_value=0.001, step=0.1), pres_unit
     )
+    tooltip_label("Viskozite", "Akismanin ici surukleme katsayisi. Reynolds sayisi ve laminar akis kontrolunde kullanilir.")
     viscosity = c6.number_input("Viskozite [Pa.s]", value=float(mu_default), key="liquid_mu", min_value=1e-7, step=0.0001, format="%.7f")
 
     st.markdown("**Proses Verileri**")
     p2, q, d1, d2 = st.columns(4)
+    tooltip_label("Debi", "Hacimsel debi. Gerekli Cv hesaplamanin temel parametresidir.")
     flow_value = q.number_input(f"Debi [{flow_label}]", key="liquid_flow_m3h", min_value=0.0001, step=1.0)
     flow_m3h = liquid_flow_to_m3h(flow_value, flow_unit, density_kg_m3=density)
+    tooltip_label("Cikis Basinci (P2)", "Vana cikis mutlak basinci. Delta P ve choked flow hesaplamada kullanilir.")
     outlet_pressure = pressure_to_bar_a(
         p2.number_input(f"Cikis P [{pres_label}]", key="liquid_p2", min_value=0.001, step=0.1), pres_unit
     )
+    tooltip_label("Hat Giris Capi", "Vana giris boru capi. Reducer etkisi (FP) hesaplamada kullanilir.")
     pipe_in_mm = d1.number_input("Hat giris capi [mm]", key="liquid_pipe_in_mm", min_value=1.0, step=1.0)
+    tooltip_label("Hat Cikis Capi", "Vana cikis boru capi. Erozion hizi hesaplamada kullanilir.")
     pipe_out_mm = d2.number_input("Hat cikis capi [mm]", key="liquid_pipe_out_mm", min_value=1.0, step=1.0)
 
     vendor = get_vendor_definition(vendor_key)
@@ -677,13 +703,17 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
     flow_label = GAS_FLOW_UNITS[flow_unit]
     c1, c2, c3, c4 = st.columns(4)
     basis = c1.radio("Kompozisyon bazisi", ["molar", "mass"], key="gas_basis", horizontal=True)
+    tooltip_label("Sicaklik", "Gaz akiskan giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
     temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="gas_temp_c", step=1.0), temp_unit)
+    tooltip_label("Giris Basinci (P1)", "Gaz giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
     inlet_pressure = pressure_to_bar_a(
         c3.number_input(f"Giris P [{pres_label}]", key="gas_p1", min_value=0.001, step=0.1), pres_unit
     )
+    tooltip_label("Cikis Basinci (P2)", "Gaz cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
     outlet_pressure = pressure_to_bar_a(
         c4.number_input(f"Cikis P [{pres_label}]", key="gas_p2", min_value=0.001, step=0.1), pres_unit
     )
+    tooltip_label("Debi", "Gaz hacimsel debi (nm3h). Gerekli Cv hesaplamanin temel parametresidir.")
     flow_value = st.number_input(f"Debi [{flow_label}]", key="gas_flow_nm3h", min_value=0.0001, step=10.0)
 
     gas_options = list_coolprop_fluids()
@@ -720,7 +750,9 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}, Fd={vendor.fd}")
     g1, g2 = st.columns(2)
+    tooltip_label("Hat Giris Capi", "Gaz hat giris boru capi. Reducer etkisi hesaplamada kullanilir.")
     pipe_in_mm = g1.number_input("Hat giris capi [mm]", key="gas_pipe_in_mm", min_value=1.0, step=1.0)
+    tooltip_label("Hat Cikis Capi", "Gaz hat cikis boru capi. Erozion hizi hesaplamada kullanilir.")
     pipe_out_mm = g2.number_input("Hat cikis capi [mm]", key="gas_pipe_out_mm", min_value=1.0, step=1.0)
 
     if not getattr(st.session_state, "gas_valid", False):
@@ -835,11 +867,15 @@ def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
     pres_label = PRESSURE_UNITS[pres_unit]
     flow_label = STEAM_FLOW_UNITS[flow_unit]
     c1, c2, c3, c4 = st.columns(4)
+    tooltip_label("Debi", "Buhar kutlesel debi (kg/h). Gerekli Cv hesaplamanin temel parametresidir.")
     flow_kg_h = steam_flow_to_kgh(c1.number_input(f"Debi [{flow_label}]", key="steam_flow_kgh", min_value=0.0001, step=100.0), flow_unit)
+    tooltip_label("Sicaklik", "Buhar giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
     temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="steam_temp_c", step=1.0), temp_unit)
+    tooltip_label("Giris Basinci (P1)", "Buhar giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
     inlet_pressure = pressure_to_bar_a(
         c3.number_input(f"Giris P [{pres_label}]", key="steam_p1", min_value=0.001, step=0.1), pres_unit
     )
+    tooltip_label("Cikis Basinci (P2)", "Buhar cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
     outlet_pressure = pressure_to_bar_a(
         c4.number_input(f"Cikis P [{pres_label}]", key="steam_p2", min_value=0.001, step=0.1), pres_unit
     )
@@ -952,7 +988,50 @@ def main() -> None:
         color: green;
         font-weight: bold;
     }
-    </style>
+    /* Tooltip styles */
+    .tooltip-container {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .tooltip-btn {
+        font-size: 14px;
+        cursor: help;
+        border: none;
+        background: transparent;
+        color: #6c757d;
+        padding: 0;
+        line-height: 1;
+    }
+    .tooltip-btn:hover {
+        color: #1a73e8;
+    }
+    .tooltip-content {
+        visibility: hidden;
+        position: absolute;
+        background-color: #333;
+        color: #fff;
+        text-align: left;
+        border-radius: 4px;
+        padding: 8px 12px;
+        z-index: 1000;
+        font-size: 13px;
+        line-height: 1.4;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        width: max-content;
+        max-width: 300px;
+        white-space: pre-wrap;
+    }
+    .tooltip-container:hover .tooltip-content {
+        visibility: visible;
+    }
+    .help-label {
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+</style>
     """, unsafe_allow_html=True)
 
     _init_state()

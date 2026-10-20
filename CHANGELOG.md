@@ -28,6 +28,7 @@ Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine ba
 - PDF characteristic curve: inherent valve characteristic drawn with fpdf2 primitives (no extra dependency), with required-Cv reference line and operating-point marker; `flow_characteristic` is now stored in all sizing results.
 - UI reset to defaults: web sidebar button and desktop action-bar button (`Esc` in desktop); clears inputs, results and history.
 - Desktop keyboard shortcuts: `Enter` = Hesapla, `Esc` = Varsayılana Sıfırla.
+- Web UI UX: context-sensitive tooltips (ⓘ) added to all input fields in liquid, gas and steam sections explaining parameter meaning and typical values; CSS tooltip system added for reuse across all input fields.
 - Result history / comparison: last three explicit calculations shown side-by-side (web dataframe table; desktop Treeview dialog), including P1/P2/flow process conditions; live recalculation does not pollute history.
 - Declared `fpdf2` and `plotly` dependencies in `requirements.txt` and `pyproject.toml`.
 - Web UI 3D visualization: interactive installed-characteristic surface (opening % vs valve authority PR vs installed flow Q/Qmax) rendered with plotly, including the current operating-point marker; illustrates characteristic distortion per IEC 60534-2-4.
