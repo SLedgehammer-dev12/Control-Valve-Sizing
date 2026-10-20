@@ -878,23 +878,24 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
 def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Buhar")
-    temp_unit, pres_unit, flow_unit = _unit_selectors("steam", STEAM_FLOW_UNITS)
-    temp_label = TEMPERATURE_UNITS[temp_unit]
-    pres_label = PRESSURE_UNITS[pres_unit]
-    flow_label = STEAM_FLOW_UNITS[flow_unit]
-    c1, c2, c3, c4 = st.columns(4)
-    tooltip_label("Debi", "Buhar kutlesel debi (kg/h). Gerekli Cv hesaplamanin temel parametresidir.")
-    flow_kg_h = steam_flow_to_kgh(c1.number_input(f"Debi [{flow_label}]", key="steam_flow_kgh", min_value=0.0001, step=100.0), flow_unit)
-    tooltip_label("Sicaklik", "Buhar giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
-    temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="steam_temp_c", step=1.0), temp_unit)
-    tooltip_label("Giris Basinci (P1)", "Buhar giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
-    inlet_pressure = pressure_to_bar_a(
-        c3.number_input(f"Giris P [{pres_label}]", key="steam_p1", min_value=0.001, step=0.1), pres_unit
-    )
-    tooltip_label("Cikis Basinci (P2)", "Buhar cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
-    outlet_pressure = pressure_to_bar_a(
-        c4.number_input(f"Cikis P [{pres_label}]", key="steam_p2", min_value=0.001, step=0.1), pres_unit
-    )
+    with st.expander("Buhar Ozellikleri", expanded=True):
+        temp_unit, pres_unit, flow_unit = _unit_selectors("steam", STEAM_FLOW_UNITS)
+        temp_label = TEMPERATURE_UNITS[temp_unit]
+        pres_label = PRESSURE_UNITS[pres_unit]
+        flow_label = STEAM_FLOW_UNITS[flow_unit]
+        c1, c2, c3, c4 = st.columns(4)
+        tooltip_label("Debi", "Buhar kutlesel debi (kg/h). Gerekli Cv hesaplamanin temel parametresidir.")
+        flow_kg_h = steam_flow_to_kgh(c1.number_input(f"Debi [{flow_label}]", key="steam_flow_kgh", min_value=0.0001, step=100.0), flow_unit)
+        tooltip_label("Sicaklik", "Buhar giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
+        temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="steam_temp_c", step=1.0), temp_unit)
+        tooltip_label("Giris Basinci (P1)", "Buhar giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
+        inlet_pressure = pressure_to_bar_a(
+            c3.number_input(f"Giris P [{pres_label}]", key="steam_p1", min_value=0.001, step=0.1), pres_unit
+        )
+        tooltip_label("Cikis Basinci (P2)", "Buhar cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
+        outlet_pressure = pressure_to_bar_a(
+            c4.number_input(f"Cikis P [{pres_label}]", key="steam_p2", min_value=0.001, step=0.1), pres_unit
+        )
 
     from fluid_properties import evaluate_steam_state, get_saturated_steam_temperature
 
