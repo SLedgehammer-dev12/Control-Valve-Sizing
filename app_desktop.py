@@ -40,7 +40,7 @@ class ToolTip:
         self.widget.bind("<Leave>", self.on_leave)
         self.widget.bind("<Button-1>", self.on_leave)
 
-    def _show_tooltip(self, event):
+    def _show_tooltip(self, _event):
         x, y, _, _ = self.widget.bbox("insert")
         if self.widget.winfo_width() > 0:
             x = self.widget.winfo_rootx() + 25
@@ -63,7 +63,7 @@ class ToolTip:
         )
         label.pack(ipadx=1)
 
-    def _hide_tooltip(self, event=None):
+    def _hide_tooltip(self, _event=None):
         tw = self.tipwindow
         self.tipwindow = None
         if tw:
@@ -72,7 +72,7 @@ class ToolTip:
     def _on_enter(self, event=None):
         self._show_tooltip(event)
 
-    def _on_live_change(self, event=None):
+    def _on_live_change(self, *_args) -> str:
         self._hide_tooltip()
 
 
