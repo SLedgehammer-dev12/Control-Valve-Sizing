@@ -1,6 +1,6 @@
 # Project Index: Control Valve Sizing (v3.3.0)
 
-> Generated: 2026-10-20 | Staleness Threshold: 7 days | Tests: 518/518 PASS (95.43% cov) | Scenarios: 52/52 PASS
+> Generated: 2026-10-21 | Staleness Threshold: 7 days | Tests: 522/522 PASS (95.24% cov) | Scenarios: 52/52 PASS
 
 ## 1. Architectural Overview
 
@@ -68,8 +68,8 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 - **Web UI**: `streamlit run app_web.py` or entry point `valve-sizing-web`
 - **Industrial Benchmarks (52 Scenarios)**: `python verify_50_scenarios.py`
 - **IEC Standard Benchmarks (12 Scenarios)**: `python verify_scenarios.py`
-- **Automated Test Suite**: `python -m pytest -q` (518 tests)
-- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 95.43%)
+- **Automated Test Suite**: `python -m pytest -q` (522 tests)
+- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 95.24%)
 - **Code Linter**: `ruff check .` (target line length: 150)
 
 ## 4. Key Architectural Patterns

@@ -81,7 +81,7 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 disallow_untyped_defs = false
 check_untyped_defs = false
-exclude = ["vendor"]
+exclude = ["vendor", "dist", "build"]
 
 [tool.coverage.run]
 source = ["."]
@@ -93,6 +93,7 @@ exclude_lines = ["if __name__ == .__main__.:", "pragma: no cover", "raise NotImp
 
 [tool.pytest.ini_options]
 testpaths = ["."]
+norecursedirs = ["vendor", ".opencode", ".agents", "build", "dist", "node_modules"]
 python_files = ["test_*.py"]
 filterwarnings = ["ignore::DeprecationWarning"]
 addopts = "--tb=short --strict-markers"

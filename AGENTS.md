@@ -120,9 +120,10 @@ python app_desktop.py
 This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mode, minimal diffs) and **addyosmani/agent-skills** (lifecycle engineering skills & subagent personas) across both **OpenCode** and **Antigravity**:
 
 1. **Submodules**: `vendor/ponytail` and `vendor/agent-skills`
-2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`), commands in `.opencode/command/` (`build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
-3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/`, and skills in `.agents/skills/`.
-4. **Orchestration Matrix**:
+2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`orchestrator`, `cv-orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`), commands in `.opencode/command/` (`orchestrate`, `build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
+3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/` (`orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`), and skills in `.agents/skills/`.
+4. **Master Orchestrator**: `orchestrator` coordinates the entire engineering cycle, decomposing requests, managing human confirmation gates before edits, assigning tasks to specialists, and iteratively evaluating/re-dispatching upon test/review failures.
+5. **Orchestration Matrix**:
    - **SPEC / DEFINE**: `spec-driven-development`, `api-and-interface-design`, `idea-refine`
    - **PLAN**: `planning-and-task-breakdown`, `interview-me`, `constraint-driven-development`
    - **BUILD**: `incremental-implementation`, `test-driven-development`, `frontend-ui-engineering`
@@ -132,7 +133,7 @@ This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mod
 
 ### Test Status
 
-- **518 tests, 100% passing**
-- **Coverage**: 95.43% (core modules at 100% statement coverage)
+- **522 tests, 100% passing**
+- **Coverage**: 95.24% (core modules at 100% statement coverage)
 - **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12/3.13, ruff + mypy + pytest)
 - **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

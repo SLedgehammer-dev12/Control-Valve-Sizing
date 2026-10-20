@@ -2,7 +2,17 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
-### Web UI coverage tests: high-noise acoustic-mitigation panel, propane severe-cavitation multi-stage panel, CoolProp liquid source, reset button, and multi-case analysis for gas and steam; `app_web.py` coverage raised from 86% to 92%.
+## [3.3.3]
+
+### Fixed
+- macOS app version: `CFBundleShortVersionString`/`CFBundleVersion` were stale at 3.3.1 in the previously shipped `.dmg`; rebuilt `.app` and `.dmg` now report **3.3.3** (`Info.plist` verified).
+- Desktop tooltips: `ToolTip` class bound to non-existent `self.on_enter`/`self.on_leave` methods, which would raise `AttributeError` on widget construction; renamed to `_on_enter`/`_on_leave` so tooltips work on every input field.
+- `valve_sizing.__version__` and `PROJECT_INDEX.json` version synced to 3.3.3.
+
+### Added
+- Desktop tooltips: `ToolTip` class and `tooltip_label()` helper; every Liquid/Gas/Steam input and sidebar option now has an explanatory hover tooltip.
+- PDF "Key Highlights" strip: color-coded boxes for predicted noise (green ≤85 dBA, red above), actuator thrust margin (green/red by stroke adequacy), opening % (green in 20–85%) and choked-flow status.
+- PDF working-point table: inherent characteristic curve values at 25/50/75/100% openings (Cv and Kv), complementing the curve chart.
 - PDF report export: `build_pdf_report()` in `reporting.py` (fpdf2, Turkish glyph sanitization for core fonts) exposed as a web download button and a desktop `Dosya → Hesaplama Raporu Kaydet (PDF)` menu item.
 - PDF characteristic curve: inherent valve characteristic drawn with fpdf2 primitives (no extra dependency), with required-Cv reference line and operating-point marker; `flow_characteristic` is now stored in all sizing results.
 - UI reset to defaults: web sidebar button and desktop action-bar button (`Esc` in desktop); clears inputs, results and history.
@@ -10,12 +20,10 @@ Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine ba
 - Web UI 3D visualization: interactive installed-characteristic surface (opening % vs valve authority PR vs installed flow Q/Qmax) rendered with plotly, including the current operating-point marker; illustrates characteristic distortion per IEC 60534-8-4.
 - Web UI 3D operating envelope: Min/Normal/Max operating points plotted in 3D (flow vs ΔP vs opening %) for the recommended valve in the multi-case analysis, colored by opening.
 - Project JSON validation: required numeric fields must be finite numbers and unit selector keys are validated against the supported unit maps, so corrupt or hand-edited project files cannot break widget state on load.
-- PDF "Key Highlights" strip: color-coded boxes for predicted noise (green ≤85 dBA, red above), actuator thrust margin (green/red by stroke adequacy), opening % (green in 20–85%) and choked-flow status.
-- PDF working-point table: inherent characteristic curve values at 25/50/75/100% openings (Cv and Kv), complementing the curve chart.
 
 ### Assets
 - `ControlValveSizing_windows_x86_64.zip` (~73.6 MB)
-- `ControlValveSizing_macos_arm64_3.3.3.dmg` (~146 MB)
+- `ControlValveSizing_macos_arm64_3.3.3.dmg` (~143 MB)
 
 ## [Unreleased]
 
