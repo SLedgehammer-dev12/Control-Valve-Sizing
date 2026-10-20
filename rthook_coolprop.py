@@ -6,8 +6,9 @@ _MEIPASS/<package>/ but the sibling DLL may not be on the DLL search path.
 This hook adds the bundled CoolProp directory to both os.environ['PATH']
 and os.add_dll_directory() so LoadLibrary(CoolProp.dll) succeeds.
 """
-import sys
+import contextlib
 import os
+import sys
 
 if sys.platform == "win32":
     coolprop_dir = os.path.join(sys._MEIPASS, "CoolProp")
@@ -15,7 +16,5 @@ if sys.platform == "win32":
         # Add to PATH for LoadLibrary
         os.environ["PATH"] = coolprop_dir + os.pathsep + os.environ.get("PATH", "")
         # Add to DLL search directory (Python 3.8+)
-        try:
+        with contextlib.suppress(Exception):
             os.add_dll_directory(coolprop_dir)
-        except Exception:
-            pass
