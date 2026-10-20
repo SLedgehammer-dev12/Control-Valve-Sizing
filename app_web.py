@@ -558,9 +558,7 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     with st.expander("Akiskan Ozellikleri", expanded=True):
         c1, c2 = st.columns(2)
         tooltip_label("Sicaklik", "Akiskan giris sicakligi. Viscosity, density ve cavitasyon hesaplamalarinda kullanilir.")
-        tooltip_label("Sicaklik", "Akiskan giris sicakligi. Viscosity, density ve cavitasyon hesaplamalarinda kullanilir.")
         temperature_c = temperature_to_c(c1.number_input(f"Sicaklik [{temp_label}]", key="liquid_temp_c", step=1.0), temp_unit)
-        tooltip_label("Giris Basinci (P1)", "Vana giris mutlak basinci. Kavitasyon ve choked flow hesaplamalarinda kullanilir.")
         tooltip_label("Giris Basinci (P1)", "Vana giris mutlak basinci. Kavitasyon ve choked flow hesaplamalarinda kullanilir.")
         inlet_pressure = pressure_to_bar_a(
             c2.number_input(f"Giris P [{pres_label}]", key="liquid_p1", min_value=0.001, step=0.1), pres_unit
