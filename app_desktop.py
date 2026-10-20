@@ -36,9 +36,9 @@ class ToolTip:
         self.widget = widget
         self.text = text
         self.tipwindow = None
-        self.widget.bind("<Enter>", self.on_enter)
-        self.widget.bind("<Leave>", self.on_leave)
-        self.widget.bind("<Button-1>", self.on_leave)
+        self.widget.bind("<Enter>", self._on_enter)
+        self.widget.bind("<Leave>", self._on_leave)
+        self.widget.bind("<Button-1>", self._on_leave)
 
     def _show_tooltip(self, _event):
         x, y, _, _ = self.widget.bbox("insert")
@@ -72,7 +72,7 @@ class ToolTip:
     def _on_enter(self, event=None):
         self._show_tooltip(event)
 
-    def _on_live_change(self, *_args) -> str:
+    def _on_leave(self, _event=None):
         self._hide_tooltip()
 
 
