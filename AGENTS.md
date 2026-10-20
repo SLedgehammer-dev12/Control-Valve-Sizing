@@ -132,7 +132,7 @@ This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mod
 
 ### Test Status
 
-- **463 tests, 100% passing**
-- **Coverage**: 93.71% (16 core modules at 100% statement coverage)
+- **518 tests, 100% passing**
+- **Coverage**: 95.43% (core modules at 100% statement coverage)
 - **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12/3.13, ruff + mypy + pytest)
 - **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

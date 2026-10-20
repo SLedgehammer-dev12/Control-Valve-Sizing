@@ -4,7 +4,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from project_io import dump_project_json, load_project_json
-from reporting import build_report
+from reporting import build_pdf_report, build_report
 from valve_sizing import LiquidSizingInput, size_liquid_valve
 from vendor_catalog import get_vendor_definition
 
@@ -61,6 +61,44 @@ def test_load_project_json_rejects_missing_data():
     invalid = '{"project_type":"control_valve_sizing","service":"Gas"}'
     with pytest.raises(ValueError, match="Proje data alanı bir JSON nesnesi olmalidir"):
         load_project_json(invalid)
+
+
+def test_load_project_json_rejects_non_numeric_required_field():
+    invalid = (
+        '{"project_type":"control_valve_sizing","schema_version":1,"service":"Liquid",'
+        '"data":{"liquid_flow_m3h":"abc","liquid_p1":8.0,"liquid_p2":5.0}}'
+    )
+    with pytest.raises(ValueError, match="sayisal bir deger"):
+        load_project_json(invalid)
+
+
+def test_load_project_json_rejects_non_finite_required_field():
+    invalid = (
+        '{"project_type":"control_valve_sizing","schema_version":1,"service":"Liquid",'
+        '"data":{"liquid_flow_m3h":NaN,"liquid_p1":8.0,"liquid_p2":5.0}}'
+    )
+    with pytest.raises(ValueError, match="sayisal bir deger"):
+        load_project_json(invalid)
+
+
+def test_load_project_json_rejects_invalid_unit_key():
+    invalid = (
+        '{"project_type":"control_valve_sizing","schema_version":1,"service":"Liquid",'
+        '"data":{"liquid_flow_m3h":25.0,"liquid_p1":8.0,"liquid_p2":5.0,"liquid_temp_unit":"X"}}'
+    )
+    with pytest.raises(ValueError, match="gecersiz birim"):
+        load_project_json(invalid)
+
+
+def test_load_project_json_accepts_valid_units():
+    valid = (
+        '{"project_type":"control_valve_sizing","schema_version":1,"service":"Liquid",'
+        '"data":{"liquid_flow_m3h":25.0,"liquid_p1":8.0,"liquid_p2":5.0,'
+        '"liquid_temp_unit":"F","liquid_pres_unit":"psi_a","liquid_flow_unit":"gpm"}}'
+    )
+    loaded = load_project_json(valid)
+    assert loaded["data"]["liquid_temp_unit"] == "F"
+    assert loaded["data"]["liquid_flow_unit"] == "gpm"
 
 
 def test_report_contains_result_and_sources():
@@ -123,6 +161,78 @@ def test_report_scalar_actuator_thrust_branch():
     modified = dataclasses.replace(result, extra={**result.extra, "actuator_thrust_n": 1234.5})
     report = build_report("Liquid", None, modified)
     assert "Total estimated thrust: 1234.5 N" in report
+
+
+def test_pdf_report_is_valid():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25.0, 8.0, 5.0, 998.0, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+        valve_meta={"vendor": vendor.vendor},
+    )
+    pdf = build_pdf_report("Liquid", {"Fluid": "Water"}, result)
+    assert pdf[:4] == b"%PDF"
+    assert len(pdf) > 1000
+
+
+def test_pdf_report_flashing_two_phase_velocity_branch():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=40.0,
+            inlet_pressure_bar_a=10.0,
+            outlet_pressure_bar_a=0.2,
+            density_kg_m3=950.0,
+            vapor_pressure_bar_a=2.5,
+            critical_pressure_bar_a=46.0,
+            viscosity_pa_s=0.0008,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+            temperature_c=120.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    pdf = build_pdf_report("Liquid", None, result)
+    assert pdf[:4] == b"%PDF"
+
+
+def test_pdf_report_scalar_actuator_thrust_branch():
+    import dataclasses
+
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25.0, 8.0, 5.0, 998.0, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    modified = dataclasses.replace(result, extra={**result.extra, "actuator_thrust_n": 1234.5})
+    pdf = build_pdf_report("Liquid", None, modified)
+    assert pdf[:4] == b"%PDF"
+
+
+def test_pdf_report_includes_characteristic_curve():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25.0, 8.0, 5.0, 998.0, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+        flow_characteristic="linear",
+    )
+    assert result.get("flow_characteristic") == "linear"
+    pdf = build_pdf_report("Liquid", None, result)
+    assert pdf[:4] == b"%PDF"
+    assert len(pdf) > 5000  # chart adds drawing content over the text-only baseline
+
+
+def test_pdf_report_summary_boxes_without_optional_data():
+    import dataclasses
+
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(25.0, 8.0, 5.0, 998.0, 0.023, 220.64, 0.00089, fl=vendor.fl or 0.85, fd=vendor.fd or 1.0),
+        valve_series=list(vendor.sizes),
+    )
+    modified = dataclasses.replace(result, extra={**result.extra, "actuator_selection": None, "noise_db": None})
+    pdf = build_pdf_report("Liquid", None, modified)
+    assert pdf[:4] == b"%PDF"
 
 
 def test_streamlit_app_loads_and_shows_title():
@@ -286,6 +396,7 @@ def test_streamlit_multicase_section():
     metric_labels = [m.label for m in at.metric]
     assert any("Turndown" in label for label in metric_labels)
     assert len(at.dataframe) > 0
+    assert len(at.get("plotly_chart")) >= 2
 
 
 
@@ -359,6 +470,10 @@ def test_streamlit_advanced_sections_and_metrics():
     assert "Kademe Sayısı" in metric_labels
     assert "Kavitasyon Durumu" in metric_labels
     assert "Gürültü Azaltma" in metric_labels
+    assert "Açılma Süresi (t_open)" in metric_labels
+    assert "Kapanma Süresi (t_close)" in metric_labels
+    assert "Oda Hacmi" in metric_labels
+    assert "Toplam Hava Tüketimi" in metric_labels
 
     at.sidebar.radio[0].set_value("Gas")
     at.run()
@@ -378,5 +493,136 @@ def test_streamlit_gauge_pressure_caption():
     assert not at.exception
     captions = [c.value for c in at.caption if hasattr(c, "value")]
     assert any("atmosfer basinciyla mutlak degere" in c for c in captions)
+
+
+def test_streamlit_high_noise_shows_acoustic_mitigation():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=15)
+    at.run()
+    for key, val in [("liquid_p1", 50.0), ("liquid_p2", 1.0), ("liquid_flow_m3h", 100.0)]:
+        _set_number_input(at, key, val)
+    at.run()
+    assert not at.exception
+    warnings = [w.value for w in at.warning]
+    assert any("85 dBA" in w for w in warnings)
+    metric_labels = [m.label for m in at.metric]
+    assert "Whisper Trim (-18 dBA)" in metric_labels
+    assert "Boru Ceketi (-10 dBA)" in metric_labels
+
+
+def test_streamlit_propane_severe_cavitation_shows_multistage():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=15)
+    at.run()
+    for key, val in [
+        ("liquid_density", 500.0),
+        ("liquid_pv", 8.5),
+        ("liquid_pc", 42.5),
+        ("liquid_mu", 0.00011),
+        ("liquid_p1", 15.0),
+        ("liquid_p2", 2.0),
+        ("liquid_flow_m3h", 30.0),
+    ]:
+        _set_number_input(at, key, val)
+    at.run()
+    assert not at.exception
+    info = " ".join(i.value for i in at.info if hasattr(i, "value"))
+    assert "Önerilen Trim" in info
+    markdown = " ".join(m.value for m in at.markdown if hasattr(m, "value"))
+    assert "Kademe Başına Maks İzin Verilen" in markdown
+
+
+def test_streamlit_liquid_coolprop_source():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=15)
+    at.run()
+    src = next(sb for sb in at.selectbox if sb.label == "Akiskan tanimi")
+    src.set_value("CoolProp pure fluid")
+    at.run()
+    assert not at.exception
+    captions = [c.value for c in at.caption if hasattr(c, "value")]
+    assert any("Oto ozellikler" in c for c in captions)
+
+
+def test_streamlit_reset_button_restores_defaults():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    _set_number_input(at, "liquid_flow_m3h", 77.0)
+    at.run()
+    assert float(at.session_state["liquid_flow_m3h"]) == 77.0
+    next(b for b in at.button if "Varsayılana Sıfırla" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    assert float(at.session_state["liquid_flow_m3h"]) == 25.0
+    assert at.session_state["service"] == "Liquid"
+
+
+def test_streamlit_history_deduplicates_identical_results():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=15)
+    at.run()
+    assert len(at.session_state["result_history"]) == 1
+    at.run()
+    assert len(at.session_state["result_history"]) == 1
+    _set_number_input(at, "liquid_flow_m3h", 100.0)
+    at.run()
+    history = at.session_state["result_history"]
+    assert len(history) == 2
+    assert history[0]["p1"] == 8.0
+    assert history[0]["flow"] == 100.0
+
+
+def test_streamlit_3d_installed_characteristic_renders():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=15)
+    at.run()
+    assert not at.exception
+    plotly_charts = at.get("plotly_chart")
+    assert len(plotly_charts) == 1
+
+
+def test_streamlit_multicase_gas():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    at.sidebar.radio[0].set_value("Gas")
+    at.run()
+    next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    assert "last_multicase" in at.session_state
+    assert len(at.get("plotly_chart")) >= 2
+
+
+def test_streamlit_multicase_steam():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    at.sidebar.radio[0].set_value("Steam")
+    at.run()
+    next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    assert "last_multicase" in at.session_state
+    assert len(at.get("plotly_chart")) >= 2
+
+
+def test_streamlit_gas_z_sensitivity_panel():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    at.sidebar.radio[0].set_value("Gas")
+    at.run()
+    next(c for c in at.checkbox if c.key == "z_sens_enabled").set_value(True)
+    at.run()
+    assert not at.exception
+    labels = [m.label for m in at.metric]
+    assert "Cv (Z-0.05)" in labels
+    assert "Cv (Z+0.05)" in labels
+
+
+def test_streamlit_gas_joule_thomson_hydrate_risk():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    at.sidebar.radio[0].set_value("Gas")
+    at.run()
+    for key, val in [("gas_p1", 100.0), ("gas_p2", 20.0), ("gas_temp_c", 20.0)]:
+        _set_number_input(at, key, val)
+    at.run()
+    assert not at.exception
+    errors = [e.value for e in at.error]
+    assert any("hidrat" in e.lower() for e in errors)
 
 

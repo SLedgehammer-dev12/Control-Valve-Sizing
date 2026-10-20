@@ -8,7 +8,7 @@ from typing import Any
 from config import GAS_PRESET_NAMES, GAS_PRESETS
 from fluid_properties import LIQUID_PRESETS, evaluate_gas_mixture, get_liquid_preset, get_pure_fluid_state, list_coolprop_fluids
 from project_io import dump_project_json, load_project_json
-from reporting import build_report
+from reporting import build_pdf_report, build_report
 from units import (
     GAS_FLOW_UNITS,
     LIQUID_FLOW_UNITS,
@@ -89,6 +89,7 @@ class ValveSizingApp:
         self._live_enabled = False
         self._field_labels: dict[str, ttk.Label] = {}
         self._field_family: dict[str, str] = {}
+        self._result_history: list[dict[str, Any]] = []
 
         # Display variables
         self.z_calculated_display = tk.StringVar(value="--")
@@ -107,6 +108,34 @@ class ValveSizingApp:
         self._refresh_unit_labels()
         self._live_enabled = True
 
+        # Snapshot of all input variable default values (for reset)
+        self._var_defaults: dict[str, Any] = {}
+        for attr in (
+            "service_type", "vendor_key", "liquid_source", "liquid_preset_label",
+            "design_margin", "flow_characteristic",
+            "liquid_temp_unit", "liquid_pres_unit", "liquid_flow_unit",
+            "gas_temp_unit", "gas_pres_unit", "gas_flow_unit",
+            "steam_temp_unit", "steam_pres_unit", "steam_flow_unit",
+        ):
+            self._var_defaults[attr] = getattr(self, attr).get()
+        for key, var in self.inputs.items():
+            self._var_defaults[f"input:{key}"] = var.get()
+
+        # Klavye kısayolları: Enter = Hesapla, Esc = Varsayılana Sıfırla
+        self.root.bind("<Return>", lambda _event: self._calculate())
+        self.root.bind("<Escape>", lambda _event: self._reset_to_defaults())
+
+    def _reset_to_defaults(self) -> None:
+        """Reset all input variables to their initial default values."""
+        for attr, value in self._var_defaults.items():
+            if attr.startswith("input:"):
+                key = attr[len("input:"):]
+                self.inputs[key].set(value)
+            else:
+                getattr(self, attr).set(value)
+        self._result_history = []
+        self._on_live_change()
+
     def _build_menu(self) -> None:
         menubar = tk.Menu(self.root)
         file_menu = tk.Menu(menubar, tearoff=0)
@@ -114,6 +143,7 @@ class ValveSizingApp:
         file_menu.add_command(label="Projeyi Yukle (JSON)", command=self._load_project)
         file_menu.add_separator()
         file_menu.add_command(label="Hesaplama Raporu Kaydet (Markdown)", command=self._save_report)
+        file_menu.add_command(label="Hesaplama Raporu Kaydet (PDF)", command=self._save_pdf_report)
         file_menu.add_command(label="ISA-20 Datasheet Kaydet (MD / HTML)", command=self._export_isa20)
         file_menu.add_separator()
         file_menu.add_command(label="Cikis", command=self.root.quit)
@@ -139,6 +169,10 @@ class ValveSizingApp:
         tools_menu.add_command(
             label="Gelismis Malzeme ve Bonnet Secimi (NACE / API 941)",
             command=self._open_material_selection_dialog,
+        )
+        tools_menu.add_command(
+            label="Aktorator Tepki Suresi ve Hava Tuketimi (ISA-75.25)",
+            command=self._open_actuator_dynamics_dialog,
         )
         menubar.add_cascade(label="Araclar", menu=tools_menu)
 
@@ -248,6 +282,30 @@ class ValveSizingApp:
             bg="#2a6d8a",
             fg="white",
             activebackground="#1f5670",
+            relief="flat",
+            font=("Segoe UI Semibold", 11),
+            padx=18,
+            pady=10,
+        ).pack(side="left")
+        tk.Button(
+            action_bar,
+            text="Varsayılana Sıfırla",
+            command=self._reset_to_defaults,
+            bg="#6c757d",
+            fg="white",
+            activebackground="#5a6268",
+            relief="flat",
+            font=("Segoe UI Semibold", 11),
+            padx=18,
+            pady=10,
+        ).pack(side="left")
+        tk.Button(
+            action_bar,
+            text="Gecmis / Karsilastirma",
+            command=self._show_history_dialog,
+            bg="#8a6d3b",
+            fg="white",
+            activebackground="#725a30",
             relief="flat",
             font=("Segoe UI Semibold", 11),
             padx=18,
@@ -859,6 +917,22 @@ class ValveSizingApp:
 
         self.last_result = result
         self.last_fluid_summary = fluid_summary
+        if show_errors:
+            # Explicit "Hesapla" click only (live updates pass show_errors=False)
+            entry = {
+                "service": result["service"],
+                "p1": round(float(result.get("p1", 0.0)), 3),
+                "p2": round(float(result.get("p2", 0.0)), 3),
+                "flow": round(float(result.get("flow", 0.0)), 3),
+                "required_cv": float(result["required_cv"]),
+                "rated_cv": float(result["rated_cv"]),
+                "valve_dn_mm": int(result["valve_dn_mm"]),
+                "valve_inch": str(result["valve_inch"]),
+                "opening_percent": round(float(result["opening_percent"]), 1),
+                "is_choked": bool(result["is_choked"]),
+            }
+            if entry not in self._result_history:
+                self._result_history = [entry, *self._result_history][:3]
         char_name = self.flow_characteristic.get()
         op_analysis = evaluate_operating_point(
             required_cv=result["required_cv"],
@@ -965,6 +1039,34 @@ class ValveSizingApp:
 
         self.result_box.delete("1.0", tk.END)
         self.result_box.insert("1.0", "\n".join(lines))
+
+    def _show_history_dialog(self) -> None:
+        """Show a comparison table of the last few explicit calculations."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Onceki Hesaplamalar (Karsilastirma)")
+        dlg.geometry("980x260")
+        dlg.transient(self.root)
+        if not self._result_history:
+            ttk.Label(dlg, text="Henuz hesaplama gecmisi yok. 'Hesapla' butonuna basin.", padding=20).pack()
+            return
+        columns = ("no", "service", "p1", "p2", "flow", "required_cv", "rated_cv", "valve", "opening", "status")
+        tree = ttk.Treeview(dlg, columns=columns, show="headings", height=min(len(self._result_history), 6))
+        headings = {
+            "no": "#", "service": "Servis", "p1": "P1 [bar]", "p2": "P2 [bar]", "flow": "Debi",
+            "required_cv": "Gerekli Cv", "rated_cv": "Rated Cv",
+            "valve": "Vana", "opening": "Aciklik %", "status": "Durum",
+        }
+        for col in columns:
+            tree.heading(col, text=headings[col])
+            tree.column(col, width=95, anchor="center")
+        for i, h in enumerate(self._result_history):
+            tree.insert("", tk.END, values=(
+                i + 1, h["service"], h.get("p1", "-"), h.get("p2", "-"), h.get("flow", "-"),
+                f"{h['required_cv']:.3f}", f"{h['rated_cv']:.3f}",
+                f"DN{h['valve_dn_mm']} / {h['valve_inch']}", f"{h['opening_percent']:.1f}",
+                "BOGULMUS" if h["is_choked"] else "Normal",
+            ))
+        tree.pack(fill="both", expand=True, padx=12, pady=12)
 
     def _open_thermal_expansion_dialog(self) -> None:
         from thermal_expansion import (
@@ -1817,6 +1919,112 @@ class ValveSizingApp:
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
         _calc()
 
+    def _open_actuator_dynamics_dialog(self) -> None:
+        from actuator_sizing import analyze_actuator_dynamics, get_actuator_options
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Aktuator Tepki Suresi ve Hava Tuketimi (ISA-75.25 / IEC 60534-6)")
+        dlg.geometry("740x600")
+        dlg.resizable(True, True)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=16)
+        frame.pack(fill="both", expand=True)
+
+        act_opts = get_actuator_options()
+        def_act = "DA-150"
+        if hasattr(self, "last_result") and self.last_result:
+            act_sel = self.last_result.get("actuator_selection")
+            if isinstance(act_sel, dict) and act_sel.get("model") in act_opts:
+                def_act = act_sel["model"]
+
+        ttk.Label(frame, text="Aktuator Modeli:").grid(row=0, column=0, sticky="w", pady=3)
+        act_var = tk.StringVar(value=def_act)
+        ttk.Combobox(frame, textvariable=act_var, values=act_opts, state="readonly", width=18).grid(
+            row=0, column=1, sticky="w", pady=3
+        )
+
+        ttk.Label(frame, text="Besleme Basinci [bar(g)]:").grid(row=1, column=0, sticky="w", pady=3)
+        psup_var = tk.DoubleVar(value=4.0)
+        ttk.Entry(frame, textvariable=psup_var, width=16).grid(row=1, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Konumlandirici Kapasitesi [Nm³/h]:").grid(row=2, column=0, sticky="w", pady=3)
+        qpos_var = tk.DoubleVar(value=14.0)
+        ttk.Entry(frame, textvariable=qpos_var, width=16).grid(row=2, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Hedef Strok Suresi [s]:").grid(row=3, column=0, sticky="w", pady=3)
+        ttarg_var = tk.DoubleVar(value=2.0)
+        ttk.Entry(frame, textvariable=ttarg_var, width=16).grid(row=3, column=1, sticky="w", pady=3)
+
+        ttk.Label(frame, text="Modulasyon Cevrimi [cevrim/saat]:").grid(row=4, column=0, sticky="w", pady=3)
+        cyc_var = tk.DoubleVar(value=60.0)
+        ttk.Entry(frame, textvariable=cyc_var, width=16).grid(row=4, column=1, sticky="w", pady=3)
+
+        res_box = tk.Text(frame, height=17, width=84, font=("Consolas", 10))
+        res_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(10, 8))
+        frame.rowconfigure(5, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+        def _calc() -> None:
+            try:
+                model = act_var.get()
+                p_sup = psup_var.get()
+                q_pos = qpos_var.get()
+                t_targ = ttarg_var.get()
+                cycles = cyc_var.get()
+
+                dyn = analyze_actuator_dynamics(
+                    actuator_key=model,
+                    supply_pressure_bar_g=p_sup,
+                    positioner_flow_capacity_nm3h=q_pos,
+                    target_stroke_time_sec=t_targ,
+                    cycles_per_hour=cycles,
+                )
+
+                booster_status = "GEREKLI (Hedef asildi)" if dyn.booster_recommended else "Gerekli Degil (Yeterli)"
+
+                lines = [
+                    "=" * 74,
+                    "AKTUATOR TEPKI SURESI VE HAVA TUKETIMI ANALIZI (ISA-75.25 / IEC 60534-6)",
+                    "=" * 74,
+                    f"Aktorator Modeli             : {dyn.model} (Piston: {dyn.piston_diameter_mm:.0f} mm, Strok: {dyn.stroke_mm:.0f} mm)",
+                    f"Toplam Hava Hacmi            : {dyn.chamber_volume_liters:.2f} Litre",
+                    f"Besleme Basinci              : {dyn.supply_pressure_bar_g:.2f} bar(g)",
+                    f"Konumlandirici Debisi        : {dyn.positioner_flow_capacity_nm3h:.1f} Nm\u00b3/h",
+                    "-" * 74,
+                    f"Acilma Suresi (t_open)       : {dyn.stroke_time_open_sec:.2f} saniye",
+                    f"Kapanma Suresi (t_close)     : {dyn.stroke_time_close_sec:.2f} saniye",
+                    f"Hedef Strok Suresi           : {dyn.target_stroke_time_sec:.2f} saniye",
+                    f"Hacim Yukseltici (Booster)   : {booster_status}",
+                    "-" * 74,
+                    f"Statik Kacak Tuketimi        : {dyn.quiescent_air_consumption_nm3h:.2f} Nm\u00b3/h",
+                    f"Dinamik Modulasyon Tuketimi  : {dyn.dynamic_air_consumption_nm3h:.3f} Nm\u00b3/h ({cycles:.0f} cevrim/saat)",
+                    f"Toplam Hava Tuketimi         : {dyn.total_air_consumption_nm3h:.3f} Nm\u00b3/h",
+                    f"Onerilen Besleme Hatti       : {dyn.supply_line_recommendation}",
+                    "=" * 74,
+                ]
+                if dyn.warnings:
+                    lines.append("UYARILAR:")
+                    for w in dyn.warnings:
+                        lines.append(f"  [!] {w}")
+                    lines.append("-" * 74)
+                if dyn.engineering_notes:
+                    lines.append("MUHENDISLIK NOTLARI:")
+                    for n in dyn.engineering_notes:
+                        lines.append(f"  * {n}")
+
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", "\n".join(lines))
+            except Exception as exc:
+                res_box.delete("1.0", tk.END)
+                res_box.insert("1.0", f"Hata olustu: {exc}")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=6)
+        ttk.Button(btn_frame, text="Hesapla", command=_calc).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
+        _calc()
+
 
 
     def _get_display_value(self, var: tk.Variable, fmt: str = ".4f") -> str:
@@ -1848,6 +2056,30 @@ class ValveSizingApp:
             messagebox.showinfo("Basarili", f"Rapor kaydedildi: {filepath}")
         except Exception as exc:
             messagebox.showerror("Hata", f"Rapor kaydedilemedi: {exc}")
+
+    def _save_pdf_report(self) -> None:
+        if not hasattr(self, 'last_result') or self.last_result is None:
+            messagebox.showinfo("Bilgi", "Once hesaplama yapin.")
+            return
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf"), ("All files", "*.*")],
+            title="PDF raporu kaydet",
+        )
+        if not filepath:
+            return
+        service_map = {"liquid": "Liquid", "gas": "Gas", "steam": "Steam"}
+        try:
+            pdf_bytes = build_pdf_report(
+                service_map.get(self.service_type.get(), "Liquid"),
+                self.last_fluid_summary,
+                self.last_result,
+            )
+            with open(filepath, "wb") as f:
+                f.write(pdf_bytes)
+            messagebox.showinfo("Basarili", f"PDF raporu kaydedildi: {filepath}")
+        except Exception as exc:
+            messagebox.showerror("Hata", f"PDF raporu kaydedilemedi: {exc}")
 
     def _collect_payload(self) -> dict:
         payload = {"service": self.service_type.get(), "vendor_key": self.vendor_key.get()}

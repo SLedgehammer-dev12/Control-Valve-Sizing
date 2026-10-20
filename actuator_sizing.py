@@ -244,3 +244,129 @@ def select_actuator(
         "stroke_ok": True,
         "details": act,
     }
+
+
+@dataclass(frozen=True)
+class ActuatorDynamicsAnalysis:
+    """Actuator dynamic stroking time, air consumption, and booster requirements."""
+
+    model: str
+    piston_diameter_mm: float
+    stroke_mm: float
+    chamber_volume_liters: float
+    supply_pressure_bar_g: float
+    positioner_flow_capacity_nm3h: float
+    stroke_time_open_sec: float
+    stroke_time_close_sec: float
+    target_stroke_time_sec: float | None
+    is_stroking_time_acceptable: bool
+    booster_recommended: bool
+    quiescent_air_consumption_nm3h: float
+    dynamic_air_consumption_nm3h: float
+    total_air_consumption_nm3h: float
+    supply_line_recommendation: str
+    warnings: tuple[str, ...]
+    engineering_notes: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "piston_diameter_mm": self.piston_diameter_mm,
+            "stroke_mm": self.stroke_mm,
+            "chamber_volume_liters": self.chamber_volume_liters,
+            "supply_pressure_bar_g": self.supply_pressure_bar_g,
+            "positioner_flow_capacity_nm3h": self.positioner_flow_capacity_nm3h,
+            "stroke_time_open_sec": self.stroke_time_open_sec,
+            "stroke_time_close_sec": self.stroke_time_close_sec,
+            "target_stroke_time_sec": self.target_stroke_time_sec,
+            "is_stroking_time_acceptable": self.is_stroking_time_acceptable,
+            "booster_recommended": self.booster_recommended,
+            "quiescent_air_consumption_nm3h": self.quiescent_air_consumption_nm3h,
+            "dynamic_air_consumption_nm3h": self.dynamic_air_consumption_nm3h,
+            "total_air_consumption_nm3h": self.total_air_consumption_nm3h,
+            "supply_line_recommendation": self.supply_line_recommendation,
+            "warnings": list(self.warnings),
+            "engineering_notes": list(self.engineering_notes),
+        }
+
+
+def analyze_actuator_dynamics(
+    actuator_key: str,
+    supply_pressure_bar_g: float | None = None,
+    positioner_flow_capacity_nm3h: float = 14.0,
+    target_stroke_time_sec: float | None = None,
+    cycles_per_hour: float = 60.0,
+    clearance_factor: float = 1.15,
+) -> ActuatorDynamicsAnalysis:
+    """Analyze pneumatic actuator stroke time, air consumption, and booster requirements per ISA-75.25 / IEC 60534-6."""
+    act = get_actuator_definition(actuator_key)
+    p_sup = supply_pressure_bar_g if supply_pressure_bar_g is not None and supply_pressure_bar_g > 0 else act.supply_bar
+    q_pos = max(1.0, float(positioner_flow_capacity_nm3h))
+    cycles = max(0.0, float(cycles_per_hour))
+
+    piston_area_m2 = pi * (act.piston_diameter_mm / 2000.0) ** 2
+    stroke_m = act.stroke_mm / 1000.0
+    swept_volume_liters = piston_area_m2 * stroke_m * 1000.0
+    total_volume_liters = swept_volume_liters * max(1.0, clearance_factor)
+
+    p_abs = p_sup + 1.01325
+    std_liters_per_stroke = total_volume_liters * (p_abs / 1.01325)
+    std_m3_per_stroke = std_liters_per_stroke / 1000.0
+
+    q_pos_sec = q_pos / 3600.0
+    time_open = round(std_m3_per_stroke / q_pos_sec, 2)
+    q_exhaust_sec = (q_pos * 1.2) / 3600.0
+    time_close = round(std_m3_per_stroke / q_exhaust_sec, 2)
+
+    booster_needed = False
+    is_time_ok = True
+    warnings: list[str] = []
+    notes: list[str] = []
+
+    if target_stroke_time_sec is not None and target_stroke_time_sec > 0:
+        if max(time_open, time_close) > target_stroke_time_sec:
+            is_time_ok = False
+            booster_needed = True
+            warnings.append(
+                f"Hesaplanan strok süresi ({max(time_open, time_close):.2f} s), hedeflenen süreyi ({target_stroke_time_sec:.2f} s) aşmaktadır. "
+                "Hacim yükseltici röle (Volume Booster) ve/veya çabuk egzoz valfi (Quick Exhaust Valve) gereklidir."
+            )
+        else:
+            notes.append(f"Strok süresi hedeflenen sürenin ({target_stroke_time_sec:.2f} s) altındadır; standart konumlandırıcı yeterlidir.")
+    elif max(time_open, time_close) > 6.0:
+        notes.append("Büyük aktüatör hacmi nedeniyle strok süresi 6 saniyenin üzerindedir. Hızlı kontrol döngüleri için booster değerlendirilebilir.")
+
+    quiescent_air = 0.35
+    dynamic_air = round(cycles * std_m3_per_stroke, 3)
+    total_air = round(quiescent_air + dynamic_air, 3)
+
+    if total_volume_liters > 15.0 or q_pos > 25.0:
+        supply_line = "1/2\" NPT (Minimum 12 mm OD boru / tubing)"
+    elif total_volume_liters > 4.0:
+        supply_line = "3/8\" NPT (Minimum 10 mm OD boru / tubing)"
+    else:
+        supply_line = "1/4\" NPT (Minimum 8 mm OD boru / tubing)"
+
+    notes.append(f"Aktüatör toplam hava hacmi: {total_volume_liters:.2f} L (Süpürülen: {swept_volume_liters:.2f} L).")
+    notes.append(f"Standart hava tüketimi: {quiescent_air:.2f} Nm³/h statik kaçak + {dynamic_air:.2f} Nm³/h modülasyon tüketimi.")
+
+    return ActuatorDynamicsAnalysis(
+        model=act.model,
+        piston_diameter_mm=act.piston_diameter_mm,
+        stroke_mm=act.stroke_mm,
+        chamber_volume_liters=round(total_volume_liters, 2),
+        supply_pressure_bar_g=round(p_sup, 2),
+        positioner_flow_capacity_nm3h=round(q_pos, 1),
+        stroke_time_open_sec=time_open,
+        stroke_time_close_sec=time_close,
+        target_stroke_time_sec=round(target_stroke_time_sec, 2) if target_stroke_time_sec else None,
+        is_stroking_time_acceptable=is_time_ok,
+        booster_recommended=booster_needed,
+        quiescent_air_consumption_nm3h=quiescent_air,
+        dynamic_air_consumption_nm3h=dynamic_air,
+        total_air_consumption_nm3h=total_air,
+        supply_line_recommendation=supply_line,
+        warnings=tuple(warnings),
+        engineering_notes=tuple(notes),
+    )
+

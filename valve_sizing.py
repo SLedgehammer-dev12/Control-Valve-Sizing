@@ -520,7 +520,7 @@ def size_liquid_valve(
     is_choked = delta_p_bar >= dp_max_bar
     effective_dp_bar = min(delta_p_bar, dp_max_bar)
     dp_max_valve_only_bar = (fl ** 2) * (data.inlet_pressure_bar_a - ff * pv)
-    dp_max_valve_only_bar = max(dp_max_bar if flp else dp_max_valve_only_bar, 1e-9)
+    dp_max_valve_only_bar = max(dp_max_valve_only_bar, 1e-9)
 
     sigma = _iec_cavitation_index(data.inlet_pressure_bar_a, data.outlet_pressure_bar_a, pv)
     if data.outlet_pressure_bar_a <= pv:
@@ -607,6 +607,7 @@ def size_liquid_valve(
             "velocity": velocity,
             "valve_meta": valve_meta or {},
             "design_margin_pct": float(design_margin_pct),
+            "flow_characteristic": flow_characteristic,
             "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
             "opening_percent": float(opening_metrics["opening_percent"]),
             "cv_ratio": float(opening_metrics["cv_ratio"]),
@@ -855,6 +856,7 @@ def size_gas_valve(
             "velocity": velocity,
             "valve_meta": valve_meta or {},
             "design_margin_pct": float(design_margin_pct),
+            "flow_characteristic": flow_characteristic,
             "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
             "opening_percent": float(opening_metrics["opening_percent"]),
             "cv_ratio": float(opening_metrics["cv_ratio"]),
@@ -1081,6 +1083,7 @@ def size_steam_valve(
             "velocity": velocity,
             "valve_meta": valve_meta or {},
             "design_margin_pct": float(design_margin_pct),
+            "flow_characteristic": flow_characteristic,
             "required_cv_with_margin": float(opening_metrics["required_cv_with_margin"]),
             "opening_percent": float(opening_metrics["opening_percent"]),
             "cv_ratio": float(opening_metrics["cv_ratio"]),

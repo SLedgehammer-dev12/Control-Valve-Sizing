@@ -955,3 +955,153 @@ def test_sizing_advisory_and_rangeability_warnings():
     )
     assert "uzeri gurultu acisindan degerlendirilmelidir" in stm_mach.warning
 
+
+# --- Edge cases -----------------------------------------------------------
+
+def test_liquid_p2_equals_pv_flashing_boundary():
+    """P2 tam olarak Pv'e esit ise flashing rejimi olmalidir."""
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=25.0,
+            inlet_pressure_bar_a=8.0,
+            outlet_pressure_bar_a=0.023,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["flow_regime"] == "flashing"
+    assert result["required_cv"] > 0.0
+
+
+def test_liquid_p1_equals_pv_raises():
+    """P1 <= FF*Pv ise tek fazli sizing uygulanamaz, hata firlatilmali."""
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    # ff = 0.96 - 0.28*sqrt(0.023/220.64) ~ 0.957, ff*pv ~ 0.022
+    # P1=0.02 < 0.022 => hata
+    with pytest.raises(ValueError, match="buhar basincinin ve kavitasyon"):
+        size_liquid_valve(
+            LiquidSizingInput(
+                flow_m3h=25.0,
+                inlet_pressure_bar_a=0.02,
+                outlet_pressure_bar_a=0.01,
+                density_kg_m3=998.0,
+                vapor_pressure_bar_a=0.023,
+                critical_pressure_bar_a=220.64,
+                viscosity_pa_s=0.00089,
+                fl=vendor.fl or 0.85,
+                fd=vendor.fd or 1.0,
+            ),
+            valve_series=list(vendor.sizes),
+        )
+
+
+def test_liquid_very_small_pressure_drop():
+    """Cok kucuk DeltaP icin pozitif Cv donmelidir."""
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=1.0,
+            inlet_pressure_bar_a=5.0,
+            outlet_pressure_bar_a=4.999,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["required_cv"] > 0.0
+    assert result["is_choked"] is False
+
+
+def test_gas_choked_boundary():
+    """x tam olarak x_choked'a esit ise choked=True olmalidir."""
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    # xT=0.72, k=1.4 => fk=1.0, x_choked=0.72. x=DeltaP/P1 => P2=P1*(1-0.72)=0.28*P1
+    p1 = 10.0
+    p2 = p1 * (1.0 - 0.72)
+    result = size_gas_valve(
+        GasSizingInput(
+            flow_nm3h=100.0,
+            inlet_pressure_bar_a=p1,
+            outlet_pressure_bar_a=p2,
+            temperature_c=20.0,
+            molecular_weight=28.96,
+            specific_heat_ratio=1.4,
+            viscosity_pa_s=1.8e-5,
+            z=1.0,
+            fl=vendor.fl or 0.9,
+            fd=vendor.fd or 1.0,
+            xt=vendor.xt or 0.72,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["is_choked"] is True
+
+
+def test_steam_very_small_flow_rangeability_warning():
+    """Cok kucuk debi icin rangeability uyarisi verilmeli."""
+    result = size_steam_valve(
+        SteamSizingInput(
+            flow_kg_h=0.1,
+            inlet_pressure_bar_a=5.0,
+            outlet_pressure_bar_a=4.0,
+            temperature_c=200.0,
+            specific_heat_ratio=1.3,
+            z=0.95,
+            fl=0.9,
+            fd=0.46,
+            xt=0.72,
+        )
+    )
+    assert "rangeability disinda" in result["warning"]
+
+
+def test_cavitation_index_edge_cases():
+    from two_phase import cavitation_index, xfz_cavitation_factor
+    # DeltaP = 0 => sigma = inf, xFz = 0
+    assert cavitation_index(5.0, 5.0, 1.0) == float("inf")
+    assert xfz_cavitation_factor(5.0, 5.0, 1.0) == 0.0
+    # P2 = Pv => sigma = 1.0, xFz = 1.0 (incipient cavitation boundary)
+    assert cavitation_index(5.0, 1.0, 1.0) == 1.0
+    assert xfz_cavitation_factor(5.0, 1.0, 1.0) == 1.0
+    # Normal case
+    sigma = cavitation_index(10.0, 5.0, 2.0)
+    assert abs(sigma - 8.0 / 5.0) < 1e-12
+    xfz = xfz_cavitation_factor(10.0, 5.0, 2.0)
+    assert abs(xfz - 5.0 / 8.0) < 1e-12
+    assert abs(sigma * xfz - 1.0) < 1e-12
+
+
+def test_flash_fraction_zero_pressure_drop():
+    from two_phase import flash_fraction
+    assert flash_fraction(5.0, 5.0, 25.0, 4186.0, 2257000.0) == 0.0
+    assert flash_fraction(5.0, 6.0, 25.0, 4186.0, 2257000.0) == 0.0
+
+
+def test_flashing_cv_estimate_degenerate():
+    from two_phase import flashing_cv_estimate
+    assert flashing_cv_estimate(0.0, 0.5, 1000.0, 10.0) == 0.0
+    assert flashing_cv_estimate(10.0, 0.0, 1000.0, 10.0) == 10.0
+    # quality_x=1.0 => rho_tp=rho_gas=10 => Cv = 10*sqrt(1000/10) = 100
+    assert flashing_cv_estimate(10.0, 1.0, 1000.0, 10.0) == 100.0
+
+
+def test_estimate_opening_characteristics():
+    from valve_sizing import estimate_opening
+
+    assert estimate_opening(50.0, 100.0, "linear") == 0.5
+    assert abs(estimate_opening(50.0, 100.0, "quick_opening") - 0.25) < 1e-12
+    eqpct = estimate_opening(50.0, 100.0, "equal_percentage", rangeability=50.0)
+    assert 0.0 < eqpct < 1.0
+    assert estimate_opening(200.0, 100.0, "linear") == 1.0
+    assert estimate_opening(0.0, 100.0, "linear") == 0.0
+

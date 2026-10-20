@@ -14,9 +14,27 @@ Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine ba
 - Joule-Thomson analysis: dynamically resolved dominant gas component from current mixture in web UI and fixed temperature sign formatting in `joule_thomson.py`.
 - UI Parity & Multi-case ISA-20: added `MultiCaseAnalysis.to_isa20_process_cases()`, forwarded `multicase_cases` through `reporting.py`, and updated both web and desktop UIs to export multi-case operational envelopes into ISA Form 20 datasheets.
 - Build & Packaging: added missing v3.3.0 modules to `pyproject.toml` `py-modules` and `app_desktop.spec` `hiddenimports`.
+- Liquid sizing: `dp_max_valve_only_bar` now reports the true valve-only choked pressure drop (`FL` only) in `valve_sizing.py`; it was previously overwritten with the pipe-reducer-influenced value when `FLp` was available, mismatching its label.
+- Safety piping report: fixed `actual_flow_m3_s` type mismatch (`float | None` passed where `float` expected) in `build_safety_piping_report`.
+- Web UI reset: "Varsayılana Sıfırla" now applies defaults before widgets are instantiated (pending flag + rerun). Previously it modified widget-bound session-state keys (`design_margin`, `flow_characteristic`) after creation, raising `StreamlitAPIException`.
+- Web result history: identical results are deduplicated, so no-op reruns (unit/preset changes, expander toggles) no longer fill the comparison table with duplicates.
 
 ### Added
 - Dedicated unit test suites: `test_datasheet_isa20.py` and `test_packing_emissions.py` (total test suite expanded to 447 tests, 100% pass rate, 91.42% statement coverage, 14 modules at 100% coverage).
+- Engine edge-case tests (8 new): liquid flashing boundary at `P2 = Pv`, inlet-below-`FF·Pv` validation error, very small `ΔP`, gas choked boundary at `x = x_choked`, small-flow rangeability warning, cavitation index/`xFz` edge cases, zero-`ΔP` flash fraction, and degenerate flashing Cv estimate.
+- Report/PDF coverage tests: valid PDF output, flashing two-phase velocity branch, scalar actuator-thrust branch, and `estimate_opening` characteristic branches; `reporting.py` and `valve_sizing.py` now at 100% statement coverage.
+- Web UI coverage tests: high-noise acoustic-mitigation panel, propane severe-cavitation multi-stage panel, CoolProp liquid source, reset button, and multi-case analysis for gas and steam; `app_web.py` coverage raised from 86% to 92%.
+- PDF report export: `build_pdf_report()` in `reporting.py` (fpdf2, Turkish glyph sanitization for core fonts) exposed as a web download button and a desktop `Dosya → Hesaplama Raporu Kaydet (PDF)` menu item.
+- PDF characteristic curve: inherent valve characteristic drawn with fpdf2 primitives (no extra dependency), with required-Cv reference line and operating-point marker; `flow_characteristic` is now stored in all sizing results.
+- UI reset to defaults: web sidebar button and desktop action-bar button (`Esc` in desktop); clears inputs, results and history.
+- Desktop keyboard shortcuts: `Enter` = Hesapla, `Esc` = Varsayılana Sıfırla.
+- Result history / comparison: last three explicit calculations shown side-by-side (web dataframe table; desktop Treeview dialog), including P1/P2/flow process conditions; live recalculation does not pollute history.
+- Declared `fpdf2` and `plotly` dependencies in `requirements.txt` and `pyproject.toml`.
+- Web UI 3D visualization: interactive installed-characteristic surface (opening % vs valve authority PR vs installed flow Q/Qmax) rendered with plotly, including the current operating-point marker; illustrates characteristic distortion per IEC 60534-2-4.
+- Web UI 3D operating envelope: Min/Normal/Max operating points plotted in 3D (flow vs ΔP vs opening %) for the recommended valve in the multi-case analysis, colored by opening.
+- Project JSON validation: required numeric fields must be finite numbers and unit selector keys are validated against the supported unit maps, so corrupt or hand-edited project files cannot break widget state on load.
+- PDF "Key Highlights" strip: color-coded boxes for predicted noise (green ≤85 dBA, red above), actuator thrust margin (green/red by stroke adequacy), opening % (green in 20–85%) and choked-flow status.
+- PDF working-point table: inherent characteristic curve values at 25/50/75/100% openings (Cv and Kv), complementing the curve chart.
 
 ## [3.3.0] — 2026-09-10
 

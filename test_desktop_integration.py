@@ -311,6 +311,7 @@ def test_desktop_has_new_dialog_methods():
     assert hasattr(ValveSizingApp, "_open_safety_piping_dialog")
     assert hasattr(ValveSizingApp, "_open_material_selection_dialog")
     assert hasattr(ValveSizingApp, "_open_characteristic_curve_dialog")
+    assert hasattr(ValveSizingApp, "_open_actuator_dynamics_dialog")
 
 
 def test_desktop_code_contains_new_tools():
@@ -323,6 +324,7 @@ def test_desktop_code_contains_new_tools():
     assert "Boru Guvenligi ve PSV Tahliye Debisi (API 14E / API 520)" in code
     assert "Gelismis Malzeme ve Bonnet Secimi (NACE / API 941)" in code
     assert "Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)" in code
+    assert "Aktorator Tepki Suresi ve Hava Tuketimi (ISA-75.25)" in code
 
 
 def test_desktop_cavitation_dialog_multistage_trim():
@@ -330,6 +332,14 @@ def test_desktop_cavitation_dialog_multistage_trim():
     assert "design_multistage_cavitation_trim" in code
     assert "KADEME BASINC VE AKIS PROFILI TABLOSU" in code
     assert "Kademe Secimi" in code
+
+
+def test_desktop_actuator_dynamics_dialog():
+    code = APP_FILE.read_text(encoding="utf-8")
+    assert "analyze_actuator_dynamics" in code
+    assert "AKTUATOR TEPKI SURESI VE HAVA TUKETIMI ANALIZI" in code
+    assert "Hacim Yukseltici (Booster)" in code
+
 
 
 

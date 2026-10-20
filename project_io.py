@@ -6,7 +6,16 @@ of payload structure, schema versioning, and date-stamped metadata."""
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
+
+from units import (
+    GAS_FLOW_UNITS,
+    LIQUID_FLOW_UNITS,
+    PRESSURE_UNITS,
+    STEAM_FLOW_UNITS,
+    TEMPERATURE_UNITS,
+)
 
 PROJECT_TYPE = "control_valve_sizing"
 
@@ -16,6 +25,18 @@ SERVICE_REQUIRED_KEYS: dict[str, set[str]] = {
     "liquid": {"liquid_flow_m3h", "liquid_p1", "liquid_p2"},
     "gas": {"gas_flow_nm3h", "gas_p1", "gas_p2"},
     "steam": {"steam_flow_kgh", "steam_p1", "steam_p2"},
+}
+
+UNIT_VALIDATORS: dict[str, dict[str, str]] = {
+    "liquid_temp_unit": TEMPERATURE_UNITS,
+    "liquid_pres_unit": PRESSURE_UNITS,
+    "liquid_flow_unit": LIQUID_FLOW_UNITS,
+    "gas_temp_unit": TEMPERATURE_UNITS,
+    "gas_pres_unit": PRESSURE_UNITS,
+    "gas_flow_unit": GAS_FLOW_UNITS,
+    "steam_temp_unit": TEMPERATURE_UNITS,
+    "steam_pres_unit": PRESSURE_UNITS,
+    "steam_flow_unit": STEAM_FLOW_UNITS,
 }
 
 
@@ -72,6 +93,13 @@ def validate_project_payload(payload: dict) -> None:
     missing = required - set(data.keys())
     if missing:
         raise ValueError(f"Proje verisinde eksik alanlar: {', '.join(sorted(missing))}.")
+    for key in sorted(required):
+        value = data[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"Proje verisinde '{key}' sayisal bir deger olmalidir.")
+    for key, allowed in UNIT_VALIDATORS.items():
+        if key in data and data[key] not in allowed:
+            raise ValueError(f"Proje verisinde gecersiz birim: '{key}' = {data[key]!r}.")
 
 
 def load_project_json(text: str) -> dict:

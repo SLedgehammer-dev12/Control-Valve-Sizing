@@ -33,6 +33,7 @@ from valve_sizing import (
     size_gas_valve,
     size_liquid_valve,
     size_steam_valve,
+    z_sensitivity_gas,
 )
 from vendor_catalog import get_vendor_definition, get_vendor_options
 
@@ -102,6 +103,25 @@ def _live_render(service: str, result: SizingResult, fluid_summary: dict) -> Non
     st.session_state.last_result = result
     st.session_state.last_fluid_summary = fluid_summary
     st.session_state.last_report = build_report(service, fluid_summary, result)
+
+    # Sonucu gecmise ekle (tekrarlari atla, en son 3 benzersiz sonucu tut)
+    entry = {
+        "service": result["service"],
+        "p1": round(float(result.get("p1", 0.0)), 3),
+        "p2": round(float(result.get("p2", 0.0)), 3),
+        "flow": round(float(result.get("flow", 0.0)), 3),
+        "required_cv": float(result["required_cv"]),
+        "rated_cv": float(result["rated_cv"]),
+        "valve_dn_mm": int(result["valve_dn_mm"]),
+        "valve_inch": str(result["valve_inch"]),
+        "opening_percent": round(float(result["opening_percent"]), 1),
+        "is_choked": bool(result["is_choked"]),
+        "warning": str(result.get("warning", "")),
+    }
+    history = st.session_state.result_history
+    if entry not in history:
+        st.session_state.result_history = [entry, *history][:3]
+
     render_result(result)
 
 
@@ -113,6 +133,7 @@ def _init_state() -> None:
     st.session_state.setdefault("last_result", None)
     st.session_state.setdefault("last_report", "")
     st.session_state.setdefault("last_fluid_summary", None)
+    st.session_state.setdefault("result_history", [])
 
 
 def _vendor_meta(vendor_key: str) -> dict:
@@ -357,8 +378,61 @@ def render_result(result: SizingResult) -> None:
                 inst_tbl_df.columns = ["Açıklık [%]", "Inherent Cv", "Kurulu Debi Q [%]", "Dinamik Kazanç (dQ/dh)", "Vana dP Oranı"]
                 st.dataframe(inst_tbl_df, hide_index=True)
 
+    with st.expander("3D Tesisat Karakteristigi (Vana Otoritesi Etkisi)", expanded=False):
+        import plotly.graph_objects as go
+
+        from valve_curve import calc_installed_flow_ratio, cv_at_opening
+
+        char_3d = st.session_state.get("flow_characteristic", "equal_percentage")
+        rated_3d = float(result["rated_cv"])
+        if rated_3d <= 0:
+            st.write("-")
+        else:
+            openings = list(range(0, 101, 5))
+            authorities = [round(0.05 + 0.05 * i, 2) for i in range(20)]
+            surface = [
+                [calc_installed_flow_ratio(cv_at_opening(float(pct), rated_3d, char_3d) / rated_3d, pr) * 100.0 for pct in openings]
+                for pr in authorities
+            ]
+            fig3d = go.Figure(go.Surface(x=openings, y=authorities, z=surface, colorscale="Viridis",
+                                         colorbar={"title": "Q/Qmax [%]"}))
+            op_pr = float(st.session_state.get(f"pr_slider_{result['service']}", 0.5))
+            op_pct = min(float(result["opening_percent"]), 100.0)
+            op_flow = calc_installed_flow_ratio(cv_at_opening(op_pct, rated_3d, char_3d) / rated_3d, op_pr) * 100.0
+            fig3d.add_trace(go.Scatter3d(x=[op_pct], y=[op_pr], z=[op_flow], mode="markers",
+                                         marker={"size": 5, "color": "red"}, name="Calisma noktasi"))
+            fig3d.update_layout(
+                scene={"xaxis_title": "Aciklik [%]", "yaxis_title": "Vana Otoritesi PR",
+                       "zaxis_title": "Kurulu Debi Q/Qmax [%]"},
+                margin={"l": 0, "r": 0, "t": 10, "b": 0}, height=480,
+            )
+            st.plotly_chart(fig3d, use_container_width=True)
+            st.caption("Yuzey, vana otoritesi PR degistikce kurulu debi karakteristiginin nasil bozuldugunu gosterir (IEC 60534-2-4).")
+
     if result.get("warning"):
         st.warning(result["warning"])
+
+    # Önceki hesaplamalar (karşılaştırma için)
+    history = st.session_state.get("result_history", [])
+    if len(history) > 1:
+        with st.expander("Önceki Hesaplamalar (Karşılaştırma)", expanded=False):
+            cmp_df = pd.DataFrame([
+                {
+                    "#": i + 1,
+                    "Servis": h["service"],
+                    "P1": h.get("p1", "-"),
+                    "P2": h.get("p2", "-"),
+                    "Debi": h.get("flow", "-"),
+                    "Durum": "🔴 Boğulmuş" if h["is_choked"] else "🟢 Normal",
+                    "Gerekli Cv": round(h["required_cv"], 3),
+                    "Rated Cv": round(h["rated_cv"], 3),
+                    "Vana": f"DN{h['valve_dn_mm']} / {h['valve_inch']}",
+                    "Açıklık %": round(h["opening_percent"], 1),
+                    "Uyarı": h["warning"] if h["warning"] else "",
+                }
+                for i, h in enumerate(history)
+            ])
+            st.dataframe(cmp_df, hide_index=True, use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -391,6 +465,22 @@ def render_report_tools() -> None:
             file_name="control_valve_sizing_report.md",
             mime="text/markdown",
         )
+        if st.session_state.last_result:
+            from reporting import build_pdf_report
+
+            pdf_bytes = bytes(
+                build_pdf_report(
+                    st.session_state.last_result["service"],
+                    st.session_state.last_fluid_summary or {},
+                    st.session_state.last_result,
+                )
+            )
+            st.sidebar.download_button(
+                "Raporu indir (PDF)",
+                pdf_bytes,
+                file_name="control_valve_sizing_report.pdf",
+                mime="application/pdf",
+            )
     if st.session_state.last_result:
         from reporting import build_isa20_html_report, build_isa20_report
 
@@ -665,22 +755,23 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
             m3.metric("Yogunluk [kg/m3]", f"{summary.density_kg_m3:.4f}" if summary.density_kg_m3 is not None else "-")
             m4.metric("k = Cp/Cv", f"{summary.specific_heat_ratio:.4f}" if summary.specific_heat_ratio is not None else "-")
 
+            gas_input = GasSizingInput(
+                flow_nm3h=flow_nm3h,
+                inlet_pressure_bar_a=inlet_pressure,
+                outlet_pressure_bar_a=outlet_pressure,
+                temperature_c=temperature_c,
+                molecular_weight=summary.average_molecular_weight,
+                specific_heat_ratio=summary.specific_heat_ratio or 1.30,
+                viscosity_pa_s=summary.viscosity_pa_s or 1e-5,
+                z=summary.z or 1.0,
+                fl=vendor.fl or 0.9,
+                fd=vendor.fd or 1.0,
+                xt=vendor.xt or 0.7,
+                pipe_inlet_diameter_mm=pipe_in_mm,
+                pipe_outlet_diameter_mm=pipe_out_mm,
+            )
             result = size_gas_valve(
-                GasSizingInput(
-                    flow_nm3h=flow_nm3h,
-                    inlet_pressure_bar_a=inlet_pressure,
-                    outlet_pressure_bar_a=outlet_pressure,
-                    temperature_c=temperature_c,
-                    molecular_weight=summary.average_molecular_weight,
-                    specific_heat_ratio=summary.specific_heat_ratio or 1.30,
-                    viscosity_pa_s=summary.viscosity_pa_s or 1e-5,
-                    z=summary.z or 1.0,
-                    fl=vendor.fl or 0.9,
-                    fd=vendor.fd or 1.0,
-                    xt=vendor.xt or 0.7,
-                    pipe_inlet_diameter_mm=pipe_in_mm,
-                    pipe_outlet_diameter_mm=pipe_out_mm,
-                ),
+                gas_input,
                 valve_series=list(vendor.sizes),
                 valve_meta=_vendor_meta(vendor_key),
                 design_margin_pct=st.session_state.design_margin,
@@ -714,6 +805,19 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
                         st.caption(f"- {w}")
                 except Exception as jt_exc:
                     st.caption(f"J-T analizi yapilamadi: {jt_exc}")
+            with st.expander("Z Duyarliligi (delta_z = +/-0.05)", expanded=False):
+                if st.checkbox("Hesapla", key="z_sens_enabled"):
+                    zs = z_sensitivity_gas(
+                        gas_input,
+                        valve_series=list(vendor.sizes),
+                        valve_meta=_vendor_meta(vendor_key),
+                    )
+                    z1, z2, z3, z4 = st.columns(4)
+                    z1.metric("Cv (Z-0.05)", f"{zs['cv_low']:.3f}")
+                    z2.metric("Cv (nominal)", f"{zs['cv_mid']:.3f}")
+                    z3.metric("Cv (Z+0.05)", f"{zs['cv_high']:.3f}")
+                    z4.metric("Degisim", f"%{zs['delta_percent']:.2f}")
+                    st.caption("Z faktor belirsizliginin gerekli Cv'ye etkisi; nihai secim vendor yazilimi ile dogrulanmalidir.")
         except Exception as exc:
             st.error(f"Gaz sizing hesaplamasi yapilirken hata olustu: {exc}")
             st.session_state.last_result = None
@@ -853,6 +957,18 @@ def main() -> None:
 
     _init_state()
 
+    # Apply a pending reset BEFORE any widget is instantiated (Streamlit forbids
+    # modifying widget-bound session_state keys after their widget is created).
+    if st.session_state.pop("_reset_defaults", False):
+        for key, value in DEFAULTS.items():
+            st.session_state[key] = value
+        st.session_state.gas_rows = DEFAULT_GAS_ROWS
+        st.session_state.gas_valid = True
+        st.session_state.last_result = None
+        st.session_state.last_report = ""
+        st.session_state.last_fluid_summary = None
+        st.session_state.result_history = []
+
     st.title("Control Valve Sizing")
     st.caption("Kaynakli Streamlit arayuzu: liquid, gas ve steam servisleri icin IEC/ISA'ya yaklastirilmis sizing uygulamasi.")
 
@@ -873,6 +989,16 @@ def main() -> None:
         key="flow_characteristic",
     )
     render_source_library()
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button(
+        "Varsayılana Sıfırla",
+        type="secondary",
+        use_container_width=True,
+        help="Tüm giriş alanlarını ve sonucu fabrika ayarlarına döndürür.",
+    ):
+        st.session_state["_reset_defaults"] = True
+        st.rerun()
 
     payload = {
         "service": st.session_state.service,
@@ -1016,6 +1142,26 @@ def main() -> None:
                     "Onerilen": "\u2605 EVET" if c.is_recommended else "",
                 })
             st.dataframe(pd.DataFrame(cand_rows), hide_index=True)
+            rec = mc_res.recommended or (mc_res.candidates[0] if mc_res.candidates else None)
+            if rec:
+                import plotly.graph_objects as go
+
+                details = list(rec.case_details.values())
+                fig_mc = go.Figure(go.Scatter3d(
+                    x=[d.flow for d in details],
+                    y=[d.p1_bar_a - d.p2_bar_a for d in details],
+                    z=[d.opening_pct for d in details],
+                    mode="markers+text",
+                    text=[d.name for d in details],
+                    textposition="top center",
+                    marker={"size": 7, "color": [d.opening_pct for d in details],
+                            "colorscale": "RdYlGn_r", "cmin": 0, "cmax": 100},
+                ))
+                fig_mc.update_layout(
+                    scene={"xaxis_title": "Debi", "yaxis_title": "DeltaP [bar]", "zaxis_title": "Aciklik [%]"},
+                    margin={"l": 0, "r": 0, "t": 10, "b": 0}, height=420,
+                )
+                st.plotly_chart(fig_mc, use_container_width=True)
             for w in mc_res.warnings:
                 st.warning(w)
 
@@ -1087,6 +1233,64 @@ def main() -> None:
             for s in cav_design.stages
         ]
         st.dataframe(pd.DataFrame(st_rows), hide_index=True)
+
+    with st.expander("Aktüatör Tepki Süresi, Hızlanma ve Hava Tüketimi (ISA-75.25 / IEC 60534-6)", expanded=False):
+        st.markdown(
+            "Pnömatik aktüatörün açılma/kapanma strok süresi, konumlandırıcı (positioner) hava debisi, "
+            "hacim yükseltici (volume booster) ihtiyacı ve enstrüman havası tüketim hesabı."
+        )
+        from actuator_sizing import analyze_actuator_dynamics, get_actuator_options
+
+        act_opts = get_actuator_options()
+        def_act = "DA-150"
+        if st.session_state.last_result and isinstance(st.session_state.last_result.get("actuator_selection"), dict):
+            sel_m = st.session_state.last_result["actuator_selection"].get("model")
+            if sel_m and sel_m in act_opts:
+                def_act = sel_m
+
+        act_col1, act_col2 = st.columns(2)
+        act_key = act_col1.selectbox("Aktüatör Modeli", act_opts, index=act_opts.index(def_act), key="dyn_act_key")
+        act_p_sup = act_col2.number_input(
+            "Hava Besleme Basıncı [bar(g)]", value=4.0, min_value=1.0, max_value=10.0, step=0.5, key="dyn_act_psup"
+        )
+
+        act_c3, act_c4, act_c5 = st.columns(3)
+        act_q_pos = act_c3.number_input(
+            "Konumlandırıcı Kapasitesi [Nm³/h]", value=14.0, min_value=1.0, step=1.0, key="dyn_act_qpos"
+        )
+        act_t_target = act_c4.number_input(
+            "Hedef Strok Süresi [s]", value=2.0, min_value=0.1, step=0.5, key="dyn_act_ttarget"
+        )
+        act_cycles = act_c5.number_input(
+            "Modülasyon Çevrimi [çevrim/saat]", value=60.0, min_value=0.0, step=10.0, key="dyn_act_cycles"
+        )
+
+        act_dyn = analyze_actuator_dynamics(
+            actuator_key=act_key,
+            supply_pressure_bar_g=act_p_sup,
+            positioner_flow_capacity_nm3h=act_q_pos,
+            target_stroke_time_sec=act_t_target,
+            cycles_per_hour=act_cycles,
+        )
+
+        dm1, dm2, dm3, dm4 = st.columns(4)
+        dm1.metric("Açılma Süresi (t_open)", f"{act_dyn.stroke_time_open_sec:.2f} s")
+        dm2.metric("Kapanma Süresi (t_close)", f"{act_dyn.stroke_time_close_sec:.2f} s")
+        dm3.metric("Oda Hacmi", f"{act_dyn.chamber_volume_liters:.2f} L")
+        dm4.metric("Toplam Hava Tüketimi", f"{act_dyn.total_air_consumption_nm3h:.2f} Nm³/h")
+
+        if act_dyn.booster_recommended:
+            st.warning("⚠️ **Hacim Yükseltici (Volume Booster) Gerekli:** " + act_dyn.warnings[0])
+        else:
+            st.success(
+                f"✅ Strok süresi ({max(act_dyn.stroke_time_open_sec, act_dyn.stroke_time_close_sec):.2f} s) "
+                f"hedeflenen sınırın ({act_t_target:.2f} s) altındadır."
+            )
+
+        st.info(f"**Önerilen Enstrüman Hava Besleme Hattı:** {act_dyn.supply_line_recommendation}")
+
+        for note in act_dyn.engineering_notes:
+            st.caption(f"ℹ️ {note}")
 
     with st.expander("Salmastra ve Kaçak Emisyon Analizi (ISO 15848-1 / API 641)", expanded=False):
         from packing_emissions import recommend_packing_system

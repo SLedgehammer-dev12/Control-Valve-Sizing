@@ -6,8 +6,8 @@
   "staleness_threshold_days": 7,
   "freshness_score": 100,
   "metrics": {
-    "test_count": 490,
-    "test_coverage_percent": 94.29,
+    "test_count": 495,
+    "test_coverage_percent": 94.40,
     "industrial_scenarios_count": 52,
     "industrial_scenarios_pass_rate": 100.0,
     "iec_benchmarks_count": 12,

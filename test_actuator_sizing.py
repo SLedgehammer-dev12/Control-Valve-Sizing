@@ -104,3 +104,56 @@ class TestValveStrokeEstimation:
         assert estimate_valve_stroke_mm(150) == 51.0
         assert estimate_valve_stroke_mm(200) == 51.0
         assert estimate_valve_stroke_mm(300) == 76.0
+
+
+class TestActuatorDynamics:
+    def test_dynamics_standard(self):
+        from actuator_sizing import analyze_actuator_dynamics
+
+        res = analyze_actuator_dynamics("DA-150", supply_pressure_bar_g=4.0, positioner_flow_capacity_nm3h=14.0)
+        assert res.model == "DA-150"
+        assert res.chamber_volume_liters > 0.5
+        assert res.stroke_time_open_sec > 0.0
+        assert res.stroke_time_close_sec > 0.0
+        assert res.total_air_consumption_nm3h > res.quiescent_air_consumption_nm3h
+        assert "NPT" in res.supply_line_recommendation
+
+    def test_dynamics_booster_recommendation(self):
+        from actuator_sizing import analyze_actuator_dynamics
+
+        # Request very fast stroke (0.2s) on a large actuator (DA-350)
+        res = analyze_actuator_dynamics(
+            "DA-350",
+            supply_pressure_bar_g=5.0,
+            positioner_flow_capacity_nm3h=12.0,
+            target_stroke_time_sec=0.2,
+        )
+        assert res.booster_recommended is True
+        assert res.is_stroking_time_acceptable is False
+        assert len(res.warnings) > 0
+        assert any("Booster" in w for w in res.warnings)
+
+    def test_dynamics_to_dict(self):
+        from actuator_sizing import analyze_actuator_dynamics
+
+        res = analyze_actuator_dynamics("DA-200", target_stroke_time_sec=3.0)
+        d = res.to_dict()
+        assert d["model"] == "DA-200"
+        assert "chamber_volume_liters" in d
+        assert "stroke_time_open_sec" in d
+        assert "total_air_consumption_nm3h" in d
+        assert isinstance(d["warnings"], list)
+        assert isinstance(d["engineering_notes"], list)
+
+    def test_dynamics_supply_line_sizing(self):
+        from actuator_sizing import analyze_actuator_dynamics
+
+        small = analyze_actuator_dynamics("DA-100")
+        assert "1/4\"" in small.supply_line_recommendation
+
+        large = analyze_actuator_dynamics("DA-350")
+        assert "3/8\"" in large.supply_line_recommendation
+
+        heavy = analyze_actuator_dynamics("DA-350", positioner_flow_capacity_nm3h=30.0)
+        assert "1/2\"" in heavy.supply_line_recommendation
+

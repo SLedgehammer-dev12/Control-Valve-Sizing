@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from fpdf import FPDF
+
 from valve_sizing import SizingResult
 
 
@@ -299,7 +301,10 @@ def build_safety_piping_report(
     """Generate an API 14E erosional velocity and API 520 wide-open relief report in Markdown."""
     from safety_piping import calc_wide_open_relief_capacity, check_erosional_velocity
 
-    eros = check_erosional_velocity(velocity_m_s, density_kg_m3, actual_flow_m3_s=actual_flow_m3_s)
+    eros = check_erosional_velocity(
+        velocity_m_s, density_kg_m3,
+        actual_flow_m3_s=actual_flow_m3_s if actual_flow_m3_s is not None else 0.0,
+    )
     relief = calc_wide_open_relief_capacity(service, rated_cv, p1_bar_a, p_relief_bar_a, fluid_data)
 
     lines = [
@@ -332,5 +337,320 @@ def build_safety_piping_report(
         lines.append(f"- {n}")
 
     return "\n".join(lines) + "\n"
+
+
+def _pdf_safe(text: str) -> str:
+    """Replace Turkish glyphs absent from fpdf2 core fonts (Latin-1)."""
+    return (
+        str(text)
+        .replace("İ", "I").replace("ı", "i")
+        .replace("Ğ", "G").replace("ğ", "g")
+        .replace("Ş", "S").replace("ş", "s")
+    )
+
+
+def build_pdf_report(service: str, fluid_summary: dict | None, result: SizingResult) -> bytes:
+    """Generate a PDF report from sizing results (fpdf2, core fonts)."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Helvetica", size=10)
+
+    def title(text: str) -> None:
+        pdf.set_font("Helvetica", style="B", size=14)
+        pdf.cell(0, 8, _pdf_safe(text), ln=1)  # type: ignore[arg-type]
+        pdf.set_font("Helvetica", size=10)
+        pdf.ln(2)
+
+    def heading(text: str) -> None:
+        pdf.set_font("Helvetica", style="B", size=11)
+        pdf.cell(0, 7, _pdf_safe(text), ln=1)  # type: ignore[arg-type]
+        pdf.set_font("Helvetica", size=10)
+        pdf.ln(1)
+
+    def field(label: str, value: str) -> None:
+        pdf.cell(55, 5, _pdf_safe(label))
+        pdf.cell(0, 5, _pdf_safe(value), ln=1)  # type: ignore[arg-type]
+
+    def para(text: str) -> None:
+        pdf.multi_cell(0, 5, _pdf_safe(text))
+        pdf.ln(1)
+
+    def summary_box(x: float, y: float, w: float, h: float, label: str, value: str, ok: bool | None) -> None:
+        if ok is True:
+            pdf.set_fill_color(232, 245, 233)
+        elif ok is False:
+            pdf.set_fill_color(253, 235, 236)
+        else:
+            pdf.set_fill_color(240, 240, 240)
+        pdf.rect(x, y, w, h, style="F")
+        pdf.set_draw_color(200, 200, 200)
+        pdf.rect(x, y, w, h)
+        pdf.set_font("Helvetica", size=7)
+        pdf.set_xy(x, y + 1.5)
+        pdf.cell(w, 4, _pdf_safe(label), align="C")
+        pdf.set_font("Helvetica", style="B", size=10)
+        pdf.set_xy(x, y + 6)
+        pdf.cell(w, 5, _pdf_safe(value), align="C")
+        pdf.set_font("Helvetica", size=10)
+
+    def summary_strip() -> None:
+        """Color-coded highlight boxes for noise, actuator margin, opening and choking."""
+        heading("Key Highlights")
+        x0 = pdf.get_x()
+        y0 = pdf.get_y()
+        box_w, box_h, gap = 44.0, 14.0, 4.0
+        noise = result.get("noise_db")
+        noise_ok = None if noise is None else (float(noise) <= 85.0)
+        summary_box(x0, y0, box_w, box_h, "Noise", f"{float(noise):.1f} dBA" if noise is not None else "n/a", noise_ok)
+        act = result.get("actuator_selection")
+        if act and isinstance(act, dict) and act.get("model"):
+            summary_box(x0 + box_w + gap, y0, box_w, box_h, "Actuator margin",
+                        f"+%{act.get('thrust_margin_pct', 0.0):.0f}", bool(act.get("stroke_ok")))
+        else:
+            summary_box(x0 + box_w + gap, y0, box_w, box_h, "Actuator margin", "n/a", None)
+        opening = float(result["opening_percent"])
+        summary_box(x0 + 2 * (box_w + gap), y0, box_w, box_h, "Opening", f"{opening:.1f}%", 20.0 <= opening <= 85.0)
+        choked = bool(result["is_choked"])
+        summary_box(x0 + 3 * (box_w + gap), y0, box_w, box_h, "Choked flow", "Yes" if choked else "No", not choked)
+        pdf.set_y(y0 + box_h + 3)
+
+    def curve_chart() -> None:
+        """Draw the inherent characteristic curve with the operating point (fpdf2 primitives)."""
+        if float(result["rated_cv"]) <= 0:
+            return
+        try:
+            from valve_curve import generate_characteristic_curve
+
+            chart = generate_characteristic_curve(
+                rated_cv=float(result["rated_cv"]),
+                required_cv=float(result["required_cv"]),
+                characteristic=str(result.get("flow_characteristic", "equal_percentage")),
+            )
+        except Exception:
+            return
+        heading("Valve Characteristic Curve")
+        x0 = pdf.get_x()
+        y0 = pdf.get_y()
+        w, h = 170.0, 48.0
+        if y0 + h + 14 > pdf.h - pdf.b_margin:
+            pdf.add_page()
+            x0 = pdf.get_x()
+            y0 = pdf.get_y()
+        max_cv = max((pt.cv for pt in chart.points), default=0.0) or 1.0
+        pdf.set_draw_color(150, 150, 150)
+        pdf.set_line_width(0.2)
+        pdf.rect(x0, y0, w, h)
+        for pct in (25.0, 50.0, 75.0):
+            gx = x0 + pct / 100.0 * w
+            pdf.line(gx, y0, gx, y0 + h)
+        ry = y0 + h - min(float(result["required_cv"]) / max_cv, 1.0) * h
+        pdf.set_draw_color(200, 60, 60)
+        pdf.line(x0, ry, x0 + w, ry)
+        pdf.set_draw_color(30, 80, 140)
+        pdf.set_line_width(0.6)
+        prev: tuple[float, float] | None = None
+        for pt in chart.points:
+            px = x0 + pt.opening_pct / 100.0 * w
+            py = y0 + h - min(pt.cv / max_cv, 1.0) * h
+            if prev is not None:
+                pdf.line(prev[0], prev[1], px, py)
+            prev = (px, py)
+        op = chart.operating_point
+        ox = x0 + min(op.opening_pct, 100.0) / 100.0 * w
+        oy = y0 + h - min(op.required_cv / max_cv, 1.0) * h
+        pdf.set_fill_color(200, 60, 60)
+        pdf.ellipse(ox - 1.2, oy - 1.2, 2.4, 2.4, style="F")
+        pdf.set_font("Helvetica", size=8)
+        pdf.set_xy(x0, y0 + h + 1)
+        pdf.cell(w, 4, "X: Opening [%] 0-100 | Y: Cv | red = required Cv, dot = operating point", align="C")
+        pdf.set_font("Helvetica", size=10)
+        pdf.set_y(y0 + h + 6)
+        field("Characteristic:", f"{chart.characteristic} | opening {op.opening_pct:.1f}% | {op.controllability_zone}")
+        pdf.ln(2)
+
+    def curve_table() -> None:
+        """Önemli açıklık noktalarında Cv/Kv değerlerini tabloyla gösterir."""
+        try:
+            from valve_curve import generate_characteristic_curve
+
+            chart = generate_characteristic_curve(
+                rated_cv=float(result["rated_cv"]),
+                required_cv=float(result["required_cv"]),
+                characteristic=str(result.get("flow_characteristic", "equal_percentage")),
+            )
+        except Exception:
+            return
+        if float(result["rated_cv"]) <= 0 or not chart.points:
+            return
+        heading("Characteristic Curve Values")
+        # 25/50/75/100% noktalarını seç
+        points = chart.points
+        picks = {}
+        for pct in (25.0, 50.0, 75.0, 100.0):
+            nearest = min(points, key=lambda pt: abs(pt.opening_pct - pct))
+            picks[nearest.opening_pct] = nearest
+        col_w = [30.0, 40.0, 40.0]
+        col_x = pdf.get_x()
+        y0 = pdf.get_y()
+        if y0 + 14 > pdf.h - pdf.b_margin:
+            pdf.add_page()
+            col_x = pdf.get_x()
+            y0 = pdf.get_y()
+        pdf.set_font("Helvetica", style="B", size=9)
+        pdf.set_fill_color(230, 230, 230)
+        pdf.cell(col_w[0], 6, "Opening [%]", border=1, align="C", fill=True)
+        pdf.cell(col_w[1], 6, "Cv", border=1, align="C", fill=True)
+        pdf.cell(col_w[2], 6, "Kv", border=1, align="C", fill=True)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", size=9)
+        for op_pt in [picks.get(p) for p in (25.0, 50.0, 75.0, 100.0)]:
+            if op_pt is None:
+                continue
+            pdf.set_x(col_x)
+            pdf.cell(col_w[0], 5, f"{op_pt.opening_pct:.0f}", border=1, align="C")
+            pdf.cell(col_w[1], 6, f"{op_pt.cv:.3f}", border=1, align="C")
+            pdf.cell(col_w[2], 6, f"{op_pt.cv:.3f}", border=1, align="C")
+            pdf.ln(6)
+        pdf.ln(2)
+
+    # Header
+    title("Control Valve Sizing Report")
+    field("Date:", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
+    field("Service:", service)
+    pdf.ln(2)
+
+    # Result
+    heading("Result")
+    field("Required Cv:", f"{result['required_cv']:.4f}")
+    field("Required Kv:", f"{result['required_kv']:.4f}")
+    field("Selected Valve:", f"DN{result['valve_dn_mm']} ({result['valve_inch']})")
+    field("Rated Cv:", f"{result['rated_cv']:.4f}")
+    field("Rated Kv:", f"{result['rated_kv']:.4f}")
+    field("DeltaP [bar]:", f"{result['delta_p_bar']:.4f}")
+    field("Choked:", "Yes" if result["is_choked"] else "No")
+    field("Opening (est.):", f"{result['opening_percent']:.1f}% of rated travel")
+    field("Design margin:", f"{result['design_margin_pct']:.1f}%")
+    field("Cv ratio:", f"{result['cv_ratio']:.3f}")
+    pdf.ln(2)
+
+    summary_strip()
+    curve_chart()
+    curve_table()
+
+    if result.get("flow_regime"):
+        heading("Flow Regime")
+        para(f"{result['flow_regime']}")
+
+    if result.get("rangeability_ok") is not None:
+        heading("Rangeability (est.)")
+        field("Min. controllable Cv:", f"{result['rangeability_min_cv']:.3f}")
+        status = "within rangeability" if result["rangeability_ok"] else "below rangeability"
+        field("Status:", status)
+        para("Note: based on inherent characteristic and rangeability; vendor trim validation required.")
+
+    if result.get("noise_db") is not None:
+        heading("Acoustic (est.)")
+        field("Predicted valve noise:", f"{result['noise_db']:.1f} dB(A) at 1 m downstream (IEC 60534-8)")
+        para("Note: estimate only; low-noise trim/diffuser selection requires vendor validation.")
+
+    thrust = result.get("actuator_thrust_n")
+    act_sel = result.get("actuator_selection")
+    if thrust is not None or act_sel is not None:
+        heading("Actuator (est.)")
+        if isinstance(thrust, dict):
+            field("Static unbalance thrust:", f"{thrust.get('unbalance_n', 0.0):.1f} N")
+            field("Shutoff thrust:", f"{thrust.get('shutoff_n', 0.0):.1f} N")
+            field("Packing friction:", f"{thrust.get('packing_n', 0.0):.1f} N")
+            field("Total estimated thrust:", f"{thrust.get('total_n', 0.0):.1f} N")
+        elif thrust is not None:
+            field("Total estimated thrust:", f"{thrust:.1f} N")
+        if act_sel and isinstance(act_sel, dict) and act_sel.get("model"):
+            field("Selected actuator:", act_sel["model"])
+            field("Thrust capacity:", f"{act_sel.get('thrust_n', 0.0):.1f} N")
+            field("Thrust safety margin:", f"{act_sel.get('thrust_margin_pct', 0.0):.1f}%")
+            status = "adequate" if act_sel.get("stroke_ok") else "insufficient"
+            field("Stroke status:", status)
+        para("Note: estimate only; actuator sizing requires dynamic force and bench-set data.")
+
+    if result.get("valve_spec"):
+        spec = result["valve_spec"]
+        heading("Valve Specification (est.)")
+        field("Recommended ANSI class (P1-based):", spec.get("pressure_class_recommended", "-"))
+        field("Vendor body class:", spec.get("vendor_pressure_class", "-"))
+        if "derated_mawp_bar" in spec:
+            t_spec = spec.get("temperature_c", 20.0)
+            mat_grp = spec.get("material_group", "WCB")
+            field("ASME B16.34 Derated MAWP:", f"{spec['derated_mawp_bar']:.1f} bar @ {t_spec:.1f} C ({mat_grp})")
+        field("Recommended seat leakage class:", spec.get("leakage_class_recommended", "-"))
+        field("Vendor seat leakage class:", spec.get("vendor_leakage_class", "-"))
+        if "allowable_leakage" in spec and isinstance(spec["allowable_leakage"], dict):
+            al = spec["allowable_leakage"]
+            field("Max allowable seat leakage:", f"{al.get('max_rate', 0.0):.4f} {al.get('rate_unit', '')} ({al.get('note', '')})")
+        field("Recommended fail-safe:", spec.get("fail_safe_recommended", "-"))
+        para(f"Note: {spec.get('note', '')}")
+
+    velocity = result.get("velocity")
+    if velocity:
+        heading("Velocity / Erosion (est.)")
+        if "pipe_in_m_s" in velocity:
+            field("Pipe inlet velocity:", f"{velocity['pipe_in_m_s']:.2f} m/s")
+        field("Pipe outlet velocity:", f"{velocity['pipe_out_m_s']:.2f} m/s")
+        if "mach_outlet" in velocity:
+            field("Outlet Mach number:", f"{velocity['mach_outlet']:.3f}")
+        if "two_phase_out_m_s" in velocity:
+            field("Two-phase outlet velocity:", f"{velocity['two_phase_out_m_s']:.2f} m/s")
+            field("API 14E erosion limit:", f"{velocity['api_14e_limit_m_s']:.2f} m/s")
+            field("Erosion risk:", "Yes" if velocity["erosion_risk"] else "No")
+        para("Note: guideline values; erosion assessment requires material and trim review.")
+
+    if result.get("trim_guidance"):
+        heading("Trim Guidance (est.)")
+        for item in result["trim_guidance"]:
+            pdf.cell(0, 5, f"- {_pdf_safe(item)}", ln=1)  # type: ignore[arg-type]
+        para("Note: heuristic guidance; final trim selection requires vendor confirmation.")
+
+    if result.get("warning"):
+        heading("Warning")
+        para(result["warning"])
+
+    if fluid_summary:
+        heading("Fluid Summary")
+        for key, value in fluid_summary.items():
+            field(f"{key}:", str(value))
+
+    iv = result.get("intermediate_values", {})
+    if "Z" in iv:
+        heading("Compressibility (Z)")
+        field("Z factor:", f"{iv['Z']:.4f}")
+        field("Source:", iv.get("Z_source", "Calculated from composition"))
+
+    heading("Equations")
+    for eq in result.get("equations", []):
+        pdf.cell(0, 5, f"- {_pdf_safe(eq)}", ln=1)  # type: ignore[arg-type]
+
+    heading("Intermediate Values")
+    for key, value in result.get("intermediate_values", {}).items():
+        if isinstance(value, float):
+            field(f"{key}:", f"{value:.6g}")
+        else:
+            field(f"{key}:", str(value))
+
+    heading("Method Notes")
+    for item in result.get("method_panel", []):
+        pdf.cell(0, 5, f"- {_pdf_safe(item)}", ln=1)  # type: ignore[arg-type]
+
+    heading("Sources")
+    for source in result.get("sources", []):
+        pdf.cell(0, 5, f"- {_pdf_safe(source['title'])}: {source['url']}", ln=1)  # type: ignore[arg-type]
+        pdf.cell(0, 5, f"  Note: {_pdf_safe(source['note'])}", ln=1)  # type: ignore[arg-type]
+
+    if result.get("valve_meta"):
+        heading("Vendor Data")
+        meta = result["valve_meta"]
+        for key, value in meta.items():
+            field(f"{key}:", str(value))
+
+    return bytes(pdf.output())  # type: ignore[call-overload]
 
 
