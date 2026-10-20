@@ -177,16 +177,20 @@ def render_result(result: SizingResult) -> None:
     # Enhanced metrics display
     col1, col2, col3, col4 = st.columns(4)
     with col1:
+        tooltip_label("Gerekli Cv", "Gerekli debi ve basinc dusumune gore gereken vana kapasitesi (Cv).")
         st.markdown(f'<div class="metric-card"><h4>Gerekli Cv</h4><p>{result["required_cv"]:.3f}</p></div>', unsafe_allow_html=True)
     with col2:
+        tooltip_label("Gerekli Kv", "Gerekli Cv'nin metrik birimdeki denkdugu deger (Kv = 0.865 x Cv).")
         st.markdown(f'<div class="metric-card"><h4>Gerekli Kv</h4><p>{result["required_kv"]:.3f}</p></div>', unsafe_allow_html=True)
     with col3:
+        tooltip_label("Secilen Vana", "Tasarim margi dahil secilen vananin DN ve inc boyutu.")
         st.markdown(
-            f'<div class="metric-card"><h4>Seçilen Vana</h4>'
+            f'<div class="metric-card"><h4>Secilen Vana</h4>'
             f'<p>DN{result["valve_dn_mm"]} / {result["valve_inch"]}</p></div>',
             unsafe_allow_html=True,
         )
     with col4:
+        tooltip_label("Rated Cv", "Secilen vananin rated (nominal) Cv degeri.")
         st.markdown(f'<div class="metric-card"><h4>Rated Cv</h4><p>{result["rated_cv"]:.3f}</p></div>', unsafe_allow_html=True)
 
     # Enhanced visualization: Bar chart for Cv comparison
@@ -197,19 +201,25 @@ def render_result(result: SizingResult) -> None:
     st.bar_chart(cv_data.set_index('Type'), use_container_width=True)
 
     st.markdown("**Sonuç Özeti**")
-    st.json(
-        {
-            "service": result["service"],
-            "delta_p_bar": round(result["delta_p_bar"], 5),
-            "is_choked": result["is_choked"],
-            "opening_percent": round(result["opening_percent"], 1),
-            "design_margin_pct": result["design_margin_pct"],
-            "cv_ratio": round(result["cv_ratio"], 3),
-            "pipe_out_velocity_m_s": round(result["velocity"]["pipe_out_m_s"], 2) if result.get("velocity") else None,
-            "mach_outlet": round(result["velocity"]["mach_outlet"], 3) if result.get("velocity") and "mach_outlet" in result["velocity"] else None,
-            "warning": result.get("warning", ""),
-        }
-    )
+    col_summary1, col_summary2 = st.columns(2)
+    with col_summary1:
+        tooltip_label("Basinc Dusu (Delta P)", "Giris ve cikis basinci arasindaki fark.")
+        st.metric("Delta P [bar]", f"{result['delta_p_bar']:.3f}")
+        tooltip_label("Choked (Kritik Akis)", "Delta P'nin kritik degeri (choked limit) uzerine ciktiysa akis kritik denir.")
+        st.metric("Choked", "Yes" if result["is_choked"] else "No")
+        tooltip_label("Opening %", "Vana aciligi yuzdesi. Ideal kontrol araligi %20-%80 arasindadir.")
+        st.metric("Opening %", f"{result['opening_percent']:.1f}%")
+        tooltip_label("Design Margin %", "Tasarim margisi. Gerekli Cv'nin uzerine eklenen guvenlik yuzdesi.")
+        st.metric("Design Margin %", f"{result['design_margin_pct']:.1f}%")
+    with col_summary2:
+        tooltip_label("Cv Ratio", "Gerekli Cv'nin rated Cv'ye orani.")
+        st.metric("Cv Ratio", f"{result['cv_ratio']:.3f}")
+        pipe_out_vel = result.get("velocity", {}).get("pipe_out_m_s", None) if result.get("velocity") else None
+        tooltip_label("Pipe Outlet Velocity", "Cikis boru hattindaki akis hizi. API 14E erozyon degerlendirmesinde kullanilir.")
+        st.metric("Pipe Out Vel [m/s]", f"{pipe_out_vel:.2f}" if pipe_out_vel else "-")
+        tooltip_label("Mach Outlet", "Cikis boru hattindaki Mach sayisi. Gaz/buhar icin kritik akis degerlendirmesinde kullanilir.")
+        mach_outlet = result.get("velocity", {}).get("mach_outlet", None) if result.get("velocity") else None
+        st.metric("Mach Outlet", f"{mach_outlet:.3f}" if mach_outlet else "-")
 
     est_cols = st.columns(2)
     with est_cols[0]:
