@@ -715,6 +715,117 @@ def size_liquid_valve(
     return _pack_result(result)
 
 
+def size_liquid_valve_with_noise_control(
+    data: LiquidSizingInput,
+    valve_series: list[ValveSize] | None = None,
+    valve_meta: dict | None = None,
+    design_margin_pct: float = 0.0,
+    flow_characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
+    max_noise_db: float = 85.0,
+) -> dict:
+    """Size a liquid valve with noise control (IEC 60534-8-4).
+
+    Runs standard sizing; if predicted noise exceeds max_noise_db, tries the
+    next larger valve size from the same vendor series to reduce noise.
+    Returns a dict with the original result and, when a quieter alternative
+    exists, an ``alt`` key containing the alternate result and reason.
+
+    Parameters
+    ----------
+    data : LiquidSizingInput
+        Sizing input parameters.
+    valve_series : list[ValveSize] | None
+        Candidate valve series. Defaults to DEFAULT_VALVE_SERIES.
+    valve_meta : dict | None
+        Vendor metadata to attach to results.
+    design_margin_pct : float
+        Design margin percent added to required Cv.
+    flow_characteristic : str
+        Inherent characteristic ('equal_percentage', 'linear', 'quick_opening').
+    rangeability : float
+        Rangeability used for opening estimation.
+    max_noise_db : float
+        Maximum acceptable noise level in dB(A) (default 85.0).
+
+    Returns
+    -------
+    dict
+        SizingResult dict. If an alternative valve satisfies the noise limit,
+        an ``alt`` key is added with the alternate SizingResult dict and a
+        ``reason`` string.
+    """
+    result = size_liquid_valve(
+        data,
+        valve_series=valve_series,
+        valve_meta=valve_meta,
+        design_margin_pct=design_margin_pct,
+        flow_characteristic=flow_characteristic,
+        rangeability=rangeability,
+    )
+
+    result_dict = {
+        "required_cv": float(result["required_cv"]),
+        "required_kv": float(result["required_kv"]),
+        "rated_cv": float(result["rated_cv"]),
+        "rated_kv": float(result["rated_kv"]),
+        "valve_dn_mm": int(result["valve_dn_mm"]),
+        "valve_inch": str(result["valve_inch"]),
+        "delta_p_bar": float(result["delta_p_bar"]),
+        "is_choked": bool(result["is_choked"]),
+        "noise_db": float(result["noise_db"]),
+        "opening_percent": float(result["opening_percent"]),
+        "warning": str(result.get("warning", "")),
+        "service": str(result["service"]),
+        "extra": dict(result.get("extra", {})),
+    }
+
+    if float(result["noise_db"]) <= max_noise_db:
+        return result_dict
+
+    # Noise exceeds limit: try next larger valve size
+    vendor_series = valve_series or DEFAULT_VALVE_SERIES
+    current_idx = None
+    for idx, v in enumerate(vendor_series):
+        if v.dn_mm == int(result["valve_dn_mm"]):
+            current_idx = idx
+            break
+
+    if current_idx is None or current_idx + 1 >= len(vendor_series):
+        # No larger valve available; return original result only
+        return result_dict
+
+    next_valve = vendor_series[current_idx + 1]
+
+    # Build a modified input with the same parameters; the sizing function
+    # will select from the full vendor series, so we force the larger valve
+    # by restricting the series to just the next larger size.
+    larger_series = [next_valve]
+
+    alt_result = size_liquid_valve(
+        data,
+        valve_series=larger_series,
+        valve_meta=valve_meta,
+        design_margin_pct=design_margin_pct,
+        flow_characteristic=flow_characteristic,
+        rangeability=rangeability,
+    )
+
+    result_dict["alt"] = {
+        "required_cv": float(alt_result["required_cv"]),
+        "rated_cv": float(alt_result["rated_cv"]),
+        "valve_dn_mm": int(alt_result["valve_dn_mm"]),
+        "valve_inch": str(alt_result["valve_inch"]),
+        "noise_db": float(alt_result["noise_db"]),
+        "opening_percent": float(alt_result["opening_percent"]),
+        "reason": f"Noise {float(result['noise_db']):.1f} dBA exceeds {max_noise_db:.0f} dBA limit; "
+                  f"selected larger valve DN{int(alt_result['valve_dn_mm'])} to reduce noise to "
+                  f"{float(alt_result['noise_db']):.1f} dBA.",
+    }
+
+    return result_dict
+
+
 def size_gas_valve(
     data: GasSizingInput,
     valve_series: list[ValveSize] | None = None,

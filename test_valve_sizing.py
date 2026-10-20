@@ -1095,6 +1095,88 @@ def test_flashing_cv_estimate_degenerate():
     assert flashing_cv_estimate(10.0, 1.0, 1000.0, 10.0) == 100.0
 
 
+def test_size_liquid_valve_with_noise_control_no_alt_needed():
+    """Low-noise service: no alt needed when noise <= limit."""
+    from valve_sizing import LiquidSizingInput, size_liquid_valve, size_liquid_valve_with_noise_control
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=25.0,
+            inlet_pressure_bar_a=8.0,
+            outlet_pressure_bar_a=5.0,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert result["noise_db"] < 85.0
+
+    res = size_liquid_valve_with_noise_control(
+        LiquidSizingInput(
+            flow_m3h=25.0,
+            inlet_pressure_bar_a=8.0,
+            outlet_pressure_bar_a=5.0,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert "alt" not in res  # noise <= limit, no alternative needed
+
+
+def test_size_liquid_valve_with_noise_control_alt_provided():
+    """High-noise service: alt provided when noise > limit."""
+    from valve_sizing import LiquidSizingInput, size_liquid_valve, size_liquid_valve_with_noise_control
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    # High flow to force choked/noisy conditions
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=200.0,
+            inlet_pressure_bar_a=50.0,
+            outlet_pressure_bar_a=5.0,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+
+    res = size_liquid_valve_with_noise_control(
+        LiquidSizingInput(
+            flow_m3h=200.0,
+            inlet_pressure_bar_a=50.0,
+            outlet_pressure_bar_a=5.0,
+            density_kg_m3=998.0,
+            vapor_pressure_bar_a=0.023,
+            critical_pressure_bar_a=220.64,
+            viscosity_pa_s=0.00089,
+            fl=vendor.fl or 0.85,
+            fd=vendor.fd or 1.0,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+
+    if float(result["noise_db"]) > 85.0:
+        assert "alt" in res
+        assert res["alt"]["rated_cv"] > float(result["rated_cv"])
+        assert float(res["alt"]["noise_db"]) <= float(result["noise_db"])
+        assert "reason" in res["alt"]
+    else:
+        # If noise is already below limit, alt should not be present
+        assert "alt" not in res
+
+
 def test_estimate_opening_characteristics():
     from valve_sizing import estimate_opening
 
