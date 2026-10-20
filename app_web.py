@@ -709,51 +709,55 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
     temp_label = TEMPERATURE_UNITS[temp_unit]
     pres_label = PRESSURE_UNITS[pres_unit]
     flow_label = GAS_FLOW_UNITS[flow_unit]
-    c1, c2, c3, c4 = st.columns(4)
-    basis = c1.radio("Kompozisyon bazisi", ["molar", "mass"], key="gas_basis", horizontal=True)
-    tooltip_label("Sicaklik", "Gaz akiskan giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
-    temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="gas_temp_c", step=1.0), temp_unit)
-    tooltip_label("Giris Basinci (P1)", "Gaz giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
-    inlet_pressure = pressure_to_bar_a(
-        c3.number_input(f"Giris P [{pres_label}]", key="gas_p1", min_value=0.001, step=0.1), pres_unit
-    )
-    tooltip_label("Cikis Basinci (P2)", "Gaz cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
-    outlet_pressure = pressure_to_bar_a(
-        c4.number_input(f"Cikis P [{pres_label}]", key="gas_p2", min_value=0.001, step=0.1), pres_unit
-    )
-    tooltip_label("Debi", "Gaz hacimsel debi (nm3h). Gerekli Cv hesaplamanin temel parametresidir.")
-    flow_value = st.number_input(f"Debi [{flow_label}]", key="gas_flow_nm3h", min_value=0.0001, step=10.0)
+    # Gas Process Data Section
+    with st.expander("Gaz Ozellikleri", expanded=True):
+        c1, c2, c3, c4 = st.columns(4)
+        basis = c1.radio("Kompozisyon bazisi", ["molar", "mass"], key="gas_basis", horizontal=True)
+        tooltip_label("Sicaklik", "Gaz akiskan giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
+        temperature_c = temperature_to_c(c2.number_input(f"Sicaklik [{temp_label}]", key="gas_temp_c", step=1.0), temp_unit)
+        tooltip_label("Giris Basinci (P1)", "Gaz giris mutlak basinci. Choked flow ve density hesaplamada kullanilir.")
+        inlet_pressure = pressure_to_bar_a(
+            c3.number_input(f"Giris P [{pres_label}]", key="gas_p1", min_value=0.001, step=0.1), pres_unit
+        )
+        tooltip_label("Cikis Basinci (P2)", "Gaz cikis mutlak basinci. Delta P ve choked kontrolunde kullanilir.")
+        outlet_pressure = pressure_to_bar_a(
+            c4.number_input(f"Cikis P [{pres_label}]", key="gas_p2", min_value=0.001, step=0.1), pres_unit
+        )
+        tooltip_label("Debi", "Gaz hacimsel debi (nm3h). Gerekli Cv hesaplamanin temel parametresidir.")
+        flow_value = st.number_input(f"Debi [{flow_label}]", key="gas_flow_nm3h", min_value=0.0001, step=10.0)
 
-    gas_options = list_coolprop_fluids()
-    gas_preset_options = GAS_PRESET_NAMES + ["Özel (Custom)"]
-    if "gas_preset" not in st.session_state:
-        st.session_state.gas_preset = "Özel (Custom)"
+    # Gas Composition Section
+    with st.expander("Gaz Kompozisyonu", expanded=True):
+        gas_options = list_coolprop_fluids()
+        gas_preset_options = GAS_PRESET_NAMES + ["Özel (Custom)"]
+        if "gas_preset" not in st.session_state:
+            st.session_state.gas_preset = "Özel (Custom)"
 
-    def _on_gas_preset_change() -> None:
-        name = st.session_state.get("gas_preset", "")
-        if name in GAS_PRESETS:
-            st.session_state.gas_rows = [dict(r) for r in GAS_PRESETS[name]["components"]]
+        def _on_gas_preset_change() -> None:
+            name = st.session_state.get("gas_preset", "")
+            if name in GAS_PRESETS:
+                st.session_state.gas_rows = [dict(r) for r in GAS_PRESETS[name]["components"]]
 
-    st.selectbox("Gaz preset", gas_preset_options, key="gas_preset", on_change=_on_gas_preset_change)
-    gas_df = pd.DataFrame(st.session_state.gas_rows)
-    edited = st.data_editor(
-        gas_df,
-        num_rows="dynamic",
-        column_config={
-            "component": st.column_config.SelectboxColumn("Bilesen", options=gas_options, required=True),
-            "fraction_pct": st.column_config.NumberColumn("Yuzde [%]", min_value=0.0, max_value=100.0, step=0.1, format="%.4f"),
-        },
-        key=f"gas_editor_{st.session_state.get('gas_preset', '')}",
-        on_change=validate_gas_composition,
-    )
-    st.session_state.gas_rows = edited.to_dict("records")
+        st.selectbox("Gaz preset", gas_preset_options, key="gas_preset", on_change=_on_gas_preset_change)
+        gas_df = pd.DataFrame(st.session_state.gas_rows)
+        edited = st.data_editor(
+            gas_df,
+            num_rows="dynamic",
+            column_config={
+                "component": st.column_config.SelectboxColumn("Bilesen", options=gas_options, required=True),
+                "fraction_pct": st.column_config.NumberColumn("Yuzde [%]", min_value=0.0, max_value=100.0, step=0.1, format="%.4f"),
+            },
+            key=f"gas_editor_{st.session_state.get('gas_preset', '')}",
+            on_change=validate_gas_composition,
+        )
+        st.session_state.gas_rows = edited.to_dict("records")
 
-    # Real-time validation display
-    total_pct = float(edited["fraction_pct"].fillna(0.0).sum()) if "fraction_pct" in edited else 0.0
-    if abs(total_pct - 100.0) < 1e-6:
-        st.markdown(f'<p class="success-msg">Toplam kompozisyon: {total_pct:.4f}%</p>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<p class="error-msg">Toplam kompozisyon 100% olmalı. Mevcut toplam: {total_pct:.4f}%</p>', unsafe_allow_html=True)
+        # Real-time validation display
+        total_pct = float(edited["fraction_pct"].fillna(0.0).sum()) if "fraction_pct" in edited else 0.0
+        if abs(total_pct - 100.0) < 1e-6:
+            st.markdown(f'<p class="success-msg">Toplam kompozisyon: {total_pct:.4f}%</p>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p class="error-msg">Toplam kompozisyon 100% olmalı. Mevcut toplam: {total_pct:.4f}%</p>', unsafe_allow_html=True)
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}, Fd={vendor.fd}")
