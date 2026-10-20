@@ -30,18 +30,22 @@ def _collect_coolprop_binaries():
 
     PyInstaller's collect_dynamic_libs("CoolProp") often misses CoolProp.dll
     on Windows, causing "DLL load failed: The specified module could not be
-    found" at runtime. We scan the CoolProp package directory directly and
-    include .dll/.pyd/.so/.dylib files next to the CoolProp package in the
-    bundle so the .pyd can load its sibling DLL at runtime.
+    found" at runtime. We scan the CoolProp package directory (and its
+    subdirectories, e.g. redist/ for Intel MKL DLLs) directly and include
+    .dll/.pyd/.so/.dylib files next to the CoolProp package in the bundle so
+    the .pyd can load its sibling DLL at runtime.
     """
     import CoolProp
 
     cp_dir = os.path.dirname(CoolProp.__file__)
     out = []
-    for fname in os.listdir(cp_dir):
-        if fname.endswith((".dll", ".pyd", ".so", ".dylib")):
-            src = os.path.join(cp_dir, fname)
-            out.append((os.path.join("CoolProp", fname), src, "BINARY"))
+    for root, _dirs, files in os.walk(cp_dir):
+        for fname in files:
+            if fname.endswith((".dll", ".pyd", ".so", ".dylib")):
+                src = os.path.join(root, fname)
+                rel = os.path.relpath(src, cp_dir)
+                dest = os.path.join("CoolProp", rel)
+                out.append((dest, src, "BINARY"))
     return out
 
 
@@ -107,8 +111,9 @@ a = Analysis(
         "numpy",
         "numpy.core.multiarray",
     ],
-    hookspath=[],
+    hookspath=["."],
     hooksconfig={},
+    runtime_hooks=["rthook_coolprop.py"],
     excludes=[
         "tkinter.test",
         "unittest",
