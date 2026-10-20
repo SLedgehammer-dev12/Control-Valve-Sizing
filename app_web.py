@@ -612,6 +612,10 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, FL={vendor.fl}, Fd={vendor.fd}")
+    tooltip_label("FL (Liquid Pressure Recovery Factor)", "Vana basinc dususunu kacar mape ceviren faktor. "
+        "Tipik deger 0.85-0.95 globul vanalar icin. Dusuk FL daha fazla cavitasyon riski nerede.")
+    tooltip_label("Fd (Valve Style Modifier)", "Vana stilligi duzeltme katsayisi. Globe vanalar icin "
+        "1.0 dir.")
 
     fluid_summary = {
         "Fluid": fluid_label,
@@ -749,6 +753,10 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}, Fd={vendor.fd}")
+    tooltip_label("xT (Liquid Pressure Drop Ratio Factor)", "Gaz icin kritik debi orani faktoru. Choked flow "
+        "baslangic noktasini belirler. Tipik deger 0.6-0.7.")
+    tooltip_label("Fd (Valve Style Modifier)", "Vana stilligi duzeltme katsayisi. Globe vanalar icin "
+        "1.0 dir.")
     g1, g2 = st.columns(2)
     tooltip_label("Hat Giris Capi", "Gaz hat giris boru capi. Reducer etkisi hesaplamada kullanilir.")
     pipe_in_mm = g1.number_input("Hat giris capi [mm]", key="gas_pipe_in_mm", min_value=1.0, step=1.0)
@@ -894,6 +902,8 @@ def render_steam_section(vendor_key: str) -> tuple[dict | None, dict]:
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}")
+    tooltip_label("xT (Liquid Pressure Drop Ratio Factor)", "Buhar icin kritik debi orani faktoru. Choked flow "
+        "baslangic noktasini belirler. Tipik deger 0.7-0.72.")
 
     gamma = 1.30
     z_value = 1.0
@@ -1061,7 +1071,11 @@ def main() -> None:
     st.session_state.vendor_key = vendor_key
 
     st.sidebar.markdown("**Tasarim secenekleri**")
+    tooltip_label("Tasarim Marji [%]", "Gerekli Cv'nin uzerinde eklenen guvenlik marji. Tipik deger %15 dir. "
+        "Yuksek marj daha buyuk vana secimine neden olur.")
     st.sidebar.number_input("Tasarim marji [%]", key="design_margin", min_value=0.0, max_value=100.0, step=5.0)
+    tooltip_label("Akis Karakteristiği", "Vana aciligi ile debi arasindaki iliski. Equal percentage: dusuk debide hassas, "
+        "linear: dogrusal, quick opening: hizli acilim.")
     st.sidebar.selectbox(
         "Akis karakteristigi",
         ("equal_percentage", "linear", "quick_opening"),
