@@ -116,7 +116,6 @@ a = Analysis(
     runtime_hooks=["rthook_coolprop.py"],
     excludes=[
         "tkinter.test",
-        "unittest",
         "pydoc",
         "test",
         "turtle",
