@@ -30,6 +30,57 @@ from vendor_catalog import get_vendor_definition, get_vendor_options
 logger = logging.getLogger(__name__)
 
 
+class ToolTip:
+    """Create a tooltip for a given widget (desktop Tkinter)."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tipwindow = None
+        self.widget.bind("<Enter>", self.on_enter)
+        self.widget.bind("<Leave>", self.on_leave)
+        self.widget.bind("<Button-1>", self.on_leave)
+
+    def _show_tooltip(self, event):
+        x, y, _, _ = self.widget.bbox("insert")
+        if self.widget.winfo_width() > 0:
+            x = self.widget.winfo_rootx() + 25
+            y = self.widget.winfo_rooty() + 25
+        else:
+            x = self.widget.winfo_rootx() + self.widget.winfo_width() // 2
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(1)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            tw,
+            text=self.text,
+            justify=tk.LEFT,
+            background="#ffffe0",
+            relief="solid",
+            borderwidth=1,
+            font=("Tahoma", 8, "normal"),
+        )
+        label.pack(ipadx=1)
+
+    def _hide_tooltip(self, event=None):
+        tw = self.tipwindow
+        self.tipwindow = None
+        if tw:
+            tw.destroy()
+
+    def _on_enter(self, event=None):
+        self._show_tooltip(event)
+
+    def _on_live_change(self, event=None):
+        self._hide_tooltip()
+
+
+def tooltip_label(widget, text):
+    """Add a tooltip to a widget."""
+    ToolTip(widget, text)
+
+
 class ValveSizingApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
