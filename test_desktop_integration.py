@@ -3,6 +3,7 @@
 import ast
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 APP_DIR = Path(__file__).parent
@@ -341,5 +342,21 @@ def test_desktop_actuator_dynamics_dialog():
     assert "Hacim Yukseltici (Booster)" in code
 
 
+def test_version_is_consistent_across_metadata():
+    from valve_sizing import __version__
+
+    pyproject = tomllib.loads((APP_DIR / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == __version__
 
 
+def test_release_installers_include_version():
+    iss = (APP_DIR / "installer.iss").read_text(encoding="utf-8")
+    assert "OutputBaseFilename=ControlValveSizing_Setup_{#MyAppVersion}" in iss
+
+    workflow = (APP_DIR / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "ControlValveSizing_macos_arm64_${VERSION}.dmg" in workflow
+    assert "installer.iss" in workflow
+    assert "build-web" in workflow
+
+    dockerfile = (APP_DIR / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG APP_VERSION" in dockerfile

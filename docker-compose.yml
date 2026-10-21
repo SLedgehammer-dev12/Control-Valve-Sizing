@@ -1,0 +1,12 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${CVS_VERSION:-dev}
+    image: control-valve-sizing:${CVS_VERSION:-dev}
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    environment:
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"

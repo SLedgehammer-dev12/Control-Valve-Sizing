@@ -83,6 +83,32 @@ DEFAULT_UNITS: dict[str, str] = {
     "steam_flow": "kgh",
 }
 
+UNIT_MAPS: dict[str, dict[str, str]] = {
+    "temperature": TEMPERATURE_UNITS,
+    "pressure": PRESSURE_UNITS,
+    "liquid_flow": LIQUID_FLOW_UNITS,
+    "gas_flow": GAS_FLOW_UNITS,
+    "steam_flow": STEAM_FLOW_UNITS,
+}
+
+UNIT_KIND_LABELS: dict[str, str] = {
+    "temperature": "Sıcaklık",
+    "pressure": "Basınç",
+    "liquid_flow": "Sıvı Debi",
+    "gas_flow": "Gaz Debi",
+    "steam_flow": "Buhar Debi",
+}
+
+
+def validate_unit_key(kind: str, unit: str) -> str:
+    """Return a validated unit key or raise ValueError."""
+    allowed = UNIT_MAPS.get(kind)
+    if allowed is None:
+        raise ValueError(f"Bilinmeyen birim turu: {kind}")
+    if unit not in allowed:
+        raise ValueError(f"Gecersiz birim ({kind}): {unit}")
+    return unit
+
 # ---------------------------------------------------------------------------
 # Pint unit registry — for new code
 # ---------------------------------------------------------------------------
@@ -282,6 +308,34 @@ def steam_flow_from_kgh(value_kgh: float, unit: str) -> float:
     if unit == "kgs":
         return float(value_kgh) / 3600.0
     raise ValueError(f"Bilinmeyen buhar debi birimi: {unit}")
+
+
+def convert_unit(
+    kind: str,
+    value: float,
+    from_unit: str,
+    to_unit: str,
+    *,
+    density_kg_m3: float | None = None,
+    pressure_bar_a: float | None = None,
+    temperature_c: float | None = None,
+    z: float = 1.0,
+) -> float:
+    """Convert a value between two units of the same kind."""
+    validate_unit_key(kind, from_unit)
+    validate_unit_key(kind, to_unit)
+    if kind == "temperature":
+        return temperature_from_c(temperature_to_c(value, from_unit), to_unit)
+    if kind == "pressure":
+        return pressure_from_bar_a(pressure_to_bar_a(value, from_unit), to_unit)
+    if kind == "liquid_flow":
+        return liquid_flow_from_m3h(liquid_flow_to_m3h(value, from_unit, density_kg_m3), to_unit, density_kg_m3)
+    if kind == "gas_flow":
+        base = gas_flow_to_nm3h(value, from_unit, pressure_bar_a, temperature_c, z, density_kg_m3)
+        return gas_flow_from_nm3h(base, to_unit, pressure_bar_a, temperature_c, z, density_kg_m3)
+    if kind == "steam_flow":
+        return steam_flow_from_kgh(steam_flow_to_kgh(value, from_unit), to_unit)
+    raise ValueError(f"Bilinmeyen birim turu: {kind}")
 
 
 def bar_to_pa(bar: float) -> float:

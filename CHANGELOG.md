@@ -2,6 +2,24 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.3.4]
+
+### Added
+- Windows installer (`installer.iss`, Inno Setup): per-user install, Start Menu/Desktop shortcuts, versioned `ControlValveSizing_Setup_<version>.exe`.
+- macOS DMG now contains an `/Applications` shortcut; DMG/volume names and app `Info.plist` version come from the release tag.
+- Web Docker image published to GHCR with version + `latest` tags, non-root runtime, and a `/_stcore/health` healthcheck.
+- Release workflow validates `vX.Y.Z` against `valve_sizing.__version__` and builds Windows setup/zip, macOS DMG, and the Docker image in parallel.
+- Service tabs (desktop `ttk.Notebook`, web segmented buttons) stay in sync with the opening slider; centralized unit converter in desktop dialog/web sidebar.
+- Tests for version metadata consistency and versioned release artifact names.
+
+### Changed
+- All release artifact filenames include the version; `version_info.txt` is generated from `valve_sizing.__version__` instead of being hardcoded.
+- Desktop PyInstaller spec reads `CVS_VERSION` (falling back to `valve_sizing.__version__`) for Windows/macOS metadata.
+- README and release notes document the new installers, Docker image, and GHCR visibility step.
+
+### Fixed
+- Release job now declares the `prepare` dependency explicitly so the version output is available when composing the release body.
+
 ## [3.3.3]
 
 ### Fixed

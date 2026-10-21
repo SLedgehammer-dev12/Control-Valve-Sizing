@@ -8,9 +8,66 @@ avoid antivirus / antimalware false positives on unsigned builds.
 """
 
 import os
+import re
 import sys
 
 from PyInstaller.utils.hooks import collect_dynamic_libs
+
+
+def _read_app_version() -> str:
+    """Read the release version from CVS_VERSION or valve_sizing.__version__."""
+    version = os.environ.get("CVS_VERSION", "").strip().lstrip("v")
+    if not version:
+        with open("valve_sizing.py", encoding="utf-8") as handle:
+            match = re.search(r'__version__\s*=\s*"([^"]+)"', handle.read())
+        version = match.group(1) if match else "0.0.0"
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise SystemExit(f"Invalid app version: {version!r}")
+    return version
+
+
+APP_VERSION = _read_app_version()
+
+
+def _write_version_info(version: str) -> str:
+    """Generate the PyInstaller Windows version resource for the release version."""
+    major, minor, patch = (int(part) for part in version.split("."))
+    path = os.path.join("build", "version_info_generated.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    content = f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({major}, {minor}, {patch}, 0),
+    prodvers=({major}, {minor}, {patch}, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        u'040904B0',
+        [
+          StringStruct(u'CompanyName', u'Control Valve Sizing'),
+          StringStruct(u'FileDescription', u'Control Valve Sizing (IEC 60534 / ISA)'),
+          StringStruct(u'FileVersion', u'{version}'),
+          StringStruct(u'InternalName', u'ControlValveSizing'),
+          StringStruct(u'LegalCopyright', u'Control Valve Sizing'),
+          StringStruct(u'OriginalFilename', u'ControlValveSizing.exe'),
+          StringStruct(u'ProductName', u'Control Valve Sizing'),
+          StringStruct(u'ProductVersion', u'{version}')
+        ]
+      )
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)
+"""
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    return path
 
 
 def _as_binary_toc(items):
@@ -192,8 +249,8 @@ if sys.platform == "darwin":
         icon="app_icon.icns",
         bundle_identifier="com.cvsizing.controlvalvesizing",
         info_plist={
-            "CFBundleShortVersionString": "3.3.3",
-            "CFBundleVersion": "3.3.3",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
             "NSHighResolutionCapable": True,
             "NSHumanReadableCopyright": "Control Valve Sizing",
         },
@@ -211,7 +268,7 @@ else:
         upx=False,
         console=False,
         disable_windowed_traceback=False,
-        version="version_info.txt",
+        version=_write_version_info(APP_VERSION),
         icon="app_icon.ico",
     )
     coll = COLLECT(

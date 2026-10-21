@@ -19,8 +19,11 @@ from units import (
     NORMAL_P_BAR,
     NORMAL_T_K,
     Q_,
+    UNIT_KIND_LABELS,
+    UNIT_MAPS,
     bar_to_pa,
     celsius_to_k,
+    convert_unit,
     gas_flow_from_nm3h,
     gas_flow_to_nm3h,
     k_to_celsius,
@@ -36,6 +39,7 @@ from units import (
     temperature_from_c,
     temperature_to_c,
     ureg,
+    validate_unit_key,
 )
 
 _TOL = 1e-6
@@ -390,3 +394,43 @@ class TestUnitEdgeCasesAndErrors:
             temperature_from_c(25.0, "invalid_unit")
         with pytest.raises(ValueError, match="Bilinmeyen basinc birimi"):
             pressure_from_bar_a(1.0, "invalid_unit")
+
+
+class TestCentralUnitMapsAndConverter:
+    def test_label_maps_cover_every_kind(self):
+        assert set(UNIT_KIND_LABELS) == set(UNIT_MAPS)
+
+    def test_every_unit_round_trips_to_itself(self):
+        kwargs_by_kind = {
+            "liquid_flow": {"density_kg_m3": 1000.0},
+            "gas_flow": {"pressure_bar_a": 8.0, "temperature_c": 20.0, "z": 0.9, "density_kg_m3": 1.2},
+        }
+        for kind, unit_map in UNIT_MAPS.items():
+            for unit in unit_map:
+                assert convert_unit(kind, 7.5, unit, unit, **kwargs_by_kind.get(kind, {})) == pytest.approx(7.5)
+
+    def test_temperature_pressure_and_flow_conversions(self):
+        assert convert_unit("temperature", 100.0, "C", "F") == pytest.approx(212.0)
+        assert convert_unit("pressure", 1.0, "bar_a", "psi_a") == pytest.approx(BAR_TO_PSI)
+        assert convert_unit("liquid_flow", 1.0, "m3h", "gpm") == pytest.approx(M3H_TO_GPM)
+        assert convert_unit("steam_flow", 1.0, "kgh", "lbh") == pytest.approx(KGH_TO_LBH)
+        assert convert_unit("gas_flow", 100.0, "nm3h", "scfh") == pytest.approx(100.0 * NM3H_TO_SCFH)
+
+    def test_invalid_kind_and_unit(self):
+        with pytest.raises(ValueError, match="Bilinmeyen birim turu"):
+            validate_unit_key("mass", "kg")
+        with pytest.raises(ValueError, match="Gecersiz birim"):
+            validate_unit_key("temperature", "R")
+        with pytest.raises(ValueError, match="Bilinmeyen birim turu"):
+            convert_unit("mass", 1.0, "kg", "kg")
+
+    def test_density_required_for_mass_flow_units(self):
+        with pytest.raises(ValueError, match="yogunlugu gereklidir"):
+            convert_unit("liquid_flow", 1.0, "kgh", "m3h")
+
+    def test_project_io_shares_central_unit_maps(self):
+        from project_io import UNIT_VALIDATORS
+
+        assert UNIT_VALIDATORS["liquid_temp_unit"] is UNIT_MAPS["temperature"]
+        assert UNIT_VALIDATORS["gas_flow_unit"] is UNIT_MAPS["gas_flow"]
+        assert UNIT_VALIDATORS["steam_pres_unit"] is UNIT_MAPS["pressure"]

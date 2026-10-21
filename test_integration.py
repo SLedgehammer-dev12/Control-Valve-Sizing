@@ -11,6 +11,11 @@ from vendor_catalog import get_vendor_definition
 APP_FILE = Path(__file__).with_name("app_web.py")
 
 
+def _switch_service(at, label: str) -> None:
+    at.select_slider[0].set_value(label)
+    at.run()
+
+
 def test_project_json_round_trip():
     payload = {
         "service": "Liquid",
@@ -240,7 +245,8 @@ def test_streamlit_app_loads_and_shows_title():
     at.run()
     assert not at.exception
     assert at.title[0].value == "Control Valve Sizing"
-    assert at.sidebar.radio[0].value == "Liquid"
+    assert at.select_slider[0].value == "Sıvı"
+    assert at.session_state["service"] == "Liquid"
 
 
 def test_streamlit_liquid_calculation_shows_metrics():
@@ -279,17 +285,37 @@ def test_streamlit_liquid_gpm_unit_live_recalc():
 def test_streamlit_can_switch_to_gas_page():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     assert not at.exception
     assert at.subheader[0].value == "Gaz Akiskan ve Kompozisyon"
+
+
+def test_streamlit_service_tab_button_and_slider_stay_in_sync():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    next(b for b in at.button if b.key == "service_tab_Gas").click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["service"] == "Gas"
+    assert at.select_slider[0].value == "Gaz"
+    assert at.subheader[0].value == "Gaz Akiskan ve Kompozisyon"
+
+
+def test_streamlit_unit_converter_panel():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=10)
+    at.run()
+    next(sb for sb in at.selectbox if sb.label == "Dönüştürücü türü").set_value("Sıcaklık")
+    at.run()
+    next(n for n in at.number_input if n.label == "Dönüştürülecek değer").set_value(100.0)
+    at.run()
+    assert not at.exception
+    assert {m.label: m.value for m in at.metric}["Sonuç"] == "212 °F"
 
 
 def test_streamlit_gas_preset_selector_present():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     presets = [sb.options for sb in at.selectbox if "Gaz preset" in (sb.label or "")]
     assert presets, "Gas preset selectbox not found"
     assert any("H2-NG" in name for name in presets[0])
@@ -301,8 +327,7 @@ def test_streamlit_gas_preset_loads_rows():
 
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     sb = next(sb for sb in at.selectbox if "Gaz preset" in (sb.label or ""))
     sb.set_value("Sentez Gazi (Syngas)")
     at.run()
@@ -320,8 +345,7 @@ def _set_number_input(at, key: str, value: float) -> None:
 def test_streamlit_gas_preset_calculation_shows_result():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     sb = next(sb for sb in at.selectbox if "Gaz preset" in (sb.label or ""))
     sb.set_value("Doğal Gaz")
     at.run()
@@ -337,8 +361,7 @@ def test_streamlit_gas_preset_calculation_shows_result():
 def test_streamlit_gas_invalid_composition_shows_error():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     at.session_state["gas_valid"] = False
     at.run()
     errors = [e.value for e in at.error]
@@ -349,8 +372,7 @@ def test_streamlit_gas_invalid_composition_shows_error():
 def test_streamlit_steam_calculation_shows_metrics():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Steam")
-    at.run()
+    _switch_service(at, "Buhar")
     for key, val in [("steam_flow_kgh", 1000.0), ("steam_p1", 8.0), ("steam_p2", 6.0), ("steam_temp_c", 170.0)]:
         _set_number_input(at, key, val)
     at.run()
@@ -363,8 +385,7 @@ def test_streamlit_steam_calculation_shows_metrics():
 def test_streamlit_gas_scfh_unit_live_recalc():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     flow_sb = next(sb for sb in at.selectbox if sb.label == "Debi birimi")
     flow_sb.set_value("scfh")
     at.run()
@@ -475,8 +496,7 @@ def test_streamlit_advanced_sections_and_metrics():
     assert "Oda Hacmi" in metric_labels
     assert "Toplam Hava Tüketimi" in metric_labels
 
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     assert not at.exception
     metric_labels_gas = [m.label for m in at.metric]
     assert "Cikis T2 (JT)" in metric_labels_gas
@@ -579,8 +599,7 @@ def test_streamlit_3d_installed_characteristic_renders():
 def test_streamlit_multicase_gas():
     at = AppTest.from_file(str(APP_FILE), default_timeout=20)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
     at.run()
     assert not at.exception
@@ -591,8 +610,7 @@ def test_streamlit_multicase_gas():
 def test_streamlit_multicase_steam():
     at = AppTest.from_file(str(APP_FILE), default_timeout=20)
     at.run()
-    at.sidebar.radio[0].set_value("Steam")
-    at.run()
+    _switch_service(at, "Buhar")
     next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
     at.run()
     assert not at.exception
@@ -603,8 +621,7 @@ def test_streamlit_multicase_steam():
 def test_streamlit_gas_z_sensitivity_panel():
     at = AppTest.from_file(str(APP_FILE), default_timeout=20)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     next(c for c in at.checkbox if c.key == "z_sens_enabled").set_value(True)
     at.run()
     assert not at.exception
@@ -616,13 +633,21 @@ def test_streamlit_gas_z_sensitivity_panel():
 def test_streamlit_gas_joule_thomson_hydrate_risk():
     at = AppTest.from_file(str(APP_FILE), default_timeout=20)
     at.run()
-    at.sidebar.radio[0].set_value("Gas")
-    at.run()
+    _switch_service(at, "Gaz")
     for key, val in [("gas_p1", 100.0), ("gas_p2", 20.0), ("gas_temp_c", 20.0)]:
         _set_number_input(at, key, val)
     at.run()
     assert not at.exception
     errors = [e.value for e in at.error]
     assert any("hidrat" in e.lower() for e in errors)
+
+
+def test_build_valve_3d_figure_has_mesh_traces():
+    from valve_3d import build_valve_figure
+
+    fig = build_valve_figure(50.0)
+    assert len(fig.data) >= 4
+    assert all(trace.type == "mesh3d" for trace in fig.data)
+    assert all(trace.x and trace.i for trace in fig.data)
 
 

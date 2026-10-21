@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from config import DEFAULT_GAS_ROWS, GAS_PRESET_NAMES, GAS_PRESETS
@@ -15,6 +16,9 @@ from units import (
     PRESSURE_UNITS,
     STEAM_FLOW_UNITS,
     TEMPERATURE_UNITS,
+    UNIT_KIND_LABELS,
+    UNIT_MAPS,
+    convert_unit,
     gas_flow_to_nm3h,
     liquid_flow_to_m3h,
     pressure_from_bar_a,
@@ -76,6 +80,9 @@ DEFAULTS = {
     "design_margin": 15.0,
     "flow_characteristic": "equal_percentage",
 }
+
+SERVICE_LABELS = {"Liquid": "Sıvı", "Gas": "Gaz", "Steam": "Buhar"}
+SERVICE_KEYS = {label: key for key, label in SERVICE_LABELS.items()}
 
 
 def _unit_key(label: str, unit_map: dict[str, str]) -> str:
@@ -152,6 +159,15 @@ def _init_state() -> None:
     st.session_state.setdefault("result_history", [])
 
 
+def _select_service(service: str) -> None:
+    st.session_state.service = service
+    st.session_state.service_slider = SERVICE_LABELS[service]
+
+
+def _sync_service_from_slider() -> None:
+    st.session_state.service = SERVICE_KEYS[st.session_state.service_slider]
+
+
 def _vendor_meta(vendor_key: str) -> dict:
     definition = get_vendor_definition(vendor_key)
     return {
@@ -168,6 +184,57 @@ def _vendor_meta(vendor_key: str) -> dict:
         "pressure_class": definition.pressure_class,
         "leakage_class": definition.leakage_class,
     }
+
+
+@st.cache_data(show_spinner=False)
+def _cv_margin_surface(
+    required_cv: float,
+    p1: float,
+    p2: float,
+    density: float,
+    pv: float,
+    pc: float,
+    mu: float,
+    fl: float,
+    fd: float,
+    pipe_in: float,
+    pipe_out: float,
+    characteristic: str,
+) -> tuple[list[int], list[float], list[list[float]]]:
+    """Compute the required-Cv margin surface once per unique input set."""
+    openings = list(range(0, 101, 5))
+    margins = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3]
+    z: list[list[float]] = []
+    for margin_val in margins:
+        row: list[float] = []
+        for pct_val in openings:
+            margin_factor = 1.0 + margin_val
+            flow_factor = pct_val / 100.0
+            try:
+                r = size_liquid_valve(
+                    LiquidSizingInput(
+                        flow_m3h=float(required_cv) * margin_factor * max(0.1, flow_factor),
+                        inlet_pressure_bar_a=p1,
+                        outlet_pressure_bar_a=p2,
+                        density_kg_m3=density,
+                        vapor_pressure_bar_a=pv,
+                        critical_pressure_bar_a=pc,
+                        viscosity_pa_s=mu,
+                        fl=fl,
+                        fd=fd,
+                        pipe_inlet_diameter_mm=pipe_in,
+                        pipe_outlet_diameter_mm=pipe_out,
+                    ),
+                    valve_series=[],
+                    valve_meta={},
+                    design_margin_pct=margin_val,
+                    flow_characteristic=characteristic,
+                )
+                row.append(float(r["required_cv"]))
+            except Exception:
+                row.append(float(required_cv))
+        z.append(row)
+    return openings, margins, z
 
 
 def render_result(result: SizingResult) -> None:
@@ -193,12 +260,19 @@ def render_result(result: SizingResult) -> None:
         tooltip_label("Rated Cv", "Secilen vananin rated (nominal) Cv degeri.")
         st.markdown(f'<div class="metric-card"><h4>Rated Cv</h4><p>{result["rated_cv"]:.3f}</p></div>', unsafe_allow_html=True)
 
-    # Enhanced visualization: Bar chart for Cv comparison
-    cv_data = pd.DataFrame({
-        'Type': ['Required Cv', 'Rated Cv'],
-        'Value': [result["required_cv"], result["rated_cv"]]
-    })
-    st.bar_chart(cv_data.set_index('Type'), use_container_width=True)
+    cv_fig = go.Figure(go.Bar(
+        x=[result["required_cv"], result["rated_cv"]],
+        y=["Gerekli Cv", "Rated Cv"],
+        orientation="h",
+        marker_color=["#2563eb", "#10b981"],
+        text=[f'{result["required_cv"]:.3f}', f'{result["rated_cv"]:.3f}'],
+        textposition="outside",
+    ))
+    cv_fig.add_vline(x=result["rated_cv"], line_dash="dash", line_color="#ef4444",
+                     annotation_text="Rated Cv", annotation_position="top")
+    cv_fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
+                         xaxis_title="Cv", showlegend=False)
+    st.plotly_chart(cv_fig, use_container_width=True)
 
     st.markdown("**Sonuç Özeti**")
     col_summary1, col_summary2 = st.columns(2)
@@ -331,10 +405,11 @@ def render_result(result: SizingResult) -> None:
         characteristic=char_type,
     )
     with st.expander("Vana Karakteristik Eğrisi & Kontrol Analizi (IEC 60534-2-4)", expanded=True):
-        tab_inh, tab_inst, tab_3d = st.tabs([
+        tab_inh, tab_inst, tab_3d, tab_model = st.tabs([
             "Doğal (Inherent) Karakteristik",
             "Tesisat Kurulu (Installed) & Vana Otoritesi",
             "3D Karakteristik Eğrisi",
+            "3D Vana Modeli",
         ])
         with tab_inh:
             op = curve.operating_point
@@ -350,11 +425,31 @@ def render_result(result: SizingResult) -> None:
             else:
                 st.success("✅ Çalışma noktası ideal kontrol aralığında (%20 - %80 açıklık).")
 
-            chart_df = pd.DataFrame([
-                {"Açıklık [%]": pt.opening_pct, "Vana Cv (Eğri)": pt.cv, "Gereken Cv": op.required_cv}
-                for pt in curve.points
-            ]).set_index("Açıklık [%]")
-            st.line_chart(chart_df, use_container_width=True)
+            fig_inh = go.Figure()
+            fig_inh.add_trace(go.Scatter(
+                x=[pt.opening_pct for pt in curve.points],
+                y=[pt.cv for pt in curve.points],
+                mode="lines",
+                name="Vana Cv (Eğri)",
+                line=dict(color="#2563eb", width=2),
+            ))
+            fig_inh.add_trace(go.Scatter(
+                x=[op.opening_pct],
+                y=[op.required_cv],
+                mode="markers",
+                name="Çalışma Noktası",
+                marker=dict(color="#ef4444", size=10, symbol="diamond"),
+            ))
+            fig_inh.add_vrect(x0=20.0, x1=80.0, line_width=0, fillcolor="#10b981", opacity=0.08)
+            fig_inh.add_hline(y=op.required_cv, line_dash="dash", line_color="#10b981")
+            fig_inh.update_layout(
+                xaxis_title="Açıklık [%]",
+                yaxis_title="Cv",
+                height=320,
+                margin=dict(l=0, r=0, t=10, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_inh, use_container_width=True)
 
             with st.expander("Ayrık Karakteristik Tablosu (51 Nokta)", expanded=False):
                 tbl_df = pd.DataFrame([p.to_dict() for p in curve.points])
@@ -392,16 +487,39 @@ def render_result(result: SizingResult) -> None:
             else:
                 st.success("✅ Vana otoritesi yeterlidir; dinamik kazanç kontrol edilebilir sınırlar içerisindedir.")
 
-            inst_chart_df = pd.DataFrame([
-                {
-                    "Açıklık [%]": p.opening_pct,
-                    "Kurulu Debi Q [%]": p.installed_flow_pct,
-                    "Doğal Cv [%]": (p.inherent_cv / float(result["rated_cv"]) * 100.0) if float(result["rated_cv"]) > 0 else 0.0,
-                    "Vana dP Payı [%]": p.valve_dp_ratio * 100.0,
-                }
-                for p in inst.points
-            ]).set_index("Açıklık [%]")
-            st.line_chart(inst_chart_df, use_container_width=True)
+            rated_val = float(result["rated_cv"])
+            fig_inst = go.Figure()
+            fig_inst.add_trace(go.Scatter(
+                x=[p.opening_pct for p in inst.points],
+                y=[p.installed_flow_pct for p in inst.points],
+                mode="lines",
+                name="Kurulu Debi Q [%]",
+                line=dict(color="#2563eb", width=2),
+            ))
+            fig_inst.add_trace(go.Scatter(
+                x=[p.opening_pct for p in inst.points],
+                y=[(p.inherent_cv / rated_val * 100.0) if rated_val > 0 else 0.0 for p in inst.points],
+                mode="lines",
+                name="Doğal Cv [%]",
+                line=dict(color="#94a3b8", width=1, dash="dot"),
+            ))
+            fig_inst.add_vrect(x0=20.0, x1=80.0, line_width=0, fillcolor="#10b981", opacity=0.08)
+            op_pct_inst = min(float(result["opening_percent"]), 100.0)
+            fig_inst.add_trace(go.Scatter(
+                x=[op_pct_inst],
+                y=[inst.operating_installed_flow_pct],
+                mode="markers",
+                name="Çalışma Noktası",
+                marker=dict(color="#ef4444", size=10, symbol="diamond"),
+            ))
+            fig_inst.update_layout(
+                xaxis_title="Açıklık [%]",
+                yaxis_title="%",
+                height=320,
+                margin=dict(l=0, r=0, t=10, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_inst, use_container_width=True)
 
             with st.expander("Ayrık Tesisat Tablosu (51 Nokta)", expanded=False):
                 inst_tbl_df = pd.DataFrame([p.to_dict() for p in inst.points])
@@ -412,42 +530,20 @@ def render_result(result: SizingResult) -> None:
             st.markdown("### 3D Vana Karakteristik Eğrisi")
             st.markdown("Bu 3D yüzey, vananın açıklık ve tasarım marjına göre gerekli Cv değerlerinin değişimini gösterir.")
 
-            import plotly.graph_objects as go
-
-            # Generate 3D surface data using result data (no vendor dependency needed)
-            openings = list(range(0, 101, 5))
-            margins = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3]
-            z_matrix = []
-
-            for margin_val in margins:
-                row = []
-                for pct_val in openings:
-                    margin_factor = 1.0 + margin_val
-                    flow_factor = pct_val / 100.0
-                    try:
-                        r = size_liquid_valve(
-                            LiquidSizingInput(
-                                flow_m3h=float(result["required_cv"]) * margin_factor * max(0.1, flow_factor),
-                                inlet_pressure_bar_a=float(result.get("p1", 8.0)),
-                                outlet_pressure_bar_a=float(result.get("p2", 5.0)),
-                                density_kg_m3=float(result.get("extra", {}).get("density", 998.0)),
-                                vapor_pressure_bar_a=float(result.get("extra", {}).get("vapor_pressure_bar_a", 0.023)),
-                                critical_pressure_bar_a=float(result.get("extra", {}).get("critical_pressure_bar_a", 220.64)),
-                                viscosity_pa_s=float(result.get("extra", {}).get("viscosity_pa_s", 0.00089)),
-                                fl=float(result.get("extra", {}).get("fl", 0.85)),
-                                fd=float(result.get("extra", {}).get("fd", 1.0)),
-                                pipe_inlet_diameter_mm=float(result.get("extra", {}).get("pipe_inlet_diameter_mm", 50.0)),
-                                pipe_outlet_diameter_mm=float(result.get("extra", {}).get("pipe_outlet_diameter_mm", 50.0)),
-                            ),
-                            valve_series=[],
-                            valve_meta={},
-                            design_margin_pct=margin_val,
-                            flow_characteristic=char_type,
-                        )
-                        row.append(float(r["required_cv"]))
-                    except Exception:
-                        row.append(float(result["required_cv"]))
-                z_matrix.append(row)
+            openings, margins, z_matrix = _cv_margin_surface(
+                float(result["required_cv"]),
+                float(result.get("p1", 8.0)),
+                float(result.get("p2", 5.0)),
+                float(result.get("extra", {}).get("density", 998.0)),
+                float(result.get("extra", {}).get("vapor_pressure_bar_a", 0.023)),
+                float(result.get("extra", {}).get("critical_pressure_bar_a", 220.64)),
+                float(result.get("extra", {}).get("viscosity_pa_s", 0.00089)),
+                float(result.get("extra", {}).get("fl", 0.85)),
+                float(result.get("extra", {}).get("fd", 1.0)),
+                float(result.get("extra", {}).get("pipe_inlet_diameter_mm", 50.0)),
+                float(result.get("extra", {}).get("pipe_outlet_diameter_mm", 50.0)),
+                char_type,
+            )
 
             fig_3d = go.Figure(data=[go.Surface(
                 z=z_matrix,
@@ -472,9 +568,13 @@ def render_result(result: SizingResult) -> None:
 
             st.caption("3D yüzey, vananın açıklık ve tasarım marjına bağlı olarak gerekli Cv değerlerinin nasıl değiştiğini gösterir.")
 
-    with st.expander("3D Tesisat Karakteristigi (Vana Otoritesi Etkisi)", expanded=False):
-        import plotly.graph_objects as go
+        with tab_model:
+            from valve_3d import build_valve_figure
 
+            st.caption("Seçilen vana boyutuna (DN) göre parametrik gövde, flanş, bonnet, mil ve el çarkı modeli (sematik).")
+            st.plotly_chart(build_valve_figure(float(result["valve_dn_mm"])), use_container_width=True)
+
+    with st.expander("3D Tesisat Karakteristigi (Vana Otoritesi Etkisi)", expanded=False):
         from valve_curve import calc_installed_flow_ratio, cv_at_opening
 
         char_3d = st.session_state.get("flow_characteristic", "equal_percentage")
@@ -611,6 +711,40 @@ def render_source_library() -> None:
         for source in SOURCE_LIBRARY.values():
             st.write(f"- [{source['title']}]({source['url']})")
             st.caption(source["note"])
+
+
+def render_unit_converter() -> None:
+    """Sidebar converter backed by the centralized units module."""
+    with st.sidebar.expander("Birim Dönüştürücü", expanded=False):
+        kind_label = st.selectbox("Dönüştürücü türü", list(UNIT_KIND_LABELS.values()), key="conv_kind")
+        kind = next(k for k, v in UNIT_KIND_LABELS.items() if v == kind_label)
+        units = UNIT_MAPS[kind]
+        labels = list(units.values())
+        c1, c2 = st.columns(2)
+        from_label = c1.selectbox("Kaynak birim", labels, key=f"conv_from_{kind}")
+        to_label = c2.selectbox("Hedef birim", labels, index=1, key=f"conv_to_{kind}")
+        value = st.number_input("Dönüştürülecek değer", value=1.0, key=f"conv_value_{kind}")
+        kwargs: dict[str, float] = {}
+        if kind in {"liquid_flow", "gas_flow"}:
+            kwargs["density_kg_m3"] = st.number_input(
+                "Yoğunluk [kg/m³]", value=998.0 if kind == "liquid_flow" else 1.2, key=f"conv_density_{kind}"
+            )
+        if kind == "gas_flow":
+            kwargs["pressure_bar_a"] = st.number_input("Basınç [bar(a)]", value=1.01325, key=f"conv_p_{kind}")
+            kwargs["temperature_c"] = st.number_input("Sıcaklık [°C]", value=15.0, key=f"conv_t_{kind}")
+            kwargs["z"] = st.number_input("Sıkıştırılabilirlik Z", value=1.0, key=f"conv_z_{kind}")
+        try:
+            result = convert_unit(
+                kind,
+                float(value),
+                next(k for k, v in units.items() if v == from_label),
+                next(k for k, v in units.items() if v == to_label),
+                **kwargs,
+            )
+        except (ValueError, StopIteration) as exc:
+            st.error(str(exc))
+        else:
+            st.metric("Sonuç", f"{result:.6g} {to_label}")
 
 
 def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
@@ -1252,6 +1386,45 @@ def main() -> None:
     </style>
     """, unsafe_allow_html=True)
 
+    if st.context.theme.get("type") == "dark":
+        st.markdown("""
+        <style>
+        .card {
+            background-color: #1e293b;
+            border-color: #334155;
+        }
+        .metric-card {
+            background-color: #0f172a;
+            border-color: #334155;
+        }
+        .metric-card h4 {
+            color: #94a3b8;
+        }
+        .metric-card p {
+            color: #e2e8f0;
+        }
+        .highlight-card {
+            background-color: #0f172a;
+        }
+        .warning-card {
+            background-color: #3b2f0b;
+        }
+        .error-card {
+            background-color: #3b1414;
+        }
+        .success-card {
+            background-color: #0d2b1c;
+        }
+        .section-header {
+            color: #e2e8f0;
+            border-bottom-color: #334155;
+        }
+        .section-subheader {
+            color: #cbd5e1;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
     _init_state()
 
     # Apply a pending reset BEFORE any widget is instantiated (Streamlit forbids
@@ -1259,6 +1432,7 @@ def main() -> None:
     if st.session_state.pop("_reset_defaults", False):
         for key, value in DEFAULTS.items():
             st.session_state[key] = value
+        st.session_state.service_slider = SERVICE_LABELS["Liquid"]
         st.session_state.gas_rows = DEFAULT_GAS_ROWS
         st.session_state.gas_valid = True
         st.session_state.last_result = None
@@ -1269,8 +1443,26 @@ def main() -> None:
     st.title("Control Valve Sizing")
     st.caption("Kaynakli Streamlit arayuzu: liquid, gas ve steam servisleri icin IEC/ISA'ya yaklastirilmis sizing uygulamasi.")
 
-    service_index = ["Liquid", "Gas", "Steam"].index(st.session_state.service)
-    st.session_state.service = st.sidebar.radio("Servis tipi", ["Liquid", "Gas", "Steam"], index=service_index)
+    nav_cols = st.columns(3, gap="small")
+    for col, service in zip(nav_cols, ("Liquid", "Gas", "Steam"), strict=True):
+        col.button(
+            SERVICE_LABELS[service],
+            key=f"service_tab_{service}",
+            type="primary" if st.session_state.service == service else "secondary",
+            use_container_width=True,
+            on_click=_select_service,
+            args=(service,),
+        )
+    slider_kwargs: dict[str, Any] = {"key": "service_slider", "on_change": _sync_service_from_slider}
+    if "service_slider" not in st.session_state:
+        slider_kwargs["value"] = SERVICE_LABELS[st.session_state.service]
+    st.select_slider(
+        "Servis",
+        options=list(SERVICE_LABELS.values()),
+        label_visibility="collapsed",
+        **slider_kwargs,
+    )
+
     vendor_key = st.sidebar.selectbox(
         "Vendor representative trim",
         get_vendor_options(),
@@ -1290,6 +1482,7 @@ def main() -> None:
         key="flow_characteristic",
     )
     render_source_library()
+    render_unit_converter()
 
     st.sidebar.markdown("---")
     if st.sidebar.button(
@@ -1350,7 +1543,18 @@ def main() -> None:
 
     render_report_tools()
 
-    with st.expander("Coklu Calisma Durumu (Multi-Case Sizing: Min / Normal / Max)", expanded=False):
+    adv_tabs = st.tabs([
+        "Çoklu Durum",
+        "Anti-Kavitasyon Trim",
+        "Aktüatör Dinamiği",
+        "Salmastra & Emisyon",
+        "Boru Güvenliği & PSV",
+        "Malzeme & Bonnet",
+        "Termal Genleşme",
+        "Notlar",
+    ])
+
+    with adv_tabs[0]:
         st.markdown(
             "IEC 60534 standartlarina gore vananin Minimum, Normal ve Maksimum debi durumlarinda "
             "eszamanli kontrol edilebilirligi (Min %10+, Normal %40-75, Max <%85 aciklik) analiz edilir."
@@ -1445,8 +1649,6 @@ def main() -> None:
             st.dataframe(pd.DataFrame(cand_rows), hide_index=True)
             rec = mc_res.recommended or (mc_res.candidates[0] if mc_res.candidates else None)
             if rec:
-                import plotly.graph_objects as go
-
                 details = list(rec.case_details.values())
                 fig_mc = go.Figure(go.Scatter3d(
                     x=[d.flow for d in details],
@@ -1466,7 +1668,7 @@ def main() -> None:
             for w in mc_res.warnings:
                 st.warning(w)
 
-    with st.expander("Kavitasyon ve Çok Kademeli Anti-Kavitasyon Trim Tasarımı (ISA-RP75.23 / IEC 60534)", expanded=False):
+    with adv_tabs[1]:
         st.markdown(
             "Yüksek basınç düşüşlü sıvı servislerinde kavitasyon hasarını ve gürültüyü önlemek için "
             "basınç düşüşü $N$ kademeli direnç elemanlarına (Multi-Stage Letdown) paylaştırılır."
@@ -1535,7 +1737,7 @@ def main() -> None:
         ]
         st.dataframe(pd.DataFrame(st_rows), hide_index=True)
 
-    with st.expander("Aktüatör Tepki Süresi, Hızlanma ve Hava Tüketimi (ISA-75.25 / IEC 60534-6)", expanded=False):
+    with adv_tabs[2]:
         st.markdown(
             "Pnömatik aktüatörün açılma/kapanma strok süresi, konumlandırıcı (positioner) hava debisi, "
             "hacim yükseltici (volume booster) ihtiyacı ve enstrüman havası tüketim hesabı."
@@ -1593,7 +1795,7 @@ def main() -> None:
         for note in act_dyn.engineering_notes:
             st.caption(f"ℹ️ {note}")
 
-    with st.expander("Salmastra ve Kaçak Emisyon Analizi (ISO 15848-1 / API 641)", expanded=False):
+    with adv_tabs[3]:
         from packing_emissions import recommend_packing_system
 
         pack_service = st.session_state.service.lower()
@@ -1636,7 +1838,7 @@ def main() -> None:
         for r in pk_res.recommendations:
             st.caption(f"• {r}")
 
-    with st.expander("Boru Hattı Güvenliği & PSV Tahliye Debisi (API 14E / API 520)", expanded=False):
+    with adv_tabs[4]:
         from safety_piping import calc_wide_open_relief_capacity, check_erosional_velocity
 
         cur_s = st.session_state.service.lower()
@@ -1681,7 +1883,7 @@ def main() -> None:
             for sn in relief_eval.safety_notes:
                 st.caption(f"- {sn}")
 
-    with st.expander("Gelişmiş Malzeme & Bonnet Seçimi (ASME B31.3 / NACE / API 941)", expanded=False):
+    with adv_tabs[5]:
         from valve_selection import recommend_alloy_material, recommend_bonnet_type
 
         mat_srv = st.session_state.service.lower()
@@ -1709,7 +1911,7 @@ def main() -> None:
         for mr in rec_alloy.recommendations:
             st.caption(f"• {mr}")
 
-    with st.expander("Termal Genlesme (boru hatti)", expanded=False):
+    with adv_tabs[6]:
         from thermal_expansion import (
             get_material_label,
             get_material_options,
@@ -1731,7 +1933,7 @@ def main() -> None:
             c3.metric("dT [C]", f"{delta_t:.1f}")
             st.caption("Genlesme kompansatoru / loop gereksinimi icin boru hatti mekanik analizi yapilmalidir.")
 
-    with st.expander("Notlar", expanded=False):
+    with adv_tabs[7]:
         st.markdown(
             """
             - Vendor katalog verileri: Emerson Fisher (4 trim), Metso/Valmet (3), SAMSON (3), ARCA (2) — toplam 12 representative trim.

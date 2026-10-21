@@ -9,13 +9,7 @@ import json
 import math
 from datetime import UTC, datetime
 
-from units import (
-    GAS_FLOW_UNITS,
-    LIQUID_FLOW_UNITS,
-    PRESSURE_UNITS,
-    STEAM_FLOW_UNITS,
-    TEMPERATURE_UNITS,
-)
+from units import UNIT_MAPS
 
 PROJECT_TYPE = "control_valve_sizing"
 
@@ -28,15 +22,15 @@ SERVICE_REQUIRED_KEYS: dict[str, set[str]] = {
 }
 
 UNIT_VALIDATORS: dict[str, dict[str, str]] = {
-    "liquid_temp_unit": TEMPERATURE_UNITS,
-    "liquid_pres_unit": PRESSURE_UNITS,
-    "liquid_flow_unit": LIQUID_FLOW_UNITS,
-    "gas_temp_unit": TEMPERATURE_UNITS,
-    "gas_pres_unit": PRESSURE_UNITS,
-    "gas_flow_unit": GAS_FLOW_UNITS,
-    "steam_temp_unit": TEMPERATURE_UNITS,
-    "steam_pres_unit": PRESSURE_UNITS,
-    "steam_flow_unit": STEAM_FLOW_UNITS,
+    "liquid_temp_unit": UNIT_MAPS["temperature"],
+    "liquid_pres_unit": UNIT_MAPS["pressure"],
+    "liquid_flow_unit": UNIT_MAPS["liquid_flow"],
+    "gas_temp_unit": UNIT_MAPS["temperature"],
+    "gas_pres_unit": UNIT_MAPS["pressure"],
+    "gas_flow_unit": UNIT_MAPS["gas_flow"],
+    "steam_temp_unit": UNIT_MAPS["temperature"],
+    "steam_pres_unit": UNIT_MAPS["pressure"],
+    "steam_flow_unit": UNIT_MAPS["steam_flow"],
 }
 
 

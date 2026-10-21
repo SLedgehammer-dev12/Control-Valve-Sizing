@@ -34,14 +34,33 @@ pip install -r requirements.txt
 - **Desktop UI:** `python app_desktop.py`
 - **Paketlenmiş giriş noktaları:** `valve-sizing-web`, `valve-sizing-desktop`
 
-## Yayınlar (Desktop)
+## Yayınlar
 
-`v*` etiketine push edildiğinde GitHub Actions **Windows (x86_64)** ve **macOS (Apple Silicon/arm64)** için PyInstaller paketlerini derler ve Release'e ekler. AV alarmını azaltmak için paketler tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenir; macOS paketi ad-hoc imzalıdır. Detaylar ve SmartScreen/Gatekeeper talimatları için `release_notes.md`'ye bakın.
+`vX.Y.Z` etiketine push edildiğinde GitHub Actions üç hedefi derler. Sürüm numarası etiketten okunur, `valve_sizing.__version__` ile karşılaştırılır ve tüm kurulum dosyalarının adına eklenir:
+
+| Platform | Çıktı | Açıklama |
+|---|---|---|
+| Windows (x86_64) | `ControlValveSizing_Setup_<version>.exe` | Inno Setup kurulum sihirbazı |
+| Windows (taşınabilir) | `ControlValveSizing_windows_x86_64_<version>.zip` | Kurulum gerektirmez |
+| macOS (Apple Silicon / arm64) | `ControlValveSizing_macos_arm64_<version>.dmg` | `.app` + `/Applications` kısayolu |
+| Web (Docker) | `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` | Streamlit imajı; ayrıca `latest` |
+
+AV alarmını azaltmak için masaüstü paketleri tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenir; macOS paketi ad-hoc imzalıdır. Detaylar ve SmartScreen/Gatekeeper talimatları için `release_notes.md`'ye bakın.
+
+GHCR imajının herkes tarafından çekilebilmesi için ilk yayından sonra GitHub → Packages → Package settings → Change visibility → **Public** ayarlanmalıdır.
 
 Tüm sürümlerin what's new ve release notları: [`docs/releases/index.md`](docs/releases/index.md)
 
+```bash
+git tag v3.3.4 && git push origin v3.3.4
+```
+
+Yerel derleme:
+
 ```powershell
-git tag v3.2.0 && git push origin v3.2.0
+pyinstaller app_desktop.spec
+iscc /DMyAppVersion=3.3.4 installer.iss
+docker compose up --build
 ```
 
 ## Test

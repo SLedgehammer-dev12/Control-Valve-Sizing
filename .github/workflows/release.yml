@@ -8,9 +8,43 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag and version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be vX.Y.Z (got ${GITHUB_REF_NAME})" >&2
+            exit 1
+          fi
+          FILE_VERSION="$(python3 - <<'PY'
+          import pathlib
+          import re
+          text = pathlib.Path("valve_sizing.py").read_text(encoding="utf-8")
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', text)
+          print(match.group(1) if match else "")
+          PY
+          )"
+          if [ "$VERSION" != "$FILE_VERSION" ]; then
+            echo "Tag version ${VERSION} does not match valve_sizing.__version__ ${FILE_VERSION}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
   build-windows:
     name: Windows x86_64
+    needs: prepare
     runs-on: windows-latest
+    env:
+      CVS_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,21 +85,39 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
           Write-Host "Self-test passed"
 
-      - name: Package release zip
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer (versioned name)
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/ControlValveSizing" -DestinationPath "dist/ControlValveSizing_windows_x86_64.zip" -Force
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          & $iscc "/DMyAppVersion=$env:CVS_VERSION" "installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          $setup = "dist/ControlValveSizing_Setup_$env:CVS_VERSION.exe"
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+
+      - name: Package portable zip (versioned name)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/ControlValveSizing" -DestinationPath "dist/ControlValveSizing_windows_x86_64_$env:CVS_VERSION.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ControlValveSizing-windows-x86_64
-          path: dist/ControlValveSizing_windows_x86_64.zip
+          path: |
+            dist/ControlValveSizing_Setup_*.exe
+            dist/ControlValveSizing_windows_x86_64_*.zip
           retention-days: 7
 
   build-macos:
     name: macOS Apple Silicon (arm64)
+    needs: prepare
     runs-on: macos-14
+    env:
+      CVS_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -103,16 +155,19 @@ jobs:
       - name: Verify signature
         run: codesign --verify --deep --strict dist/ControlValveSizing.app
 
-      - name: Package release DMG (versioned name)
+      - name: Package versioned DMG (with Applications shortcut)
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          ditto -c -k --sequesterRsrc dist/ControlValveSizing.app dist/ControlValveSizing_macos_arm64.zip
-          hdiutil create -volname "ControlValveSizing" \
-            -srcfolder dist/ControlValveSizing.app \
+          VERSION="${CVS_VERSION}"
+          STAGE="dist/dmg-stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          ditto dist/ControlValveSizing.app "$STAGE/ControlValveSizing.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Control Valve Sizing ${VERSION}" \
+            -srcfolder "$STAGE" \
             -ov -format UDZO \
             "dist/ControlValveSizing_macos_arm64_${VERSION}.dmg"
-          ls -la dist/*.dmg dist/*.zip
+          ls -la dist/*.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -121,9 +176,49 @@ jobs:
           path: dist/ControlValveSizing_macos_arm64_*.dmg
           retention-days: 7
 
+  build-web:
+    name: Web Docker image
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ needs.prepare.outputs.version }}
+
   release:
     name: Publish GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [prepare, build-windows, build-macos, build-web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -132,12 +227,34 @@ jobs:
         with:
           path: artifacts
 
+      - name: Compose release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          {
+            echo "# Control Valve Sizing v${VERSION}"
+            echo
+            echo "## İndirmeler"
+            echo
+            echo "| Platform | Dosya |"
+            echo "|---|---|"
+            echo "| Windows (x86_64) | \`ControlValveSizing_Setup_${VERSION}.exe\` |"
+            echo "| Windows (taşınabilir) | \`ControlValveSizing_windows_x86_64_${VERSION}.zip\` |"
+            echo "| macOS (Apple Silicon) | \`ControlValveSizing_macos_arm64_${VERSION}.dmg\` |"
+            echo "| Web (Docker) | \`${IMAGE}:${VERSION}\` |"
+            echo
+            tail -n +2 release_notes.md
+          } > release_body.generated.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            artifacts/**/*.exe
             artifacts/**/*.zip
             artifacts/**/*.dmg
           name: Control Valve Sizing ${{ github.ref_name }}
-          body_path: release_notes.md
+          body_path: release_body.generated.md
           generate_release_notes: false

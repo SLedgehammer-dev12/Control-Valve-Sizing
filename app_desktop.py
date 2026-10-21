@@ -16,6 +16,9 @@ from units import (
     PRESSURE_UNITS,
     STEAM_FLOW_UNITS,
     TEMPERATURE_UNITS,
+    UNIT_KIND_LABELS,
+    UNIT_MAPS,
+    convert_unit,
     gas_flow_to_nm3h,
     liquid_flow_to_m3h,
     pressure_from_bar_a,
@@ -29,6 +32,9 @@ from valve_sizing import GasSizingInput, LiquidSizingInput, SteamSizingInput, si
 from vendor_catalog import get_vendor_definition, get_vendor_options
 
 logger = logging.getLogger(__name__)
+
+SERVICE_KEYS = ("liquid", "gas", "steam")
+SERVICE_NAMES = ("Sivi", "Gaz", "Buhar")
 
 
 class ToolTip:
@@ -90,6 +96,8 @@ class ValveSizingApp:
         self.root.minsize(980, 720)
 
         self.service_type = tk.StringVar(value="liquid")
+        self.service_slider = tk.DoubleVar(value=0.0)
+        self.service_slider_label = tk.StringVar(value=SERVICE_NAMES[0])
         self.vendor_key = tk.StringVar(value="fisher_globe_eqpct")
         self.liquid_source = tk.StringVar(value="Preset")
         self.liquid_preset_label = tk.StringVar(value="Su")
@@ -139,6 +147,7 @@ class ValveSizingApp:
 
         # Live-calculation bookkeeping
         self._live_enabled = False
+        self._syncing_service = False
         self._field_labels: dict[str, ttk.Label] = {}
         self._field_family: dict[str, str] = {}
         self._result_history: list[dict[str, Any]] = []
@@ -186,6 +195,7 @@ class ValveSizingApp:
             else:
                 getattr(self, attr).set(value)
         self._result_history = []
+        self._toggle_service()
         self._on_live_change()
 
     def _build_menu(self) -> None:
@@ -254,20 +264,25 @@ class ValveSizingApp:
         body.pack(fill="both", expand=True)
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
+        body.grid_rowconfigure(1, weight=1)
         body.grid_rowconfigure(3, weight=1)
 
-        # Row 0: Service type + Vendor
+        # Row 0: Service slider + Vendor
         top_card = ttk.LabelFrame(body, text="Servis Tipi / Vendor")
         top_card.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        ttk.Radiobutton(
-            top_card, text="Sivi", variable=self.service_type, value="liquid", command=self._toggle_service
-        ).grid(row=0, column=0, padx=12, pady=8, sticky="w")
-        ttk.Radiobutton(
-            top_card, text="Gaz", variable=self.service_type, value="gas", command=self._toggle_service
-        ).grid(row=0, column=1, padx=12, pady=8, sticky="w")
-        ttk.Radiobutton(
-            top_card, text="Buhar", variable=self.service_type, value="steam", command=self._toggle_service
-        ).grid(row=0, column=2, padx=12, pady=8, sticky="w")
+        ttk.Label(top_card, text="Servis:").grid(row=0, column=0, padx=(12, 4), pady=8, sticky="w")
+        ttk.Scale(
+            top_card,
+            from_=0.0,
+            to=2.0,
+            orient="horizontal",
+            variable=self.service_slider,
+            command=self._on_service_slider,
+            length=170,
+        ).grid(row=0, column=1, padx=(0, 4), pady=8, sticky="ew")
+        ttk.Label(top_card, textvariable=self.service_slider_label, width=6).grid(
+            row=0, column=2, padx=(0, 12), pady=8, sticky="w"
+        )
         ttk.Label(top_card, text="Vendor Trim:").grid(row=0, column=3, padx=12, pady=8, sticky="e")
         vendor_combo = ttk.Combobox(
             top_card,
@@ -288,20 +303,21 @@ class ValveSizingApp:
             width=16,
         ).grid(row=1, column=6, padx=(0, 12), pady=8, sticky="w")
 
-        # Row 1: Liquid frame (left) + Gas frame (right)
-        self.liquid_frame = ttk.LabelFrame(body, text="Sivi Verileri")
-        self.liquid_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
-        self.gas_frame = ttk.LabelFrame(body, text="Gaz Verileri")
-        self.gas_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 8))
-
-        # Row 2: Steam frame (span both columns)
-        self.steam_frame = ttk.LabelFrame(body, text="Buhar Verileri")
-        self.steam_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 0), pady=(0, 8))
+        # Row 1: Service tabs
+        self.notebook = ttk.Notebook(body)
+        self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        self.liquid_frame = ttk.Frame(self.notebook, padding=8)
+        self.gas_frame = ttk.Frame(self.notebook, padding=8)
+        self.steam_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.liquid_frame, text="Sivi Verileri")
+        self.notebook.add(self.gas_frame, text="Gaz Verileri")
+        self.notebook.add(self.steam_frame, text="Buhar Verileri")
 
         # Build liquid form with source selector and pipe reducer
         self._build_form_liquid(self.liquid_frame)
         self._build_form_gas(self.gas_frame)
         self._build_form_steam(self.steam_frame)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Live calculation: re-run on any flow / pressure / temperature edit
         live_keys = (
@@ -314,7 +330,7 @@ class ValveSizingApp:
 
         # Row 3: Action bar
         action_bar = tk.Frame(body, bg="#eef3f8")
-        action_bar.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        action_bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 12))
         tk.Button(
             action_bar,
             text="Hesapla",
@@ -363,6 +379,18 @@ class ValveSizingApp:
             padx=18,
             pady=10,
         ).pack(side="left")
+        tk.Button(
+            action_bar,
+            text="Birim Dönüştürücü",
+            command=self._show_unit_converter,
+            bg="#4a5568",
+            fg="white",
+            activebackground="#3b4453",
+            relief="flat",
+            font=("Segoe UI Semibold", 11),
+            padx=18,
+            pady=10,
+        ).pack(side="left", padx=(10, 0))
 
         self.result_box = tk.Text(
             body,
@@ -375,9 +403,9 @@ class ValveSizingApp:
             padx=14,
             pady=14,
         )
-        self.result_box.grid(row=4, column=0, columnspan=2, sticky="nsew")
+        self.result_box.grid(row=3, column=0, columnspan=2, sticky="nsew")
 
-    def _build_form_liquid(self, parent: ttk.LabelFrame) -> None:
+    def _build_form_liquid(self, parent: ttk.Frame) -> None:
         """Build liquid form with source selector, pipe reducer fields."""
         row = 0
         # Source selector
@@ -449,7 +477,7 @@ class ValveSizingApp:
 
         parent.grid_columnconfigure(1, weight=1)
 
-    def _add_unit_selector_row(self, parent: ttk.LabelFrame, row: int, prefix: str, flow_units: dict[str, str]) -> None:
+    def _add_unit_selector_row(self, parent: ttk.Frame, row: int, prefix: str, flow_units: dict[str, str]) -> None:
         """Add a compact temperature / pressure / flow unit selector row."""
         frame = ttk.Frame(parent)
         frame.grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=4)
@@ -507,7 +535,7 @@ class ValveSizingApp:
             self._calculate(show_errors=False)
         return ""
 
-    def _build_form_steam(self, parent: ttk.LabelFrame) -> None:
+    def _build_form_steam(self, parent: ttk.Frame) -> None:
         """Build steam form with auto-calculated k and Z from CoolProp."""
         self._add_unit_selector_row(parent, 0, "steam", STEAM_FLOW_UNITS)
         fields = [
@@ -543,7 +571,7 @@ class ValveSizingApp:
             row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8)
         )
 
-    def _build_form_gas(self, parent: ttk.LabelFrame) -> None:
+    def _build_form_gas(self, parent: ttk.Frame) -> None:
         """Build gas form with composition selector and calculated Z display."""
         self._add_unit_selector_row(parent, 0, "gas", GAS_FLOW_UNITS)
         fields_simple = [
@@ -765,20 +793,45 @@ class ValveSizingApp:
         if z_factor == 1.0 and self.z_calculated_display.get() == "ERROR":
             return
 
+    def _on_service_slider(self, value: str) -> None:
+        if self._syncing_service or not hasattr(self, "notebook"):
+            return
+        index = min(2, max(0, int(round(float(value)))))
+        if self.notebook.select() != str(self.notebook.tabs()[index]):
+            self.notebook.select(index)
+
+    def _on_tab_changed(self, _event: object = None) -> None:
+        index = self.notebook.index(self.notebook.select())
+        self.service_type.set(SERVICE_KEYS[index])
+        self._toggle_service()
+        if self._live_enabled:
+            self._calculate(show_errors=False)
+
     def _toggle_service(self) -> None:
-        svc = self.service_type.get()
-        is_liquid = svc == "liquid"
-        is_gas = svc == "gas"
-        is_steam = svc == "steam"
-        for child in self.liquid_frame.winfo_children():
-            with contextlib.suppress(tk.TclError):
-                child.configure(state="normal" if is_liquid else "disabled")  # type: ignore[call-overload,call-arg]
-        for child in self.gas_frame.winfo_children():
-            with contextlib.suppress(tk.TclError):
-                child.configure(state="normal" if is_gas else "disabled")  # type: ignore[call-overload,call-arg]
-        for child in self.steam_frame.winfo_children():
-            with contextlib.suppress(tk.TclError):
-                child.configure(state="normal" if is_steam else "disabled")  # type: ignore[call-overload,call-arg]
+        if self._syncing_service:
+            return
+        self._syncing_service = True
+        try:
+            svc = self.service_type.get()
+            index = SERVICE_KEYS.index(svc)
+            if self.notebook.index(self.notebook.select()) != index:
+                self.notebook.select(index)
+            self.service_slider.set(float(index))
+            self.service_slider_label.set(SERVICE_NAMES[index])
+            is_liquid = svc == "liquid"
+            is_gas = svc == "gas"
+            is_steam = svc == "steam"
+            for child in self.liquid_frame.winfo_children():
+                with contextlib.suppress(tk.TclError):
+                    child.configure(state="normal" if is_liquid else "disabled")  # type: ignore[call-overload,call-arg]
+            for child in self.gas_frame.winfo_children():
+                with contextlib.suppress(tk.TclError):
+                    child.configure(state="normal" if is_gas else "disabled")  # type: ignore[call-overload,call-arg]
+            for child in self.steam_frame.winfo_children():
+                with contextlib.suppress(tk.TclError):
+                    child.configure(state="normal" if is_steam else "disabled")  # type: ignore[call-overload,call-arg]
+        finally:
+            self._syncing_service = False
 
     def _update_liquid_properties(self) -> None:
         """Auto-fill liquid properties from preset or CoolProp."""
@@ -1091,6 +1144,117 @@ class ValveSizingApp:
 
         self.result_box.delete("1.0", tk.END)
         self.result_box.insert("1.0", "\n".join(lines))
+
+    def _show_unit_converter(self) -> None:
+        """Open a unit converter dialog backed by units.convert_unit."""
+        win = tk.Toplevel(self.root)
+        win.title("Birim Dönüştürücü")
+        win.transient(self.root)
+        win.resizable(False, False)
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+
+        kind_label = tk.StringVar(value=UNIT_KIND_LABELS["temperature"])
+        from_unit = tk.StringVar()
+        to_unit = tk.StringVar()
+        value_var = tk.StringVar(value="1")
+        density_var = tk.StringVar(value="998")
+        pressure_var = tk.StringVar(value="1.01325")
+        temperature_var = tk.StringVar(value="15")
+        z_var = tk.StringVar(value="1")
+        result_var = tk.StringVar(value="--")
+        status_var = tk.StringVar(value="")
+
+        ttk.Label(frame, text="Tür:").grid(row=0, column=0, sticky="w", pady=4)
+        kind_combo = ttk.Combobox(
+            frame, textvariable=kind_label, values=list(UNIT_KIND_LABELS.values()), state="readonly", width=16
+        )
+        kind_combo.grid(row=0, column=1, columnspan=3, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Değer:").grid(row=1, column=0, sticky="w", pady=4)
+        value_entry = ttk.Entry(frame, textvariable=value_var, width=16)
+        value_entry.grid(row=1, column=1, sticky="ew", pady=4)
+        ttk.Label(frame, text="Sonuç:").grid(row=1, column=2, sticky="e", padx=(12, 4), pady=4)
+        ttk.Label(frame, textvariable=result_var, font=("Segoe UI Semibold", 11)).grid(row=1, column=3, sticky="w", pady=4)
+
+        ttk.Label(frame, text="Kaynak:").grid(row=2, column=0, sticky="w", pady=4)
+        from_combo = ttk.Combobox(frame, textvariable=from_unit, state="readonly", width=16)
+        from_combo.grid(row=2, column=1, sticky="ew", pady=4)
+        ttk.Label(frame, text="Hedef:").grid(row=2, column=2, sticky="e", padx=(12, 4), pady=4)
+        to_combo = ttk.Combobox(frame, textvariable=to_unit, state="readonly", width=16)
+        to_combo.grid(row=2, column=3, sticky="ew", pady=4)
+
+        optional = ttk.Frame(frame)
+        optional.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        density_label = ttk.Label(optional, text="Yoğunluk [kg/m³]")
+        density_entry = ttk.Entry(optional, textvariable=density_var, width=10)
+        pressure_label = ttk.Label(optional, text="P [bar(a)]")
+        pressure_entry = ttk.Entry(optional, textvariable=pressure_var, width=10)
+        temperature_label = ttk.Label(optional, text="T [°C]")
+        temperature_entry = ttk.Entry(optional, textvariable=temperature_var, width=10)
+        z_label = ttk.Label(optional, text="Z")
+        z_entry = ttk.Entry(optional, textvariable=z_var, width=6)
+        ttk.Label(frame, textvariable=status_var, foreground="#b91c1c").grid(
+            row=4, column=0, columnspan=4, sticky="w"
+        )
+
+        def current_kind() -> str:
+            return next(k for k, v in UNIT_KIND_LABELS.items() if v == kind_label.get())
+
+        def refresh_units(*_args) -> None:
+            kind = current_kind()
+            units = UNIT_MAPS[kind]
+            labels = list(units.values())
+            from_combo.configure(values=labels)
+            to_combo.configure(values=labels)
+            from_unit.set(labels[0])
+            to_unit.set(labels[1] if len(labels) > 1 else labels[0])
+            show_density = kind in {"liquid_flow", "gas_flow"}
+            show_gas = kind == "gas_flow"
+            for widget, visible, col in (
+                (density_label, show_density, 0),
+                (density_entry, show_density, 1),
+                (pressure_label, show_gas, 2),
+                (pressure_entry, show_gas, 3),
+                (temperature_label, show_gas, 4),
+                (temperature_entry, show_gas, 5),
+                (z_label, show_gas, 6),
+                (z_entry, show_gas, 7),
+            ):
+                if visible:
+                    widget.grid(row=0, column=col, sticky="w" if col % 2 == 0 else "ew", padx=(0, 6), pady=2)
+                else:
+                    widget.grid_remove()
+            convert()
+
+        def convert(*_args) -> None:
+            try:
+                kind = current_kind()
+                units = UNIT_MAPS[kind]
+                from_key = next(k for k, v in units.items() if v == from_unit.get())
+                to_key = next(k for k, v in units.items() if v == to_unit.get())
+                kwargs: dict[str, float] = {}
+                if kind in {"liquid_flow", "gas_flow"}:
+                    kwargs["density_kg_m3"] = float(density_var.get())
+                if kind == "gas_flow":
+                    kwargs["pressure_bar_a"] = float(pressure_var.get())
+                    kwargs["temperature_c"] = float(temperature_var.get())
+                    kwargs["z"] = float(z_var.get())
+                converted = convert_unit(kind, float(value_var.get()), from_key, to_key, **kwargs)
+            except (ValueError, StopIteration) as exc:
+                result_var.set("--")
+                status_var.set(str(exc))
+            else:
+                result_var.set(f"{converted:.6g} {units[to_key]}")
+                status_var.set("")
+
+        kind_combo.bind("<<ComboboxSelected>>", refresh_units)
+        from_combo.bind("<<ComboboxSelected>>", convert)
+        to_combo.bind("<<ComboboxSelected>>", convert)
+        for entry in (value_entry, density_entry, pressure_entry, temperature_entry, z_entry):
+            entry.bind("<KeyRelease>", convert)
+        ttk.Button(frame, text="Kapat", command=win.destroy).grid(row=5, column=3, sticky="e", pady=(8, 0))
+        refresh_units()
 
     def _show_history_dialog(self) -> None:
         """Show a comparison table of the last few explicit calculations."""
