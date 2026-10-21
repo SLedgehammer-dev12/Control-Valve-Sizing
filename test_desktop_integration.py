@@ -357,6 +357,7 @@ def test_release_installers_include_version():
     assert "ControlValveSizing_macos_arm64_${VERSION}.dmg" in workflow
     assert "installer.iss" in workflow
     assert "build-web" in workflow
+    assert "pattern: ControlValveSizing-*" in workflow
 
     dockerfile = (APP_DIR / "Dockerfile").read_text(encoding="utf-8")
     assert "ARG APP_VERSION" in dockerfile
