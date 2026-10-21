@@ -161,7 +161,7 @@ def build_joule_thomson_report(jt: Any) -> str:
         f"- S\u0131cakl\u0131k D\u00fc\u015f\u00fc\u015f\u00fc (\u0394T_JT): {jt.delta_t_c:.1f} \u00b0C",
         f"- J-T Katsay\u0131s\u0131 (\u03bc_JT): {jt.mu_jt_c_per_bar:.3f} \u00b0C/bar",
         f"- Hidrat Olu\u015fma S\u0131cakl\u0131\u011f\u0131 (T_hyd @ P2): {jt.t_hydrate_c:.1f} \u00b0C",
-        f"- Hidrat Riski: {'VAR (Tehlike)' if jt.hydrate_risk else 'YOK (G\u00fcvenli)'}",
+        f"- Hidrat Riski: {'VAR (Tehlike)' if jt.hydrate_risk else 'YOK (Güvenli)'}",
         f"- Donma Riski (T2 <= 0 \u00b0C): {'VAR (Buzlanma)' if jt.freezing_risk else 'YOK'}",
         f"- Minimum \u00d6n \u0131s\u0131t\u0131c\u0131 S\u0131cakl\u0131\u011f\u0131: {jt.t_preheat_min_c:.1f} \u00b0C",
         "",
