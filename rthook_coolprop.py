@@ -3,18 +3,21 @@
 CoolProp's native DLL (CoolProp.dll) must be findable by Windows when the
 Cython extension (.pyd) is loaded. PyInstaller extracts extension modules to
 _MEIPASS/<package>/ but the sibling DLL may not be on the DLL search path.
-This hook adds the bundled CoolProp directory to both os.environ['PATH']
-and os.add_dll_directory() so LoadLibrary(CoolProp.dll) succeeds.
+This hook adds the bundled CoolProp directory and delvewheel ``*.libs``
+directories to both os.environ['PATH'] and os.add_dll_directory() so
+LoadLibrary(CoolProp.dll) succeeds.
 """
 import contextlib
+import glob
 import os
 import sys
 
 if sys.platform == "win32":
-    coolprop_dir = os.path.join(sys._MEIPASS, "CoolProp")
-    if os.path.isdir(coolprop_dir):
-        # Add to PATH for LoadLibrary
-        os.environ["PATH"] = coolprop_dir + os.pathsep + os.environ.get("PATH", "")
-        # Add to DLL search directory (Python 3.8+)
-        with contextlib.suppress(Exception):
-            os.add_dll_directory(coolprop_dir)
+    meipass = getattr(sys, "_MEIPASS", "")
+    # CoolProp 8.x keeps its MSVC runtime in _MEIPASS/coolprop.libs (delvewheel).
+    dll_dirs = [os.path.join(meipass, "CoolProp"), *glob.glob(os.path.join(meipass, "*.libs"))]
+    for dll_dir in dll_dirs:
+        if os.path.isdir(dll_dir):
+            os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+            with contextlib.suppress(Exception):
+                os.add_dll_directory(dll_dir)

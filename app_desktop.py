@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import re
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
@@ -2198,6 +2199,25 @@ class ValveSizingApp:
             messagebox.showerror("Hata", f"Proje yuklenemedi: {exc}")
 
 
+def _self_test() -> int:
+    """Headless smoke test for the frozen bundle (CoolProp import + sizing)."""
+    fluid_state = get_pure_fluid_state("Water", 5.0, 25.0)
+    result = size_liquid_valve(
+        LiquidSizingInput(
+            flow_m3h=10.0,
+            inlet_pressure_bar_a=5.0,
+            outlet_pressure_bar_a=3.0,
+            density_kg_m3=fluid_state["density_kg_m3"],
+            vapor_pressure_bar_a=fluid_state["vapor_pressure_bar_a"],
+            critical_pressure_bar_a=fluid_state["critical_pressure_bar_a"],
+            viscosity_pa_s=fluid_state["viscosity_pa_s"],
+            fl=0.9,
+        )
+    )
+    print(f"SELF-TEST OK cv={result.required_cv:.3f}")
+    return 0
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -2213,4 +2233,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(_self_test())
     main()

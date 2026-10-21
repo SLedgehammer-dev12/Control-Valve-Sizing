@@ -25,6 +25,29 @@ def _as_binary_toc(items):
     return out
 
 
+def _collect_delvewheel_libs():
+    """Collect delvewheel dependency dirs (e.g. coolprop.libs) next to the bundle.
+
+    CoolProp 8.x Windows wheels ship MSVC runtime DLLs in a sibling
+    ``coolprop.libs`` directory, not inside the ``CoolProp`` package. PyInstaller
+    does not collect it automatically, so CoolProp.pyd fails to load at runtime.
+    """
+    import CoolProp
+
+    site_dir = os.path.dirname(os.path.dirname(CoolProp.__file__))
+    out = []
+    if not os.path.isdir(site_dir):
+        return out
+    for entry in os.listdir(site_dir):
+        if entry.lower() != "coolprop.libs":
+            continue
+        lib_dir = os.path.join(site_dir, entry)
+        for fname in os.listdir(lib_dir):
+            if fname.endswith(".dll"):
+                out.append((os.path.join(entry, fname), os.path.join(lib_dir, fname), "BINARY"))
+    return out
+
+
 def _collect_coolprop_binaries():
     """Collect CoolProp's native library binaries explicitly.
 
@@ -128,6 +151,7 @@ a = Analysis(
 
 # Collect native dynamic libraries shipped by the numeric stack
 a.binaries += _collect_coolprop_binaries()
+a.binaries += _collect_delvewheel_libs()
 a.binaries += _as_binary_toc(collect_dynamic_libs("fluids"))
 a.binaries += _as_binary_toc(collect_dynamic_libs("chemicals"))
 a.binaries += _as_binary_toc(collect_dynamic_libs("scipy"))

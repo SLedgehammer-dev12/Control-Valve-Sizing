@@ -28,6 +28,29 @@ jobs:
       - name: Build with PyInstaller (one-dir, no UPX)
         run: pyinstaller app_desktop.spec
 
+      - name: Verify bundled CoolProp DLL dependencies
+        shell: pwsh
+        run: |
+          $pyd = "dist/ControlValveSizing/_internal/CoolProp/CoolProp.pyd"
+          if (-not (Test-Path $pyd)) { throw "Missing $pyd" }
+          $libs = Get-ChildItem -Path "dist/ControlValveSizing/_internal" -Filter "coolprop.libs" -Directory
+          if (-not $libs) { throw "Missing coolprop.libs directory" }
+          if (-not (Get-ChildItem -Path $libs.FullName -Filter "*.dll")) { throw "coolprop.libs contains no DLLs" }
+
+      - name: Smoke test frozen exe
+        shell: pwsh
+        run: |
+          $exe = "dist/ControlValveSizing/ControlValveSizing.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -PassThru
+          try {
+            $p | Wait-Process -Timeout 180 -ErrorAction Stop
+          } catch {
+            $p.Kill()
+            throw "Self-test timed out"
+          }
+          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
+          Write-Host "Self-test passed"
+
       - name: Package release zip
         shell: pwsh
         run: |

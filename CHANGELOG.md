@@ -5,6 +5,8 @@ Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine ba
 ## [3.3.3]
 
 ### Fixed
+- Windows desktop build: bundle CoolProp 8.x `coolprop.libs` MSVC runtime DLLs and add them to the DLL search path, fixing `ImportError: DLL load failed while importing CoolProp`; add the missing `fpdf2` build dependency so the PDF report module loads.
+- Release CI: verify the bundled `CoolProp.pyd` + `coolprop.libs` DLLs and run a headless `--self-test` on the frozen Windows exe before publishing.
 - macOS app version: `CFBundleShortVersionString`/`CFBundleVersion` were stale at 3.3.1 in the previously shipped `.dmg`; rebuilt `.app` and `.dmg` now report **3.3.3** (`Info.plist` verified).
 - Desktop tooltips: `ToolTip` class bound to non-existent `self.on_enter`/`self.on_leave` methods, which would raise `AttributeError` on widget construction; renamed to `_on_enter`/`_on_leave` so tooltips work on every input field.
 - `valve_sizing.__version__` and `PROJECT_INDEX.json` version synced to 3.3.3.
