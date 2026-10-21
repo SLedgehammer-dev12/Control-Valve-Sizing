@@ -1488,7 +1488,7 @@ class ValveSizingApp:
                     f"Kademe Basi Izin Verilen \u0394P   : {sev_res.max_allowable_dp_per_stage_bar:.1f} bar",
                     "-" * 78,
                     "KADEME BASINC VE AKIS PROFILI TABLOSU:",
-                    f"{'Kademe':<8} {'P_in [bar]':<11} {'P_out [bar]':<12} {'\u0394P [bar]':<9} "
+                    f"{'Kademe':<8} {'P_in [bar]':<11} {'P_out [bar]':<12} {'ΔP [bar]':<9} "
                     f"{'P_vc [bar]':<11} {'Buhar Marji':<12} {'Kavitasyon':<11} {'Kademe Cv':<10}",
                     "-" * 78,
                 ]
