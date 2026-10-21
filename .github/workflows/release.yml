@@ -135,7 +135,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip artifacts/**/*.dmg
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.dmg
           name: Control Valve Sizing ${{ github.ref_name }}
           body_path: release_notes.md
           generate_release_notes: false
