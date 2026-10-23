@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control Valve Sizing</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">IEC 60534 · ISA 75.01</p>
+      <h1>Control Valve Sizing</h1>
+      <p class="subtitle">Sıvı, gaz ve buhar servisleri için vana seçimi, karakteristik analizi ve 3D görselleştirme.</p>
+    </div>
+    <div class="topbar-meta">
+      <span class="status-dot" id="api-status" aria-live="polite">API bağlanıyor</span>
+      <span class="version" id="version-badge">v—</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="card sidebar-card">
+        <h2>Tasarım Ayarları</h2>
+        <label class="field">
+          <span>Vendor / vana ailesi</span>
+          <select id="vendor"></select>
+        </label>
+        <p class="vendor-info" id="vendor-info">Vendor bilgisi yükleniyor…</p>
+        <label class="field">
+          <span>Tasarım marjı <b id="margin-value">%15</b></span>
+          <input id="margin" type="range" min="0" max="100" step="5" value="15">
+        </label>
+        <label class="field">
+          <span>Akış karakteristiği</span>
+          <select id="characteristic"></select>
+        </label>
+        <label class="field">
+          <span>Vana otoritesi PR <b id="authority-value">0.50</b></span>
+          <input id="authority" type="range" min="0.05" max="1" step="0.05" value="0.5">
+        </label>
+        <p class="hint">PR ≥ 0,50 ideal otoritedir. Düşük PR vananın kontrol yetkisini azaltır.</p>
+      </div>
+
+      <div class="card sidebar-card">
+        <h2>Hızlı Örnekler</h2>
+        <p class="hint">Formu tek tıkla doldur, sonucu hemen gör.</p>
+        <div class="scenario-list">
+          <button class="scenario" type="button" data-service="liquid">Su · 25 m³/h</button>
+          <button class="scenario" type="button" data-service="gas">Doğal gaz · 800 Nm³/h</button>
+          <button class="scenario" type="button" data-service="steam">Buhar · 2500 kg/h</button>
+        </div>
+      </div>
+
+      <div class="card sidebar-card">
+        <h2>Hızlı Bilgi</h2>
+        <div class="quick-stat"><span>Gerekli Cv</span><b id="quick-cv">—</b></div>
+        <div class="quick-stat"><span>Seçilen vana</span><b id="quick-valve">—</b></div>
+        <div class="quick-stat"><span>Açıklık</span><b id="quick-opening">—</b></div>
+        <div class="quick-stat"><span>Durum</span><b id="quick-status">—</b></div>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="tabs" role="tablist" aria-label="Servis seçimi">
+        <button class="tab active" id="tab-liquid" type="button" data-service="liquid" role="tab" aria-selected="true" aria-controls="panel-liquid" tabindex="0">Sıvı</button>
+        <button class="tab" id="tab-gas" type="button" data-service="gas" role="tab" aria-selected="false" aria-controls="panel-gas" tabindex="-1">Gaz</button>
+        <button class="tab" id="tab-steam" type="button" data-service="steam" role="tab" aria-selected="false" aria-controls="panel-steam" tabindex="-1">Buhar</button>
+      </div>
+
+      <form id="sizing-form" class="card form-card" autocomplete="off" aria-busy="false">
+        <section class="panel" id="panel-liquid" role="tabpanel" aria-labelledby="tab-liquid" data-panel="liquid">
+          <div class="panel-head">
+            <div>
+              <h2>Sıvı Servis</h2>
+              <p class="hint">Sıvı debisi, buhar basıncı ve kavitasyon sınırı üzerinden Cv hesabı.</p>
+            </div>
+            <div class="unit-row">
+              <label>Debi birimi<select id="liquid-flow-unit"></select></label>
+              <label>Basınç birimi<select id="liquid-pressure-unit"></select></label>
+              <label>Sıcaklık birimi<select id="liquid-temperature-unit"></select></label>
+            </div>
+          </div>
+          <div class="grid">
+            <label class="field"><span>Akışkan preset</span><select id="liquid-preset" aria-describedby="liquid-preset-note"></select></label>
+            <label class="field"><span>Debi</span><input id="liquid-flow" type="number" step="any" value="25"></label>
+            <label class="field"><span>Sıcaklık</span><input id="liquid-temperature" type="number" step="any" value="25"></label>
+            <label class="field"><span>Giriş basıncı P1</span><input id="liquid-p1" type="number" step="any" value="8"></label>
+            <label class="field"><span>Çıkış basıncı P2</span><input id="liquid-p2" type="number" step="any" value="5"></label>
+            <label class="field"><span>Buhar basıncı Pv [bar(a)]</span><input id="liquid-pv" type="number" step="any" value="0.023"></label>
+            <label class="field"><span>Kritik basınç Pc [bar(a)]</span><input id="liquid-pc" type="number" step="any" value="220.64"></label>
+            <label class="field"><span>Yoğunluk [kg/m³]</span><input id="liquid-density" type="number" step="any" value="998"></label>
+            <label class="field"><span>Viskozite [Pa·s]</span><input id="liquid-viscosity" type="number" step="any" value="0.00089"></label>
+            <label class="field"><span>Hat giriş çapı [mm]</span><input id="liquid-pipe-in" type="number" step="any" value="50"></label>
+            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="liquid-pipe-out" type="number" step="any" value="50"></label>
+          </div>
+          <p class="hint" id="liquid-preset-note" aria-live="polite"></p>
+        </section>
+
+        <section class="panel" id="panel-gas" role="tabpanel" aria-labelledby="tab-gas" data-panel="gas" hidden>
+          <div class="panel-head">
+            <div>
+              <h2>Gaz Servis</h2>
+              <p class="hint">Gaz kompozisyonu CoolProp ile değerlendirilir; choked akış xT·Fk üzerinden kontrol edilir.</p>
+            </div>
+            <div class="unit-row">
+              <label>Debi birimi<select id="gas-flow-unit"></select></label>
+              <label>Basınç birimi<select id="gas-pressure-unit"></select></label>
+              <label>Sıcaklık birimi<select id="gas-temperature-unit"></select></label>
+            </div>
+          </div>
+          <div class="grid">
+            <label class="field"><span>Gaz preset</span><select id="gas-preset"></select></label>
+            <label class="field"><span>Gaz modeli</span>
+              <select id="gas-model">
+                <option value="real">Gerçek gaz (HEOS)</option>
+                <option value="auto">Gerçek gaz (mümkünse)</option>
+                <option value="ideal">İdeal gaz</option>
+              </select>
+            </label>
+            <label class="check-line"><input id="gas-composition-toggle" type="checkbox" aria-controls="gas-composition-fields"> Gaz kompozisyonunu oluştur</label>
+            <label class="field"><span>Debi</span><input id="gas-flow" type="number" step="any" value="800"></label>
+            <label class="field"><span>Sıcaklık</span><input id="gas-temperature" type="number" step="any" value="20"></label>
+            <label class="field"><span>Giriş basıncı P1</span><input id="gas-p1" type="number" step="any" value="8"></label>
+            <label class="field"><span>Çıkış basıncı P2</span><input id="gas-p2" type="number" step="any" value="6"></label>
+            <label class="field"><span>Hat giriş çapı [mm]</span><input id="gas-pipe-in" type="number" step="any" value="80"></label>
+            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="gas-pipe-out" type="number" step="any" value="80"></label>
+          </div>
+          <div id="gas-composition-fields" hidden>
+            <div class="grid">
+              <label class="field"><span>Kompozisyon bazı</span>
+                <select id="gas-composition-basis">
+                  <option value="molar">Molar %</option>
+                  <option value="mass">Kütle %</option>
+                </select>
+              </label>
+            </div>
+            <div class="composition-rows" id="gas-composition-rows"></div>
+            <div class="composition-actions">
+              <button class="secondary" type="button" id="gas-composition-add">+ Bileşen</button>
+              <button class="secondary" type="button" id="gas-composition-clear">Temizle</button>
+              <button class="secondary" type="button" id="gas-composition-normalize">100'e normalize et</button>
+              <span class="composition-total" id="gas-composition-total" role="status" aria-live="polite">Toplam: %0</span>
+            </div>
+            <p class="hint" id="gas-composition-note">Toplam %100 değilse API pozitif toplamı 100'e normalize eder; normalize düğmesi taslağı da ölçekler. Aynı bileşen yalnızca bir satırda kullanılabilir.</p>
+          </div>
+          <div class="gas-props" id="gas-properties" role="status" aria-live="polite" aria-atomic="false">Gaz özellikleri seçim sonrası hesaplanır.</div>
+          <label class="check-line"><input id="gas-manual-toggle" type="checkbox" aria-controls="gas-manual-fields"> Gaz özelliklerini manuel gir</label>
+          <div class="grid manual-grid" id="gas-manual-fields" hidden>
+            <label class="field"><span>Moleküler ağırlık [kg/kmol]</span><input id="gas-mw" type="number" step="any"></label>
+            <label class="field"><span>k = Cp/Cv</span><input id="gas-k" type="number" step="any"></label>
+            <label class="field"><span>Z</span><input id="gas-z" type="number" step="any"></label>
+            <label class="field"><span>Viskozite [Pa·s]</span><input id="gas-viscosity" type="number" step="any"></label>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-steam" role="tabpanel" aria-labelledby="tab-steam" data-panel="steam" hidden>
+          <div class="panel-head">
+            <div>
+              <h2>Buhar Servis</h2>
+              <p class="hint">Kütlesel debi, IAPWS/CoolProp buhar özellikleriyle gerçek hacimsel debiye çevrilir.</p>
+            </div>
+            <div class="unit-row">
+              <label>Debi birimi<select id="steam-flow-unit"></select></label>
+              <label>Basınç birimi<select id="steam-pressure-unit"></select></label>
+              <label>Sıcaklık birimi<select id="steam-temperature-unit"></select></label>
+            </div>
+          </div>
+          <div class="grid">
+            <label class="field"><span>Debi</span><input id="steam-flow" type="number" step="any" value="2500"></label>
+            <label class="field"><span>Sıcaklık</span><input id="steam-temperature" type="number" step="any" value="220"></label>
+            <label class="field"><span>Giriş basıncı P1</span><input id="steam-p1" type="number" step="any" value="12"></label>
+            <label class="field"><span>Çıkış basıncı P2</span><input id="steam-p2" type="number" step="any" value="8"></label>
+            <label class="field"><span>Hat giriş çapı [mm]</span><input id="steam-pipe-in" type="number" step="any" value="80"></label>
+            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="steam-pipe-out" type="number" step="any" value="80"></label>
+          </div>
+        </section>
+
+        <div class="actions">
+          <button id="calculate" class="primary" type="button">Hesapla</button>
+          <span class="status" id="calc-status" aria-live="polite"></span>
+          <span class="hint">Birim değiştirdiğinizde girilen değerler otomatik dönüştürülür.</span>
+        </div>
+      </form>
+
+      <div class="error-box" id="error" role="alert" aria-live="assertive" tabindex="-1" hidden></div>
+
+      <section id="results" aria-busy="false" hidden>
+        <div class="card">
+          <div class="result-head">
+            <div>
+              <p class="eyebrow">Hesaplama Sonucu</p>
+              <h2 id="result-title" aria-live="polite">Vana Seçimi</h2>
+            </div>
+            <div class="result-badges">
+              <span class="badge" id="result-badge"></span>
+              <span class="badge stale" id="result-stale" hidden>Son geçerli sonuç</span>
+            </div>
+          </div>
+          <p class="result-verdict" id="result-verdict"></p>
+          <div class="metrics" id="metrics"></div>
+          <div class="result-summary" id="result-summary"></div>
+          <div id="warnings"></div>
+        </div>
+
+        <div class="visual-grid">
+          <div class="card">
+            <div class="card-head">
+              <h3>3D Vana Modeli</h3>
+              <span class="hint">Sürükle / iki parmak: döndür · Tekerlek / pinch: yakınlaştır · Ok tuşları: döndür</span>
+            </div>
+            <div class="viewport" id="valve-view"></div>
+            <div class="part-legend" id="valve-legend"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Kurulu Karakteristik Yüzeyi</h3>
+              <span class="hint">Açıklık × Otorite → Debi</span>
+            </div>
+            <div class="viewport" id="surface-view"></div>
+            <div class="surface-legend">
+              <span><i class="swatch flow-low"></i>Düşük debi</span>
+              <span><i class="swatch flow-high"></i>Yüksek debi</span>
+              <span class="hint" id="surface-operating"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>İnherent Karakteristik</h3>
+            <span class="hint" id="curve-note"></span>
+          </div>
+          <svg id="curve-chart" viewBox="0 0 640 280" role="img" aria-label="İnherent karakteristik eğrisi" aria-describedby="curve-note"></svg>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Teknik Detaylar</h3>
+            <span class="hint" id="detail-note"></span>
+          </div>
+          <div id="details"></div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

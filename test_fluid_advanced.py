@@ -271,3 +271,84 @@ class TestFluidPropertiesFallbacks:
         assert get_chemical_vapor_pressure_bar_a("unknown_molecule_xyz", 25.0) is None
 
 
+
+
+def test_gas_presets_are_complete_and_evaluable():
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture
+
+    for name, preset in GAS_PRESETS.items():
+        rows = preset["components"]
+        assert rows, name
+        assert sum(float(row["fraction_pct"]) for row in rows) == pytest.approx(100.0), name
+        summary = evaluate_gas_mixture(rows, "molar", 8.0, 20.0)
+        assert summary.average_molecular_weight > 0.0, name
+        assert summary.density_kg_m3 > 0.0, name
+        assert summary.z and summary.z > 0.0, name
+        assert summary.specific_heat_ratio and summary.specific_heat_ratio > 0.0, name
+
+
+def test_hydrogen_blends_get_lighter_and_stiffer():
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture
+
+    names = ["H2-NG %5 (blend)", "H2-NG %10 (blend)", "H2-NG %20 (blend)", "H2-NG %50 (blend)"]
+    summaries = [evaluate_gas_mixture(GAS_PRESETS[name]["components"], "molar", 8.0, 20.0) for name in names]
+    mws = [summary.average_molecular_weight for summary in summaries]
+    densities = [summary.density_kg_m3 for summary in summaries]
+    ks = [summary.specific_heat_ratio or 0.0 for summary in summaries]
+    assert all(later < earlier for earlier, later in zip(mws, mws[1:], strict=False))
+    assert all(later < earlier for earlier, later in zip(densities, densities[1:], strict=False))
+    assert all(later > earlier for earlier, later in zip(ks, ks[1:], strict=False))
+
+
+def test_molar_and_mass_basis_are_equivalent():
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture, get_molecular_weight
+
+    rows = GAS_PRESETS["Doğal Gaz"]["components"]
+    molar = evaluate_gas_mixture(rows, "molar", 8.0, 20.0)
+    weighted = [(row["component"], float(row["fraction_pct"]) * get_molecular_weight(str(row["component"]))) for row in rows]
+    total = sum(weight for _, weight in weighted)
+    mass_rows = [{"component": component, "fraction_pct": weight / total * 100.0} for component, weight in weighted]
+    mass = evaluate_gas_mixture(mass_rows, "mass", 8.0, 20.0)
+    assert mass.average_molecular_weight == pytest.approx(molar.average_molecular_weight, rel=1e-6)
+    assert mass.density_kg_m3 == pytest.approx(molar.density_kg_m3, rel=1e-6)
+    assert mass.z == pytest.approx(molar.z, rel=1e-6)
+    assert mass.specific_heat_ratio == pytest.approx(molar.specific_heat_ratio, rel=1e-6)
+
+
+
+def test_gas_fallback_flag_is_exposed(monkeypatch):
+    import fluid_properties
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture
+
+    monkeypatch.setattr(fluid_properties, "_evaluate_mixture_state_heos", lambda *_args, **_kwargs: None)
+    summary = evaluate_gas_mixture(GAS_PRESETS["Doğal Gaz"]["components"], "molar", 8.0, 20.0)
+    assert summary.fallback_used is True
+
+
+def test_gas_normal_path_is_not_marked_fallback():
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture
+
+    summary = evaluate_gas_mixture(GAS_PRESETS["Doğal Gaz"]["components"], "molar", 8.0, 20.0)
+    assert summary.fallback_used is False
+
+
+
+def test_gas_model_real_vs_ideal():
+    from config import GAS_PRESETS
+    from fluid_properties import evaluate_gas_mixture
+
+    real = evaluate_gas_mixture(GAS_PRESETS["Doğal Gaz"]["components"], "molar", 8.0, 20.0, "real")
+    ideal = evaluate_gas_mixture(GAS_PRESETS["Doğal Gaz"]["components"], "molar", 8.0, 20.0, "ideal")
+    assert real.model_used == "heos"
+    assert real.fallback_used is False
+    assert real.z != pytest.approx(1.0)
+    assert ideal.model_used == "ideal"
+    assert ideal.fallback_used is True
+    assert ideal.z == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="Gercek gaz"):
+        evaluate_gas_mixture([{"component": "Chlorine", "fraction_pct": 100.0}], "molar", 8.0, 20.0, "real")

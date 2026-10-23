@@ -19,6 +19,28 @@
           "*": "allow"
         }
       }
+    },
+    "orchestrator": {
+      "permission": {
+        "skill": {
+          "*": "allow"
+        },
+        "agent": {
+          "*": "allow"
+        },
+        "edit": "ask"
+      }
+    },
+    "cv-orchestrator": {
+      "permission": {
+        "skill": {
+          "*": "allow"
+        },
+        "agent": {
+          "*": "allow"
+        },
+        "edit": "ask"
+      }
     }
   },
   "plugin": [

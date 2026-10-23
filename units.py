@@ -18,7 +18,6 @@ from pint import UnitRegistry
 # ---------------------------------------------------------------------------
 BAR_TO_PSI = 14.5037738
 M3H_TO_GPM = 4.4028675
-NM3H_TO_SCFH = 35.3146667
 KGH_TO_LBH = 2.20462262
 CV_TO_KV = 0.865
 KV_TO_CV = 1.0 / CV_TO_KV
@@ -29,6 +28,8 @@ FF_B = 0.28
 CELSIUS_TO_RANKINE = 9.0 / 5.0
 NORMAL_P_BAR = 1.01325
 NORMAL_T_K = 273.15
+SCF_T_K = 288.706
+NM3H_TO_SCFH = 35.3146667 * SCF_T_K / NORMAL_T_K
 ATMOSPHERIC_BAR = 1.01325
 
 # ---------------------------------------------------------------------------
@@ -62,8 +63,8 @@ LIQUID_FLOW_UNITS: dict[str, str] = {
 GAS_FLOW_UNITS: dict[str, str] = {
     "nm3h": "Nm³/h",
     "sm3h": "Sm³/h",
-    "scfh": "scfh",
-    "mmscfd": "MMSCFD",
+    "scfh": "scfh (60 °F)",
+    "mmscfd": "MMSCFD (60 °F)",
     "m3h": "m³/h (actual)",
     "kgh": "kg/h",
 }
@@ -228,6 +229,16 @@ def gas_flow_to_nm3h(
     (and density for kg/h); a standard 1.01325 bar / 15 C reference is
     used for Sm3h when no conditions are supplied.
     """
+    if pressure_bar_a is not None and pressure_bar_a <= 0:
+        raise ValueError("Gaz basinci pozitif olmalidir.")
+    if temperature_c is not None and temperature_c <= -273.15:
+        raise ValueError("Gaz sicakligi mutlak sifirin uzerinde olmalidir.")
+    if z < 1e-6:
+        raise ValueError("Gaz sikistirilabilirlik faktoru en az 1e-6 olmalidir.")
+    if unit == "kgh" and (not density_kg_m3 or density_kg_m3 <= 0):
+        raise ValueError("kgh birimi icin gaz yogunlugu gereklidir.")
+    if unit in {"m3h", "kgh"} and (pressure_bar_a is None or temperature_c is None):
+        raise ValueError("Gaz aktuel debi donusumu icin basinc ve sicaklik gereklidir.")
     if unit == "nm3h":
         return float(value)
     if unit == "sm3h":
@@ -240,7 +251,7 @@ def gas_flow_to_nm3h(
         p_bar = pressure_bar_a if pressure_bar_a is not None else 1.0
         t_c = temperature_c if temperature_c is not None else 15.0
         t_k = t_c + 273.15
-        return float(value) * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / max(z, 1e-6)
+        return float(value) * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / z
     if unit == "kgh":
         if not density_kg_m3 or density_kg_m3 <= 0:
             raise ValueError("kgh birimi icin gaz yogunlugu gereklidir.")
@@ -248,7 +259,7 @@ def gas_flow_to_nm3h(
         t_c = temperature_c if temperature_c is not None else 15.0
         t_k = t_c + 273.15
         actual_m3h = float(value) / density_kg_m3
-        return actual_m3h * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / max(z, 1e-6)
+        return actual_m3h * (p_bar / NORMAL_P_BAR) * (NORMAL_T_K / t_k) / z
     raise ValueError(f"Bilinmeyen gaz debi birimi: {unit}")
 
 
@@ -261,6 +272,16 @@ def gas_flow_from_nm3h(
     density_kg_m3: float | None = None,
 ) -> float:
     """Convert Nm3/h to the requested gas flow unit."""
+    if pressure_bar_a is not None and pressure_bar_a <= 0:
+        raise ValueError("Gaz basinci pozitif olmalidir.")
+    if temperature_c is not None and temperature_c <= -273.15:
+        raise ValueError("Gaz sicakligi mutlak sifirin uzerinde olmalidir.")
+    if z < 1e-6:
+        raise ValueError("Gaz sikistirilabilirlik faktoru en az 1e-6 olmalidir.")
+    if unit == "kgh" and (not density_kg_m3 or density_kg_m3 <= 0):
+        raise ValueError("kgh birimi icin gaz yogunlugu gereklidir.")
+    if unit in {"m3h", "kgh"} and (pressure_bar_a is None or temperature_c is None):
+        raise ValueError("Gaz aktuel debi donusumu icin basinc ve sicaklik gereklidir.")
     if unit == "nm3h":
         return float(value_nm3h)
     if unit == "sm3h":

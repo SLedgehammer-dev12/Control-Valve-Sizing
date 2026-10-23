@@ -31,7 +31,7 @@ Never cut: validation at trust boundaries, error handling that prevents data los
 
 ## Control Valve Sizing — Agent Context
 
-IEC 60534 / ISA-based control valve sizing application with dual UI (desktop Tkinter + web Streamlit).
+IEC 60534 / ISA-based control valve sizing application with dual UI (desktop Tkinter + browser FastAPI/Three.js, with Streamlit kept as an alternative).
 
 ### Project Layout
 
@@ -48,16 +48,20 @@ trim_guidance.py      — Rule-based trim & cavitation severity recommendations
 thermal_expansion.py  — Pipe thermal expansion / stress / loop length
 valve_noise.py        — IEC 60534-8 aerodynamic & hydrodynamic noise + acoustic mitigation
 actuator_sizing.py    — Actuator sizing helpers
+valve_curve.py        — Inherent/installed characteristic curves + installed gain
+valve_3d.py           — Parametric globe valve Mesh3d geometry
 units.py              — Pint-based unit conversions + sector unit maps/converters
 multi_case.py         — Multi-case operating envelope sizing (Min/Norm/Max)
 joule_thomson.py      — Joule-Thomson expansion & hydrate risk evaluation
 packing_emissions.py  — ISO 15848-1 / TA-Luft stem packing guidance
 safety_piping.py      — API 14E erosional velocity & API 520 PSV relief capacity
 datasheet_isa20.py    — ISA Form 20 procurement specification sheet generator
+api.py                — FastAPI backend for the browser UI (sizing, units, vendors, 3D mesh)
+webapp/               — Browser UI (HTML/CSS/JS + Three.js)
 app_desktop.py        — Tkinter desktop UI
-app_web.py            — Streamlit web UI
+app_web.py            — Streamlit web UI (alternative)
 verify_50_scenarios.py— 52 industrial benchmark scenarios verification suite
-test_*.py             — Comprehensive pytest test suite (428 tests)
+test_*.py             — Comprehensive pytest test suite (666 tests)
 ```
 
 ### Dependency Chain
@@ -69,6 +73,8 @@ vendor_catalog ← valve_sizing (ValveSize)
 two_phase ← valve_sizing (types, circular-import-free scalar API)
 valve_selection / trim_guidance ← vendor_catalog, valve_sizing
 app_desktop ← valve_sizing, fluid_properties, vendor_catalog, config, project_io, reporting
+api ← valve_sizing, fluid_properties, vendor_catalog, valve_curve, valve_3d, units, config
+webapp ← api (HTTP)
 app_web ← valve_sizing, fluid_properties, vendor_catalog, config, project_io, reporting
 ```
 
@@ -97,7 +103,10 @@ ruff check .
 # Auto-fix lint
 ruff check --fix .
 
-# Web app
+# Browser app
+uvicorn api:app --reload --port 8501
+
+# Streamlit app (alternative)
 streamlit run app_web.py
 
 # Desktop app
@@ -112,7 +121,7 @@ python app_desktop.py
 4. **CoolProp caching**: `get_pure_fluid_state` and `_evaluate_mixture_state` use `@lru_cache`
 5. **Vendor catalog** is separate from sizing engine — `valve_series` passed as parameter
 6. **`config.py`** centralizes `GAS_PRESETS` to avoid duplication across desktop/web/test files
-7. **Sector units are centralized in `units.py`**: unit maps (`TEMPERATURE_UNITS`, `PRESSURE_UNITS`, `LIQUID_FLOW_UNITS`, `GAS_FLOW_UNITS`, `STEAM_FLOW_UNITS`) + converters; both UIs convert to engine units (bar(a), °C, m³/h, Nm³/h, kg/h) at calculation time
+7. **Sector units are centralized in `units.py`**: unit maps (`TEMPERATURE_UNITS`, `PRESSURE_UNITS`, `LIQUID_FLOW_UNITS`, `GAS_FLOW_UNITS`, `STEAM_FLOW_UNITS`) + converters; desktop converts locally, browser posts raw values + unit keys and FastAPI converts at the endpoint boundary, and `/api/convert` handles UI unit switches
 8. **Live calculation**: web recomputes on every rerun (no buttons); desktop traces flow/pressure/temperature vars and unit combos → silent `_calculate(show_errors=False)`
 
 ### Agent Ecosystem & Orchestration
@@ -120,20 +129,22 @@ python app_desktop.py
 This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mode, minimal diffs) and **addyosmani/agent-skills** (lifecycle engineering skills & subagent personas) across both **OpenCode** and **Antigravity**:
 
 1. **Submodules**: `vendor/ponytail` and `vendor/agent-skills`
-2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`orchestrator`, `cv-orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`), commands in `.opencode/command/` (`orchestrate`, `build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
-3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/` (`orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`), and skills in `.agents/skills/`.
-4. **Master Orchestrator**: `orchestrator` coordinates the entire engineering cycle, decomposing requests, managing human confirmation gates before edits, assigning tasks to specialists, and iteratively evaluating/re-dispatching upon test/review failures.
+2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`orchestrator`, `cv-orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), commands in `.opencode/command/` (`orchestrate`, `build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
+3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/` (`orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), and skills in `.agents/skills/`.
+4. **Master Orchestrator**: `orchestrator` runs a state-driven continuous improvement cycle: it snapshots the current build/test state, selects one test/UI-UX/development slice, manages the human confirmation gate, dispatches specialists, verifies, and re-dispatches until green. It repeats while standing approval remains and stops on no valuable slice, repeated failures, security/data risk, scope expansion, or user stop.
 5. **Orchestration Matrix**:
    - **SPEC / DEFINE**: `spec-driven-development`, `api-and-interface-design`, `idea-refine`
    - **PLAN**: `planning-and-task-breakdown`, `interview-me`, `constraint-driven-development`
    - **BUILD**: `incremental-implementation`, `test-driven-development`, `frontend-ui-engineering`
+   - **UI/UX**: `ui-ux-engineer` with `frontend-ui-engineering` and `browser-testing-with-devtools`
+   - **UNIT CONSISTENCY**: `unit-conversion-manager` for `units.py`, API conversion, engine boundaries, and UI unit maps
    - **VERIFY**: `debugging-and-error-recovery`, `browser-testing-with-devtools`, `observability-and-instrumentation`
    - **AUDIT / REVIEW**: Parallel fan-out running `code-reviewer`, `security-auditor`, `test-engineer`, and `ponytail-review`
    - **SHIP / MERGE**: `shipping-and-launch`, `ci-cd-and-automation`, `deprecation-and-migration`
 
 ### Test Status
 
-- **522 tests, 100% passing**
-- **Coverage**: 95.24% (core modules at 100% statement coverage)
-- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12/3.13, ruff + mypy + pytest)
+- **666 tests, 100% passing**
+- **Coverage**: 95.32% (core modules at 100% statement coverage)
+- **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)
 - **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

@@ -1,10 +1,14 @@
+import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from fluid_properties import evaluate_liquid_preset
 from project_io import dump_project_json, load_project_json
 from reporting import build_pdf_report, build_report
+from units import BAR_TO_PSI, NM3H_TO_SCFH, pressure_from_bar_a, pressure_to_bar_a
 from valve_sizing import LiquidSizingInput, size_liquid_valve
 from vendor_catalog import get_vendor_definition
 
@@ -93,6 +97,96 @@ def test_load_project_json_rejects_invalid_unit_key():
     )
     with pytest.raises(ValueError, match="gecersiz birim"):
         load_project_json(invalid)
+
+
+def test_project_json_accepts_and_normalizes_display_unit_labels():
+    payload = dump_project_json(
+        "Liquid",
+        {
+            "liquid_flow_m3h": 25.0,
+            "liquid_p1": 8.0,
+            "liquid_p2": 5.0,
+            "liquid_temp_unit": "°F",
+            "liquid_pres_unit": "psi(a)",
+            "liquid_flow_unit": "US gpm",
+        },
+    )
+    loaded = load_project_json(payload)
+    assert loaded["data"]["liquid_temp_unit"] == "F"
+    assert loaded["data"]["liquid_pres_unit"] == "psi_a"
+    assert loaded["data"]["liquid_flow_unit"] == "gpm"
+
+
+def test_streamlit_pending_project_load_applies_before_widgets():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    pending = load_project_json(
+        dump_project_json(
+            "Liquid",
+            {
+                "liquid_flow_m3h": 110.0717,
+                "liquid_p1": 116.0304,
+                "liquid_p2": 72.519,
+                "liquid_flow_unit": "gpm",
+                "liquid_pres_unit": "psi_a",
+                "liquid_temp_unit": "F",
+                "vendor_key": "fisher_globe_eqpct",
+            },
+        )
+    )
+    at.session_state["_pending_project_load"] = pending
+    at.run()
+    assert not at.exception
+    assert at.session_state["liquid_flow_unit"] == "US gpm"
+    assert at.session_state["liquid_pres_unit"] == "psi(a)"
+    assert at.session_state["liquid_temp_unit"] == "°F"
+    assert at.session_state["liquid_flow_m3h"] == pytest.approx(110.0717)
+    assert at.session_state["service"] == "Liquid"
+
+
+def test_load_project_json_rejects_missing_or_null_service():
+    payload = json.loads(
+        dump_project_json("Liquid", {"liquid_flow_m3h": 25.0, "liquid_p1": 8.0, "liquid_p2": 5.0})
+    )
+    for service in (None, ""):
+        payload["service"] = service
+        with pytest.raises(ValueError, match="Project service"):
+            load_project_json(json.dumps(payload))
+
+
+def test_load_project_json_rejects_boolean_schema_and_non_string_units():
+    payload = json.loads(
+        dump_project_json("Liquid", {"liquid_flow_m3h": 25.0, "liquid_p1": 8.0, "liquid_p2": 5.0})
+    )
+    payload["schema_version"] = True
+    with pytest.raises(ValueError, match="schema_version"):
+        load_project_json(json.dumps(payload))
+
+    payload = json.loads(
+        dump_project_json("Liquid", {"liquid_flow_m3h": 25.0, "liquid_p1": 8.0, "liquid_p2": 5.0})
+    )
+    payload["data"]["liquid_temp_unit"] = []
+    with pytest.raises(ValueError, match="gecersiz birim"):
+        load_project_json(json.dumps(payload))
+
+
+def test_project_json_preserves_unicode_and_utc_timestamp():
+    raw = dump_project_json(
+        "Gas",
+        {
+            "gas_flow_nm3h": 800.0,
+            "gas_p1": 8.0,
+            "gas_p2": 6.0,
+            "liquid_preset_label": "Doğal Gaz",
+            "liquid_temp_unit": "°F",
+        },
+    )
+    assert "Doğal Gaz" in raw
+    loaded = load_project_json(raw)
+    assert loaded["data"]["liquid_preset_label"] == "Doğal Gaz"
+    assert loaded["data"]["liquid_temp_unit"] == "F"
+    assert loaded["saved_at"].endswith("Z")
+    assert datetime.fromisoformat(loaded["saved_at"].replace("Z", "+00:00")).tzinfo is not None
 
 
 def test_load_project_json_accepts_valid_units():
@@ -269,6 +363,17 @@ def test_streamlit_unit_selectors_present():
     assert "Debi birimi" in selector_labels
 
 
+def test_streamlit_liquid_preset_properties_follow_pressure_unit():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.session_state["liquid_pres_unit"] = "psi(a)"
+    at.run()
+    assert not at.exception
+    expected = evaluate_liquid_preset("Water", pressure_to_bar_a(8.0, "psi_a"), 25.0)
+    assert at.session_state["liquid_pv"] == pytest.approx(
+        pressure_from_bar_a(expected["vapor_pressure_bar_a"], "psi_a")
+    )
+
+
 def test_streamlit_liquid_gpm_unit_live_recalc():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
@@ -280,6 +385,79 @@ def test_streamlit_liquid_gpm_unit_live_recalc():
     assert not at.exception
     assert at.session_state["last_result"]["service"] == "liquid"
     assert at.session_state["liquid_flow_unit"] == "US gpm"
+
+
+def test_streamlit_unit_change_converts_existing_values():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+
+    next(sb for sb in at.selectbox if sb.label == "Debi birimi").set_value("US gpm")
+    at.run()
+    assert at.session_state["liquid_flow_m3h"] == pytest.approx(25.0 * 4.4028675, rel=1e-4)
+
+    next(sb for sb in at.selectbox if sb.label == "Basinc birimi").set_value("psi(a)")
+    at.run()
+    assert at.session_state["liquid_p1"] == pytest.approx(8.0 * BAR_TO_PSI, rel=1e-4)
+    assert at.session_state["liquid_p2"] == pytest.approx(5.0 * BAR_TO_PSI, rel=1e-4)
+
+    next(sb for sb in at.selectbox if sb.label == "Sicaklik birimi").set_value("°F")
+    at.run()
+    assert at.session_state["liquid_temp_c"] == pytest.approx(77.0, rel=1e-4)
+
+    _switch_service(at, "Gaz")
+    next(sb for sb in at.selectbox if sb.label == "Debi birimi").set_value("scfh (60 °F)")
+    at.run()
+    assert at.session_state["gas_flow_nm3h"] == pytest.approx(800.0 * NM3H_TO_SCFH, rel=1e-4)
+
+
+def test_streamlit_reset_wins_over_pending_project_load():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    pending = load_project_json(
+        dump_project_json(
+            "Liquid",
+            {
+                "liquid_flow_m3h": 110.0,
+                "liquid_p1": 8.0,
+                "liquid_p2": 5.0,
+                "liquid_flow_unit": "gpm",
+            },
+        )
+    )
+    at.session_state["_pending_project_load"] = pending
+    at.session_state["_reset_defaults"] = True
+    at.run()
+
+    assert "_pending_project_load" not in at.session_state
+    assert float(at.session_state["liquid_flow_m3h"]) == 25.0
+    assert at.session_state["liquid_flow_unit"] == "m³/h"
+    assert at.session_state["service"] == "Liquid"
+
+
+def test_streamlit_pending_load_is_one_shot():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    pending = load_project_json(
+        dump_project_json(
+            "Gas",
+            {
+                "gas_flow_nm3h": 800.0,
+                "gas_p1": 8.0,
+                "gas_p2": 6.0,
+                "gas_flow_unit": "scfh",
+                "gas_pres_unit": "psi_a",
+                "gas_temp_unit": "F",
+            },
+        )
+    )
+    at.session_state["_pending_project_load"] = pending
+    at.run()
+    assert "_pending_project_load" not in at.session_state
+    assert at.session_state["service"] == "Gas"
+    assert at.session_state["gas_flow_unit"] == "scfh (60 °F)"
+    _set_number_input(at, "gas_flow_nm3h", 900.0)
+    at.run()
+    assert float(at.session_state["gas_flow_nm3h"]) == 900.0
 
 
 def test_streamlit_can_switch_to_gas_page():
@@ -312,6 +490,30 @@ def test_streamlit_unit_converter_panel():
     assert {m.label: m.value for m in at.metric}["Sonuç"] == "212 °F"
 
 
+def test_streamlit_gas_validation_rejects_nan(monkeypatch):
+    from types import SimpleNamespace
+
+    import app_web
+
+    state = SimpleNamespace(
+        gas_rows=[{"component": "Methane", "fraction_pct": float("nan")}],
+        gas_valid=True,
+    )
+    monkeypatch.setattr(app_web, "st", SimpleNamespace(session_state=state))
+    app_web.validate_gas_composition()
+    assert state.gas_valid is False
+
+
+def test_streamlit_gas_component_options_include_preset_components():
+    from app_web import _gas_component_options
+    from config import GAS_PRESETS
+
+    options = set(_gas_component_options())
+    for preset in GAS_PRESETS.values():
+        for row in preset["components"]:
+            assert row["component"] in options
+
+
 def test_streamlit_gas_preset_selector_present():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
@@ -320,6 +522,18 @@ def test_streamlit_gas_preset_selector_present():
     assert presets, "Gas preset selectbox not found"
     assert any("H2-NG" in name for name in presets[0])
     assert "Sentez Gazi (Syngas)" in presets[0]
+
+
+def test_streamlit_gas_model_selector_present():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    _switch_service(at, "Gaz")
+    model = next(sb for sb in at.selectbox if "Gaz modeli" in (sb.label or ""))
+    assert model.value == "real"
+    model.set_value("ideal")
+    at.run()
+    assert not at.exception
+    assert at.session_state["last_result"]["service"] == "gas"
 
 
 def test_streamlit_gas_preset_loads_rows():
@@ -342,6 +556,25 @@ def _set_number_input(at, key: str, value: float) -> None:
     next(n for n in at.number_input if n.key == key).set_value(value)
 
 
+def test_streamlit_custom_composition_normalizes_to_100():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    _switch_service(at, "Gaz")
+    at.session_state["gas_preset"] = "Özel (Custom)"
+    at.session_state["gas_rows"] = [
+        {"component": "Methane", "fraction_pct": 45.0},
+        {"component": "Ethane", "fraction_pct": 45.0},
+    ]
+    at.run()
+    assert at.session_state["gas_valid"] is False
+    assert any("normalize" in (b.label or "") for b in at.button)
+    next(b for b in at.button if "normalize" in (b.label or "")).click()
+    at.run()
+    assert at.session_state["gas_valid"] is True
+    assert sum(float(row["fraction_pct"]) for row in at.session_state["gas_rows"]) == pytest.approx(100.0)
+    assert at.session_state["last_result"]["service"] == "gas"
+
+
 def test_streamlit_gas_preset_calculation_shows_result():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
@@ -362,8 +595,9 @@ def test_streamlit_gas_invalid_composition_shows_error():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
     _switch_service(at, "Gaz")
-    at.session_state["gas_valid"] = False
+    at.session_state["gas_rows"] = [{"component": "Methane", "fraction_pct": 50.0}]
     at.run()
+    assert at.session_state["gas_valid"] is False
     errors = [e.value for e in at.error]
     assert any("kompozisyonu geçersiz" in e for e in errors)
     assert at.session_state["last_result"] is None
@@ -387,13 +621,13 @@ def test_streamlit_gas_scfh_unit_live_recalc():
     at.run()
     _switch_service(at, "Gaz")
     flow_sb = next(sb for sb in at.selectbox if sb.label == "Debi birimi")
-    flow_sb.set_value("scfh")
+    flow_sb.set_value("scfh (60 °F)")
     at.run()
     _set_number_input(at, "gas_flow_nm3h", 28300.0)
     at.run()
     assert not at.exception
     assert at.session_state["last_result"]["service"] == "gas"
-    assert at.session_state["gas_flow_unit"] == "scfh"
+    assert at.session_state["gas_flow_unit"] == "scfh (60 °F)"
 
 
 def test_streamlit_thermal_expansion_section():
@@ -404,6 +638,42 @@ def test_streamlit_thermal_expansion_section():
     metric_labels = [m.label for m in at.metric]
     assert any("Uzama" in label for label in metric_labels)
     assert any("Termal gerilme" in label for label in metric_labels)
+
+
+def test_streamlit_gauge_units_keep_pv_absolute():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.session_state["liquid_pres_unit"] = "bar(g)"
+    at.session_state["liquid_p1"] = 0.98675
+    at.session_state["liquid_p2"] = 0.18675
+    at.session_state["liquid_pv"] = 0.0317
+    at.session_state["liquid_pc"] = 220.64
+    at.session_state["liquid_source"] = "Custom"
+    at.run()
+    assert not at.exception
+
+    cav_pv = next(n for n in at.number_input if n.key == "cav_pv_in")
+    assert cav_pv.value == pytest.approx(0.0317, abs=1e-4)
+
+    next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    multicase = at.session_state["last_multicase"]
+    case = multicase.cases[1]
+    assert case.p1_bar_a == pytest.approx(2.0, rel=1e-3)
+    assert case.p2_bar_a == pytest.approx(1.2, rel=1e-3)
+    detail = multicase.recommended.case_details["Normal"] if multicase.recommended else multicase.candidates[0].case_details["Normal"]
+    assert detail.is_choked is False
+
+
+def test_streamlit_preset_properties_refresh_on_temperature():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    pv_25 = float(at.session_state["liquid_pv"])
+    _set_number_input(at, "liquid_temp_c", 150.0)
+    at.run()
+    assert not at.exception
+    assert float(at.session_state["liquid_pv"]) > pv_25 * 10
+    assert float(at.session_state["liquid_density"]) < 950.0
 
 
 def test_streamlit_multicase_section():
@@ -419,6 +689,31 @@ def test_streamlit_multicase_section():
     assert len(at.dataframe) > 0
     assert len(at.get("plotly_chart")) >= 2
 
+
+def test_streamlit_multicase_liquid_uses_selected_units():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    next(sb for sb in at.selectbox if sb.label == "Basinc birimi").set_value("psi(a)")
+    next(sb for sb in at.selectbox if sb.label == "Sicaklik birimi").set_value("°F")
+    next(sb for sb in at.selectbox if sb.label == "Debi birimi").set_value("US gpm")
+    at.run()
+    for key, value in [
+        ("liquid_p1", 116.0304),
+        ("liquid_p2", 72.5190),
+        ("liquid_temp_c", 77.0),
+        ("liquid_flow_m3h", 110.0),
+    ]:
+        _set_number_input(at, key, value)
+    for key, value in [("mc_norm_q", 110.0), ("mc_norm_p1", 116.0304), ("mc_norm_p2", 72.5190)]:
+        _set_number_input(at, key, value)
+    next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    case = at.session_state["last_multicase"].cases[1]
+    assert case.flow == pytest.approx(24.98, rel=1e-3)
+    assert case.p1_bar_a == pytest.approx(8.0, rel=1e-3)
+    assert case.p2_bar_a == pytest.approx(5.0, rel=1e-3)
+    assert case.temperature_c == pytest.approx(25.0, rel=1e-3)
 
 
 def test_build_joule_thomson_report():
@@ -564,6 +859,8 @@ def test_streamlit_liquid_coolprop_source():
 def test_streamlit_reset_button_restores_defaults():
     at = AppTest.from_file(str(APP_FILE), default_timeout=10)
     at.run()
+    next(sb for sb in at.selectbox if sb.label == "Debi birimi").set_value("US gpm")
+    at.run()
     _set_number_input(at, "liquid_flow_m3h", 77.0)
     at.run()
     assert float(at.session_state["liquid_flow_m3h"]) == 77.0
@@ -605,6 +902,28 @@ def test_streamlit_multicase_gas():
     assert not at.exception
     assert "last_multicase" in at.session_state
     assert len(at.get("plotly_chart")) >= 2
+
+
+def test_streamlit_multicase_gas_kgh_uses_case_density():
+    at = AppTest.from_file(str(APP_FILE), default_timeout=20)
+    at.run()
+    _switch_service(at, "Gaz")
+    next(sb for sb in at.selectbox if sb.label == "Debi birimi").set_value("kg/h")
+    at.run()
+    for key, value in [
+        ("mc_min_q", 1000.0),
+        ("mc_norm_q", 1000.0),
+        ("mc_max_q", 1000.0),
+        ("mc_min_p1", 10.0),
+        ("mc_max_p1", 6.0),
+    ]:
+        _set_number_input(at, key, value)
+    next(b for b in at.button if "Coklu Durum Boyutlandirma" in (b.label or "")).click()
+    at.run()
+    assert not at.exception
+    flows = [case.flow for case in at.session_state["last_multicase"].cases]
+    assert len(flows) == 3
+    assert max(flows) / min(flows) < 1.02
 
 
 def test_streamlit_multicase_steam():

@@ -1,6 +1,6 @@
-# Project Index: Control Valve Sizing (v3.3.0)
+# Project Index: Control Valve Sizing (v3.3.4)
 
-> Generated: 2026-10-21 | Staleness Threshold: 7 days | Tests: 522/522 PASS (95.24% cov) | Scenarios: 52/52 PASS
+> Generated: 2026-10-21 | Staleness Threshold: 7 days | Tests: 666/666 PASS (95.32% cov) | Scenarios: 52/52 PASS
 
 ## 1. Architectural Overview
 
@@ -9,8 +9,8 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 ```
                     ┌────────────────────────────────────────────────────────┐
                     │                      User Interfaces                   │
-                    │   Desktop (Tkinter): app_desktop.py (1,745 lines)      │
-                    │   Web (Streamlit)  : app_web.py     (1,073 lines)      │
+                    │   Desktop (Tkinter): app_desktop.py (2,595 lines)      │
+                    │   Web (Streamlit)  : app_web.py     (2,115 lines)      │
                     └───────────────┬────────────────────────┬───────────────┘
                                     │                        │
          ┌──────────────────────────┴────────────────────────┴──────────────────────────┐
@@ -59,17 +59,21 @@ Dual-interface engineering application implementing IEC 60534, ISA, API, and ISO
 | `reporting.py` | Markdown & HTML generation | `build_report()`, `build_isa20_report()`, `build_isa20_html_report()` |
 | `project_io.py` | Project JSON serialization | `dump_project_json()`, `load_project_json()` |
 | `valve_curve.py` | Flow characteristic curves & controllability | `CharacteristicPoint`, `OperatingPointAnalysis`, `CharacteristicCurve`, `generate_characteristic_curve()`, `evaluate_operating_point()` |
+| `valve_3d.py` | Parametric globe valve Mesh3d geometry | `build_valve_figure()` |
+| `api.py` | FastAPI browser backend | `/api/size/*`, `/api/convert`, `/api/valve-mesh`, `app` |
+| `webapp/` | Browser UI (HTML/CSS/JS + Three.js) | `index.html`, `app.js`, `styles.css`, local `vendor/` |
 | `app_desktop.py` | Tkinter desktop GUI | `ValveSizingApp`, `main()` |
 | `app_web.py` | Streamlit web application | `main()` |
 
 ## 3. Entry Points & Invocation Commands
 
 - **Desktop UI**: `python app_desktop.py` or entry point `valve-sizing-desktop`
-- **Web UI**: `streamlit run app_web.py` or entry point `valve-sizing-web`
+- **Browser UI**: `uvicorn api:app --reload --port 8501` → http://127.0.0.1:8501
+- **Streamlit UI**: `streamlit run app_web.py` or entry point `valve-sizing-web`
 - **Industrial Benchmarks (52 Scenarios)**: `python verify_50_scenarios.py`
 - **IEC Standard Benchmarks (12 Scenarios)**: `python verify_scenarios.py`
-- **Automated Test Suite**: `python -m pytest -q` (522 tests)
-- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 80\%$, actual 95.24%)
+- **Automated Test Suite**: `python -m pytest -q` (666 tests)
+- **Coverage Check**: `python -m pytest --cov=. --cov-report=term -q` (target $\ge 94\%$, actual 95.32%)
 - **Code Linter**: `ruff check .` (target line length: 150)
 
 ## 4. Key Architectural Patterns

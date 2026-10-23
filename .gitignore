@@ -16,6 +16,7 @@ htmlcov/
 dist/
 build/
 *.manifest
+ci_artifacts*/
 
 # IDE
 .vscode/

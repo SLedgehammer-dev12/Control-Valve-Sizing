@@ -5,6 +5,7 @@ Control Valve Sizing sürümlerinin what's new ve release notları. Her sürüm 
 
 | Sürüm | Tarih | Öne Çıkanlar |
 |---|---|---|
+| [v3.3.4](../../release_notes.md) | 2026-10-21 | Proje round-trip, Pv/Pc, 3D, CSP/API sertleştirme |
 | [v3.2.0](v3.2.0.md) | 2026-08-20 | Hesaplama doğrulama paketi (12 senaryo, 12/12 PASS) |
 | [v3.1.0](v3.1.0.md) | 2026-08-18 | Sektör birim seçicileri, canlı hesaplama, Windows + macOS release pipeline |
 | [v3.0.0](v3.0.0.md) | 2026-08-18 | IEC benchmark'ları, gürültü/aktüatör, açıklık & marj, flashing Cv, vana spec & trim |

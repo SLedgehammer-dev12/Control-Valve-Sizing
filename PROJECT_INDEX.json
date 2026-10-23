@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project_name": "control-valve-sizing",
   "version": "3.3.4",
-  "indexed_at": "2026-10-18T03:15:00+03:00",
+  "indexed_at": "2026-10-21T20:50:39.011728+00:00",
   "staleness_threshold_days": 7,
   "freshness_score": 100,
   "metrics": {
-    "test_count": 495,
-    "test_coverage_percent": 94.40,
+    "test_count": 666,
+    "test_coverage_percent": 95.32,
     "industrial_scenarios_count": 52,
     "industrial_scenarios_pass_rate": 100.0,
     "iec_benchmarks_count": 12,
@@ -28,6 +28,13 @@
       "symbol": "main",
       "cli_script": "valve-sizing-web",
       "framework": "Streamlit"
+    },
+    {
+      "name": "browser_gui",
+      "file": "api.py",
+      "symbol": "app",
+      "cli_script": "uvicorn api:app",
+      "framework": "FastAPI + Three.js"
     },
     {
       "name": "industrial_verification_suite",

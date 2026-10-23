@@ -848,6 +848,8 @@ def size_gas_valve(
     fl = _require_positive("FL", data.fl)
     fd = _require_positive("Fd", data.fd)
     xt = _require_positive("xT", data.xt)
+    if not math.isfinite(xt) or xt > 1.0:
+        raise ValueError("xT 0 ile 1 arasinda olmalidir.")
     delta_p_bar = _validate_pressure_drop(data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)
 
     q_actual_m3h = flow_nm3h * (NORMAL_P_BAR / data.inlet_pressure_bar_a) * (t_k / NORMAL_T_K) * z
@@ -909,7 +911,7 @@ def size_gas_valve(
         "gas", flow_kg_s_gas, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, gas_density_kg_m3, k, mw, required_kv,
         valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
-        fd, fl,
+        fl=fl, fd=fd,
     )
 
     c_out = speed_of_sound_m_s(k, t_k, mw)
@@ -1063,6 +1065,8 @@ def size_steam_valve(
         density = iapws_props["density_kg_m3"]
         mu = iapws_props["viscosity_pa_s"]
         mw = 18.015
+        k = _require_positive("IAPWS isi kapasite orani", float(iapws_props["specific_heat_ratio"]))
+        z = _require_positive("IAPWS sikistirilabilirlik", float(iapws_props["z"]))
         iapws_ok = True
     else:
         import CoolProp.CoolProp as CP  # noqa: N817
@@ -1155,7 +1159,7 @@ def size_steam_valve(
         "steam", flow_kg_h / 3600.0, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, density, k, mw, required_kv,
         valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
-        fd, fl,
+        fl=fl, fd=fd,
     )
 
     act_thrust = _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)

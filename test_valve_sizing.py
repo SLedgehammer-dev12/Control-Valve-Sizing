@@ -78,6 +78,108 @@ def test_gas_sizing_returns_cv():
     assert result["x_choked"] > 0.0
 
 
+def test_gas_noise_receives_fl_then_fd(monkeypatch):
+    import valve_sizing
+
+    captured = []
+
+    def fake_noise(service, _flow, _p1, _p2, _t_k, _density, _k, _mw, _kv, _valve_d, _pipe_d, fl, fd, _vapor_pressure_bar=None):
+        captured.append((service, fl, fd))
+        return 80.0
+
+    monkeypatch.setattr(valve_sizing, "_predict_valve_noise", fake_noise)
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    size_gas_valve(
+        GasSizingInput(
+            flow_nm3h=800.0,
+            inlet_pressure_bar_a=8.0,
+            outlet_pressure_bar_a=6.0,
+            temperature_c=20.0,
+            molecular_weight=18.0,
+            specific_heat_ratio=1.28,
+            viscosity_pa_s=1.1e-5,
+            z=0.98,
+            xt=vendor.xt or 0.64,
+        ),
+        valve_series=list(vendor.sizes),
+    )
+    assert captured == [("gas", 0.9, 1.0)]
+
+
+def test_gas_required_cv_scales_with_normal_flow():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+
+    def result(flow: float):
+        return size_gas_valve(
+            GasSizingInput(
+                flow_nm3h=flow,
+                inlet_pressure_bar_a=8.0,
+                outlet_pressure_bar_a=6.0,
+                temperature_c=20.0,
+                molecular_weight=18.0,
+                specific_heat_ratio=1.28,
+                viscosity_pa_s=1.1e-5,
+                z=0.98,
+                xt=vendor.xt or 0.64,
+            ),
+            valve_series=list(vendor.sizes),
+        )
+
+    low = result(200.0)
+    high = result(400.0)
+    assert high["required_cv"] / low["required_cv"] == pytest.approx(2.0, rel=1e-6)
+    assert not low.get("overflow", False)
+
+
+def test_gas_xt_rejects_out_of_range():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+    for xt in (0.0, 1.01, float("nan")):
+        with pytest.raises(ValueError, match="xT"):
+            size_gas_valve(
+                GasSizingInput(
+                    flow_nm3h=800.0,
+                    inlet_pressure_bar_a=8.0,
+                    outlet_pressure_bar_a=6.0,
+                    temperature_c=20.0,
+                    molecular_weight=18.0,
+                    specific_heat_ratio=1.28,
+                    viscosity_pa_s=1.1e-5,
+                    z=0.98,
+                    xt=xt,
+                ),
+                valve_series=list(vendor.sizes),
+            )
+
+
+def test_gas_fk_and_choke_transition():
+    vendor = get_vendor_definition("fisher_globe_eqpct")
+
+    def result(p2: float):
+        return size_gas_valve(
+            GasSizingInput(
+                flow_nm3h=800.0,
+                inlet_pressure_bar_a=8.0,
+                outlet_pressure_bar_a=p2,
+                temperature_c=20.0,
+                molecular_weight=18.0,
+                specific_heat_ratio=1.68,
+                viscosity_pa_s=1.1e-5,
+                z=0.98,
+                xt=0.5,
+            ),
+            valve_series=list(vendor.sizes),
+        )
+
+    normal = result(7.0)
+    choked = result(1.0)
+    assert normal["fk"] == pytest.approx(1.2, rel=1e-9)
+    assert normal["x_choked"] == pytest.approx(0.6, rel=1e-3)
+    assert normal["is_choked"] is False
+    assert 0.0 < normal["expansion_factor_y"] <= 1.0
+    assert choked["is_choked"] is True
+    assert 0.0 < choked["expansion_factor_y"] <= 1.0
+
+
 def test_steam_sizing_returns_cv():
     vendor = get_vendor_definition("fisher_globe_linear")
     result = size_steam_valve(
@@ -1187,3 +1289,28 @@ def test_estimate_opening_characteristics():
     assert estimate_opening(200.0, 100.0, "linear") == 1.0
     assert estimate_opening(0.0, 100.0, "linear") == 0.0
 
+
+
+
+def test_prepare_composition_rows_normalizes_and_rejects_bad_rows():
+    from fluid_properties import prepare_composition_rows
+
+    rows, total = prepare_composition_rows(
+        [{"component": "Methane", "fraction_pct": 45.0}, {"component": "Ethane", "fraction_pct": 45.0}]
+    )
+    assert total == pytest.approx(90.0)
+    assert sum(row["fraction_pct"] for row in rows) == pytest.approx(100.0)
+    assert rows[0]["fraction_pct"] == pytest.approx(50.0)
+
+    alias_rows, alias_total = prepare_composition_rows([{"component": "CO2", "fraction_pct": 100.0}])
+    assert alias_total == pytest.approx(100.0)
+    assert alias_rows[0]["component"] == "CarbonDioxide"
+
+    for bad in (
+        [{"component": "Methane", "fraction_pct": 50.0}, {"component": "Methane", "fraction_pct": 50.0}],
+        [{"component": "Unobtainium", "fraction_pct": 100.0}],
+        [{"component": "Methane", "fraction_pct": 0.0}],
+        [{"component": "Methane", "fraction_pct": float("nan")}],
+    ):
+        with pytest.raises(ValueError):
+            prepare_composition_rows(bad)

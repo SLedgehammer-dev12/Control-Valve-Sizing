@@ -163,6 +163,9 @@ class TestInstalledCharacteristic:
         # PR = 1.0: installed gain equals inherent gain
         assert calc_installed_gain(1.0, 0.5, 1.0) == pytest.approx(1.0)
 
+        # d(Q/Qmax)/dh = PR / (PR + (1-PR)*phi^2)^1.5
+        assert calc_installed_gain(1.0, 0.5, 0.5) == pytest.approx(0.5 / (0.5 + 0.5 * 0.25) ** 1.5)
+
         # Zero or negative PR
         assert calc_installed_gain(1.0, 0.5, 0.0) == 0.0
 

@@ -103,7 +103,7 @@ def build_valve_figure(dn_mm: float = 50.0) -> go.Figure:
     inlet_flange = _cylinder((-2.08 * s, 0.0, 0.0), (-1.9 * s, 0.0, 0.0), 0.62 * s)
     outlet_flange = _cylinder((1.9 * s, 0.0, 0.0), (2.08 * s, 0.0, 0.0), 0.62 * s)
     bonnet = _cylinder((0.0, 0.0, 0.9 * s), (0.0, 0.0, 1.8 * s), 0.38 * s)
-    stem = _cylinder((0.0, 0.0, 1.7 * s), (0.0, 0.0, 2.6 * s), 0.08 * s)
+    stem = _cylinder((0.0, 0.0, 1.3 * s), (0.0, 0.0, 2.6 * s), 0.08 * s)
     wheel = _cylinder((0.0, 0.0, 2.6 * s), (0.0, 0.0, 2.72 * s), 0.85 * s)
 
     fig = go.Figure(data=[

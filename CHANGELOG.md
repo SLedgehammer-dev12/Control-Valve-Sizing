@@ -7,7 +7,7 @@ Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine ba
 ### Added
 - Windows installer (`installer.iss`, Inno Setup): per-user install, Start Menu/Desktop shortcuts, versioned `ControlValveSizing_Setup_<version>.exe`.
 - macOS DMG now contains an `/Applications` shortcut; DMG/volume names and app `Info.plist` version come from the release tag.
-- Web Docker image published to GHCR with version + `latest` tags, non-root runtime, and a `/_stcore/health` healthcheck.
+- Web Docker image published to GHCR with version + `latest` tags, non-root runtime, and a `/api/health` healthcheck.
 - Release workflow validates `vX.Y.Z` against `valve_sizing.__version__` and builds Windows setup/zip, macOS DMG, and the Docker image in parallel.
 - Service tabs (desktop `ttk.Notebook`, web segmented buttons) stay in sync with the opening slider; centralized unit converter in desktop dialog/web sidebar.
 - Tests for version metadata consistency and versioned release artifact names.

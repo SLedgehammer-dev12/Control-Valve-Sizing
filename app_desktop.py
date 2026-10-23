@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from config import GAS_PRESET_NAMES, GAS_PRESETS
-from fluid_properties import LIQUID_PRESETS, evaluate_gas_mixture, get_liquid_preset, get_pure_fluid_state, list_coolprop_fluids
+from fluid_properties import LIQUID_PRESETS, evaluate_gas_mixture, evaluate_liquid_preset, get_pure_fluid_state, list_coolprop_fluids
 from project_io import dump_project_json, load_project_json
 from reporting import build_pdf_report, build_report
 from units import (
@@ -88,6 +88,39 @@ def tooltip_label(widget, text):
     ToolTip(widget, text)
 
 
+def _unit_key_for_label(unit_map: dict[str, str], value: str) -> str:
+    """Map a displayed unit label back to its engine key."""
+    for key, label in unit_map.items():
+        if label == value:
+            return key
+    return value
+
+
+def _service_key(value: object) -> str:
+    key = str(value or "liquid").lower()
+    if key not in SERVICE_KEYS:
+        raise ValueError(f"Gecersiz servis: {value}")
+    return key
+
+
+def _absolute_pressure_unit(unit: str) -> str:
+    return {"bar_g": "bar_a", "psi_g": "psi_a"}.get(unit, unit)
+
+
+class _UnitVar(tk.StringVar):
+    """Store a unit key while displaying its human-readable label."""
+
+    def __init__(self, unit_map: dict[str, str], value: str) -> None:
+        self._unit_map = unit_map
+        super().__init__(value=unit_map.get(value, value))
+
+    def get(self) -> str:
+        return _unit_key_for_label(self._unit_map, super().get())
+
+    def set(self, value: str) -> None:
+        super().set(self._unit_map.get(value, value))
+
+
 class ValveSizingApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -135,25 +168,28 @@ class ValveSizingApp:
         self.flow_characteristic = tk.StringVar(value="equal_percentage")
 
         # Sector unit selectors (temperature / pressure / flow)
-        self.liquid_temp_unit = tk.StringVar(value="C")
-        self.liquid_pres_unit = tk.StringVar(value="bar_a")
-        self.liquid_flow_unit = tk.StringVar(value="m3h")
-        self.gas_temp_unit = tk.StringVar(value="C")
-        self.gas_pres_unit = tk.StringVar(value="bar_a")
-        self.gas_flow_unit = tk.StringVar(value="nm3h")
-        self.steam_temp_unit = tk.StringVar(value="C")
-        self.steam_pres_unit = tk.StringVar(value="bar_a")
-        self.steam_flow_unit = tk.StringVar(value="kgh")
+        self.liquid_temp_unit = _UnitVar(TEMPERATURE_UNITS, "C")
+        self.liquid_pres_unit = _UnitVar(PRESSURE_UNITS, "bar_a")
+        self.liquid_flow_unit = _UnitVar(LIQUID_FLOW_UNITS, "m3h")
+        self.gas_model = tk.StringVar(value="real")
+        self.gas_temp_unit = _UnitVar(TEMPERATURE_UNITS, "C")
+        self.gas_pres_unit = _UnitVar(PRESSURE_UNITS, "bar_a")
+        self.gas_flow_unit = _UnitVar(GAS_FLOW_UNITS, "nm3h")
+        self.steam_temp_unit = _UnitVar(TEMPERATURE_UNITS, "C")
+        self.steam_pres_unit = _UnitVar(PRESSURE_UNITS, "bar_a")
+        self.steam_flow_unit = _UnitVar(STEAM_FLOW_UNITS, "kgh")
 
         # Live-calculation bookkeeping
         self._live_enabled = False
         self._syncing_service = False
+        self._unit_previous: dict[str, str] = {}
         self._field_labels: dict[str, ttk.Label] = {}
         self._field_family: dict[str, str] = {}
         self._result_history: list[dict[str, Any]] = []
 
         # Display variables
         self.z_calculated_display = tk.StringVar(value="--")
+        self._gas_z_value: float | None = None
         self.k_calculated_display = tk.StringVar(value="--")
         self.viscosity_calculated_display = tk.StringVar(value="--")
         self.gas_status_text = tk.StringVar(value="")
@@ -175,7 +211,7 @@ class ValveSizingApp:
             "service_type", "vendor_key", "liquid_source", "liquid_preset_label",
             "design_margin", "flow_characteristic",
             "liquid_temp_unit", "liquid_pres_unit", "liquid_flow_unit",
-            "gas_temp_unit", "gas_pres_unit", "gas_flow_unit",
+            "gas_model", "gas_temp_unit", "gas_pres_unit", "gas_flow_unit",
             "steam_temp_unit", "steam_pres_unit", "steam_flow_unit",
         ):
             self._var_defaults[attr] = getattr(self, attr).get()
@@ -195,6 +231,8 @@ class ValveSizingApp:
             else:
                 getattr(self, attr).set(value)
         self._result_history = []
+        for key in self._unit_previous:
+            self._unit_previous[key] = getattr(self, key).get()
         self._toggle_service()
         self._on_live_change()
 
@@ -327,6 +365,8 @@ class ValveSizingApp:
         )
         for key in live_keys:
             self.inputs[key].trace_add("write", self._on_live_change)
+        for key in ("liquid_p1", "liquid_temp_c"):
+            self.inputs[key].trace_add("write", lambda *_args: self._on_liquid_conditions_change())
 
         # Row 3: Action bar
         action_bar = tk.Frame(body, bg="#eef3f8")
@@ -455,8 +495,8 @@ class ValveSizingApp:
             ("Giris basinci", "pres", "liquid_p1"),
             ("Cikis basinci", "pres", "liquid_p2"),
             ("Yogunluk", None, "liquid_density"),
-            ("Buhar basinci", "pres", "liquid_pv"),
-            ("Kritik basinc", "pres", "liquid_pc"),
+            ("Buhar basinci", "pres_abs", "liquid_pv"),
+            ("Kritik basinc", "pres_abs", "liquid_pc"),
             ("Viskozite", None, "liquid_mu"),
             ("FL", None, "liquid_fl"),
             ("Fd", None, "liquid_fd"),
@@ -483,15 +523,20 @@ class ValveSizingApp:
         frame.grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=4)
         ttk.Label(frame, text="Birimler:").pack(side="left")
         spec = [
-            ("Sicaklik", f"{prefix}_temp_unit", list(TEMPERATURE_UNITS.values())),
-            ("Basinc", f"{prefix}_pres_unit", list(PRESSURE_UNITS.values())),
-            ("Debi", f"{prefix}_flow_unit", list(flow_units.values())),
+            ("Sicaklik", f"{prefix}_temp_unit", TEMPERATURE_UNITS, "temp"),
+            ("Basinc", f"{prefix}_pres_unit", PRESSURE_UNITS, "pres"),
+            ("Debi", f"{prefix}_flow_unit", flow_units, "flow"),
         ]
-        for label_text, var_name, values in spec:
+        for label_text, var_name, unit_map, kind in spec:
             ttk.Label(frame, text=label_text).pack(side="left", padx=(10, 2))
-            combo = ttk.Combobox(frame, textvariable=getattr(self, var_name), values=values, state="readonly", width=10)
+            unit_var = getattr(self, var_name)
+            self._unit_previous[var_name] = unit_var.get()
+            combo = ttk.Combobox(frame, textvariable=unit_var, values=list(unit_map.values()), state="readonly", width=10)
             combo.pack(side="left", padx=(0, 4))
-            combo.bind("<<ComboboxSelected>>", self._on_live_change)
+            def _on_unit_selected(_event: object, p: str = prefix, k: str = kind, v: str = var_name) -> None:
+                self._on_unit_change(p, k, v)
+
+            combo.bind("<<ComboboxSelected>>", _on_unit_selected)
 
     def _flow_map_for(self, prefix: str) -> dict[str, str]:
         if prefix == "liquid":
@@ -508,6 +553,9 @@ class ValveSizingApp:
         if family == "pres":
             unit = getattr(self, f"{prefix}_pres_unit").get()
             return f"{base_label} [{PRESSURE_UNITS[unit]}]"
+        if family == "pres_abs":
+            unit = _absolute_pressure_unit(getattr(self, f"{prefix}_pres_unit").get())
+            return f"{base_label} [{PRESSURE_UNITS[unit]}]"
         if family == "flow":
             unit = getattr(self, f"{prefix}_flow_unit").get()
             return f"{base_label} [{self._flow_map_for(prefix)[unit]}]"
@@ -520,6 +568,83 @@ class ValveSizingApp:
             base_label = self._field_labels[key].cget("text")
             base = base_label.split(" [")[0]
             self._field_labels[key].config(text=self._field_label_text(base, family, prefix))
+
+    def _unit_fields(self, prefix: str, kind: str) -> tuple[str, ...]:
+        if kind == "temp":
+            return (f"{prefix}_temp_c",)
+        if kind == "pres":
+            if prefix == "liquid":
+                return ("liquid_p1", "liquid_p2", "liquid_pv", "liquid_pc")
+            return (f"{prefix}_p1", f"{prefix}_p2")
+        return {
+            "liquid": ("liquid_flow_m3h",),
+            "gas": ("gas_flow_nm3h",),
+            "steam": ("steam_flow_kgh",),
+        }[prefix]
+
+    def _gas_model_key(self) -> str:
+        var = getattr(self, "gas_model", None)
+        return var.get() if var is not None else "auto"
+
+    def _gas_z_for_conversion(self) -> float:
+        z_value = getattr(self, "_gas_z_value", None)
+        if isinstance(z_value, (int, float)) and z_value > 0:
+            return float(z_value)
+        with contextlib.suppress(ValueError):
+            return float(self.z_calculated_display.get())
+        return 1.0
+
+    def _convert_unit_value(self, kind: str, value: float, previous: str, new: str, prefix: str, field: str) -> float:
+        if kind == "temp":
+            return convert_unit("temperature", value, previous, new)
+        if kind == "pres":
+            if prefix == "liquid" and field in {"liquid_pv", "liquid_pc"}:
+                return convert_unit("pressure", value, _absolute_pressure_unit(previous), _absolute_pressure_unit(new))
+            return convert_unit("pressure", value, previous, new)
+        unit_kind = {"liquid": "liquid_flow", "gas": "gas_flow", "steam": "steam_flow"}[prefix]
+        context: dict[str, Any] = {}
+        if prefix == "liquid":
+            context["density_kg_m3"] = self.inputs["liquid_density"].get()
+        elif prefix == "gas" and ({"m3h", "kgh"} & {previous, new}):
+            pressure = pressure_to_bar_a(self.inputs["gas_p1"].get(), self.gas_pres_unit.get())
+            temperature = temperature_to_c(self.inputs["gas_temp_c"].get(), self.gas_temp_unit.get())
+            z_factor = self._gas_z_for_conversion()
+            molecular_weight = self.inputs["gas_mw"].get() / 1000.0
+            # shortcut: ideal-gas density with Z for kgh/m3h unit changes; upgrade to CoolProp density if composition accuracy matters.
+            density = pressure * 1e5 * molecular_weight / (max(z_factor, 1e-6) * 8.314462618 * (temperature + 273.15))
+            context.update(
+                pressure_bar_a=pressure,
+                temperature_c=temperature,
+                z=z_factor,
+                density_kg_m3=density,
+            )
+        return convert_unit(unit_kind, value, previous, new, **context)
+
+    def _on_unit_change(self, prefix: str, kind: str, var_name: str) -> None:
+        """Convert existing values to the newly selected unit, then recalculate."""
+        previous = self._unit_previous.get(var_name)
+        new = getattr(self, var_name).get()
+        if not previous or previous == new:
+            self._unit_previous[var_name] = new
+            return
+        keys = self._unit_fields(prefix, kind)
+        was_live = getattr(self, "_live_enabled", False)
+        self._live_enabled = False
+        try:
+            converted = [self._convert_unit_value(kind, self.inputs[key].get(), previous, new, prefix, key) for key in keys]
+        except Exception as exc:
+            getattr(self, var_name).set(previous)
+            self._unit_previous[var_name] = previous
+            self._live_enabled = was_live
+            messagebox.showerror("Birim donusumu", f"Birim donusumu yapilamadi: {exc}")
+            return
+        self._unit_previous[var_name] = new
+        for key, value in zip(keys, converted, strict=True):
+            self.inputs[key].set(float(f"{value:.6g}"))
+        self._live_enabled = was_live
+        self._refresh_unit_labels()
+        if was_live:
+            self._calculate(show_errors=False)
 
     def _on_preset_change(self, *_args) -> str:
         """Refresh liquid properties from the selected preset and re-calculate."""
@@ -534,6 +659,12 @@ class ValveSizingApp:
             self._refresh_unit_labels()
             self._calculate(show_errors=False)
         return ""
+
+    def _on_liquid_conditions_change(self, *_args) -> None:
+        if not getattr(self, "_live_enabled", False) or self.liquid_source.get() == "Custom":
+            return
+        self._update_liquid_properties()
+        self._on_live_change()
 
     def _build_form_steam(self, parent: ttk.Frame) -> None:
         """Build steam form with auto-calculated k and Z from CoolProp."""
@@ -610,6 +741,18 @@ class ValveSizingApp:
         gas_type_combo.grid(row=row, column=1, sticky="ew", padx=10, pady=8)
         row += 1
 
+        ttk.Label(parent, text="Gaz modeli").grid(row=row, column=0, sticky="w", padx=10, pady=8)
+        gas_model_combo = ttk.Combobox(
+            parent,
+            textvariable=self.gas_model,
+            values=("real", "auto", "ideal"),
+            state="readonly",
+            width=16,
+        )
+        gas_model_combo.grid(row=row, column=1, sticky="ew", padx=10, pady=8)
+        gas_model_combo.bind("<<ComboboxSelected>>", self._on_live_change)
+        row += 1
+
         # Add custom gas composition text area
         ttk.Label(parent, text="Özel Gaz Bileşimi\n(Örn: Methane 90)").grid(
             row=row, column=0, sticky="nw", padx=10, pady=8
@@ -678,13 +821,6 @@ class ValveSizingApp:
         mu_display.grid(row=row, column=1, sticky="ew", padx=10, pady=8)
         row += 1
 
-        # Add xT field
-        ttk.Label(parent, text="xT").grid(row=row, column=0, sticky="w", padx=10, pady=8)
-        ttk.Entry(parent, textvariable=self.inputs["gas_xt"], width=18).grid(
-            row=row, column=1, sticky="ew", padx=10, pady=8
-        )
-        row += 1
-
         # Pipe reducer fields
         ttk.Label(parent, text="Hat giris capi [mm]").grid(row=row, column=0, sticky="w", padx=10, pady=8)
         ttk.Entry(parent, textvariable=self.inputs["gas_pipe_in_mm"], width=18).grid(
@@ -730,6 +866,7 @@ class ValveSizingApp:
         Returns (z, k, viscosity_pa_s).
         """
         def _fail(message: str):
+            self._gas_z_value = None
             self.z_calculated_display.set("--")
             self.k_calculated_display.set("--")
             self.viscosity_calculated_display.set("--")
@@ -758,8 +895,10 @@ class ValveSizingApp:
                 "molar",
                 pressure_bar_a,
                 temperature_c,
+                self._gas_model_key(),
             )
             z_value = summary.z if summary.z is not None else 1.0
+            self._gas_z_value = z_value
             k_value = summary.specific_heat_ratio if summary.specific_heat_ratio is not None else 1.30
             mu_value = summary.viscosity_pa_s if summary.viscosity_pa_s is not None else 1e-5
 
@@ -774,6 +913,8 @@ class ValveSizingApp:
             self.z_calculated_display.set(f"{z_value:.5f}")
             self.k_calculated_display.set(f"{k_value:.5f}")
             self.viscosity_calculated_display.set(f"{mu_value:.5g}")
+            if summary.fallback_used:
+                self.gas_status_text.set("CoolProp HEOS kullanılamadı; ideal gaz varsayımları kullanıldı.")
             return z_value, k_value, mu_value
         except Exception as exc:
             return _fail(f"Gaz ozellikleri hesaplanamadi: {exc}.")
@@ -833,29 +974,84 @@ class ValveSizingApp:
         finally:
             self._syncing_service = False
 
+    def _liquid_pressures_bar_a(self) -> dict[str, float]:
+        unit = self.liquid_pres_unit.get()
+        absolute_unit = _absolute_pressure_unit(unit)
+        return {
+            "liquid_p1": pressure_to_bar_a(self.inputs["liquid_p1"].get(), unit),
+            "liquid_p2": pressure_to_bar_a(self.inputs["liquid_p2"].get(), unit),
+            "liquid_pv": pressure_to_bar_a(self.inputs["liquid_pv"].get(), absolute_unit),
+            "liquid_pc": pressure_to_bar_a(self.inputs["liquid_pc"].get(), absolute_unit),
+        }
+
+    def _multicase_operating_case(
+        self,
+        service: str,
+        name: str,
+        flow: float,
+        p1: float,
+        p2: float,
+        flow_unit: str,
+        pressure_unit: str,
+        temp_c: float,
+    ):
+        from multi_case import OperatingCase
+
+        p1_bar_a = pressure_to_bar_a(p1, pressure_unit)
+        p2_bar_a = pressure_to_bar_a(p2, pressure_unit)
+        if service == "liquid":
+            flow_engine = liquid_flow_to_m3h(flow, flow_unit, density_kg_m3=self.inputs["liquid_density"].get())
+        elif service == "gas":
+            summary = evaluate_gas_mixture(self._gas_composition_rows(), "molar", p1_bar_a, temp_c, self._gas_model_key())
+            flow_engine = gas_flow_to_nm3h(
+                flow,
+                flow_unit,
+                pressure_bar_a=p1_bar_a,
+                temperature_c=temp_c,
+                z=summary.z or 1.0,
+                density_kg_m3=summary.density_kg_m3,
+            )
+        else:
+            flow_engine = steam_flow_to_kgh(flow, flow_unit)
+        extra_props: dict[str, Any] = {}
+        if service == "gas":
+            extra_props = {
+                "molecular_weight": summary.average_molecular_weight,
+                "specific_heat_ratio": summary.specific_heat_ratio or 1.30,
+                "viscosity_pa_s": summary.viscosity_pa_s or 1.8e-5,
+                "z": summary.z or 1.0,
+            }
+        return OperatingCase(name, flow_engine, p1_bar_a, p2_bar_a, temp_c, extra_props=extra_props)
+
     def _update_liquid_properties(self) -> None:
         """Auto-fill liquid properties from preset or CoolProp."""
         source = self.liquid_source.get()
         label = self.liquid_preset_label.get()
+        unit = _absolute_pressure_unit(self.liquid_pres_unit.get())
         if source == "Preset":
             preset_map = {v["label"]: k for k, v in LIQUID_PRESETS.items()}
             key = preset_map.get(label)
             if key:
-                preset = get_liquid_preset(key)
+                pressures = self._liquid_pressures_bar_a()
+                preset = evaluate_liquid_preset(
+                    key,
+                    pressures["liquid_p1"],
+                    temperature_to_c(self.inputs["liquid_temp_c"].get(), self.liquid_temp_unit.get()),
+                )
                 self.inputs["liquid_density"].set(preset["density_kg_m3"])
-                self.inputs["liquid_pv"].set(preset["vapor_pressure_bar_a"])
-                self.inputs["liquid_pc"].set(preset["critical_pressure_bar_a"])
+                self.inputs["liquid_pv"].set(pressure_from_bar_a(preset["vapor_pressure_bar_a"], unit))
+                self.inputs["liquid_pc"].set(pressure_from_bar_a(preset["critical_pressure_bar_a"], unit))
                 self.inputs["liquid_mu"].set(preset["viscosity_pa_s"])
         elif source == "CoolProp pure fluid":
             try:
                 props = get_pure_fluid_state(
                     label,
-                    pressure_to_bar_a(self.inputs["liquid_p1"].get(), self.liquid_pres_unit.get()),
+                    self._liquid_pressures_bar_a()["liquid_p1"],
                     temperature_to_c(self.inputs["liquid_temp_c"].get(), self.liquid_temp_unit.get()),
                 )
                 self.inputs["liquid_density"].set(props["density_kg_m3"])
-                self.inputs["liquid_pv"].set(props["vapor_pressure_bar_a"])
-                self.inputs["liquid_pc"].set(props["critical_pressure_bar_a"])
+                self.inputs["liquid_pv"].set(pressure_from_bar_a(props["vapor_pressure_bar_a"], unit))
+                self.inputs["liquid_pc"].set(pressure_from_bar_a(props["critical_pressure_bar_a"], unit))
                 self.inputs["liquid_mu"].set(props["viscosity_pa_s"])
             except Exception:
                 pass  # Keep current values on error
@@ -874,10 +1070,11 @@ class ValveSizingApp:
         return base
 
     def _calc_liquid(self, vendor):
-        p1 = pressure_to_bar_a(self.inputs["liquid_p1"].get(), self.liquid_pres_unit.get())
-        p2 = pressure_to_bar_a(self.inputs["liquid_p2"].get(), self.liquid_pres_unit.get())
-        pv = pressure_to_bar_a(self.inputs["liquid_pv"].get(), self.liquid_pres_unit.get())
-        pc = pressure_to_bar_a(self.inputs["liquid_pc"].get(), self.liquid_pres_unit.get())
+        pressures = self._liquid_pressures_bar_a()
+        p1 = pressures["liquid_p1"]
+        p2 = pressures["liquid_p2"]
+        pv = pressures["liquid_pv"]
+        pc = pressures["liquid_pc"]
         temp_c = temperature_to_c(self.inputs["liquid_temp_c"].get(), self.liquid_temp_unit.get())
         result = size_liquid_valve(
             LiquidSizingInput(
@@ -902,12 +1099,13 @@ class ValveSizingApp:
             design_margin_pct=self.design_margin.get(),
             flow_characteristic=self.flow_characteristic.get(),
         )
+        absolute_unit = _absolute_pressure_unit(self.liquid_pres_unit.get())
         fluid_summary = {
             "Fluid": self.liquid_preset_label.get(),
             f"Temperature [{TEMPERATURE_UNITS[self.liquid_temp_unit.get()]}]": f"{temperature_from_c(temp_c, self.liquid_temp_unit.get()):.3f}",
             "Density [kg/m3]": f"{self.inputs['liquid_density'].get():.4f}",
-            f"Pv [{PRESSURE_UNITS[self.liquid_pres_unit.get()]}]": f"{pressure_from_bar_a(pv, self.liquid_pres_unit.get()):.5f}",
-            f"Pc [{PRESSURE_UNITS[self.liquid_pres_unit.get()]}]": f"{pressure_from_bar_a(pc, self.liquid_pres_unit.get()):.5f}",
+            f"Pv [{PRESSURE_UNITS[absolute_unit]}]": f"{pressure_from_bar_a(pv, absolute_unit):.5f}",
+            f"Pc [{PRESSURE_UNITS[absolute_unit]}]": f"{pressure_from_bar_a(pc, absolute_unit):.5f}",
             "Viscosity [Pa.s]": f"{self.inputs['liquid_mu'].get():.7g}",
         }
         return result, fluid_summary
@@ -917,7 +1115,7 @@ class ValveSizingApp:
         p1 = pressure_to_bar_a(self.inputs["gas_p1"].get(), self.gas_pres_unit.get())
         p2 = pressure_to_bar_a(self.inputs["gas_p2"].get(), self.gas_pres_unit.get())
         temp_c = temperature_to_c(self.inputs["gas_temp_c"].get(), self.gas_temp_unit.get())
-        summary = evaluate_gas_mixture(self._gas_composition_rows(), "molar", p1, temp_c)
+        summary = evaluate_gas_mixture(self._gas_composition_rows(), "molar", p1, temp_c, self._gas_model_key())
         flow_nm3h = gas_flow_to_nm3h(
             self.inputs["gas_flow_nm3h"].get(),
             self.gas_flow_unit.get(),
@@ -1417,7 +1615,7 @@ class ValveSizingApp:
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
 
     def _open_multicase_dialog(self) -> None:
-        from multi_case import OperatingCase, size_multicase
+        from multi_case import size_multicase
 
         dlg = tk.Toplevel(self.root)
         dlg.title("Coklu Calisma Durumu (Multi-Case Sizing: Min / Normal / Max)")
@@ -1438,15 +1636,21 @@ class ValveSizingApp:
         flow_key = "liquid_flow_m3h" if cur_service == "liquid" else ("gas_flow_nm3h" if cur_service == "gas" else "steam_flow_kgh")
         p1_key = f"{cur_service}_p1"
         p2_key = f"{cur_service}_p2"
+        flow_units = self._flow_map_for(cur_service)
+        flow_unit = getattr(self, f"{cur_service}_flow_unit").get()
+        pres_unit = getattr(self, f"{cur_service}_pres_unit").get()
+        temp_unit = getattr(self, f"{cur_service}_temp_unit").get()
+        flow_label = flow_units[flow_unit]
+        pres_label = PRESSURE_UNITS[pres_unit]
 
         base_flow = float(self.inputs[flow_key].get())
         base_p1 = float(self.inputs[p1_key].get())
         base_p2 = float(self.inputs[p2_key].get())
 
         ttk.Label(frame, text="Vaka", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w", pady=2, padx=4)
-        ttk.Label(frame, text="Debi", font=("Segoe UI", 9, "bold")).grid(row=1, column=1, sticky="w", pady=2, padx=4)
-        ttk.Label(frame, text="P1 [bar(a)]", font=("Segoe UI", 9, "bold")).grid(row=1, column=2, sticky="w", pady=2, padx=4)
-        ttk.Label(frame, text="P2 [bar(a)]", font=("Segoe UI", 9, "bold")).grid(row=1, column=3, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text=f"Debi [{flow_label}]", font=("Segoe UI", 9, "bold")).grid(row=1, column=1, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text=f"P1 [{pres_label}]", font=("Segoe UI", 9, "bold")).grid(row=1, column=2, sticky="w", pady=2, padx=4)
+        ttk.Label(frame, text=f"P2 [{pres_label}]", font=("Segoe UI", 9, "bold")).grid(row=1, column=3, sticky="w", pady=2, padx=4)
 
         ttk.Label(frame, text="Min:").grid(row=2, column=0, sticky="w", pady=2, padx=4)
         min_q_var = tk.DoubleVar(value=max(base_flow * 0.4, 0.1))
@@ -1479,18 +1683,25 @@ class ValveSizingApp:
 
         def _calc_mc() -> None:
             try:
-                temp_c = float(self.inputs[f"{cur_service}_temp_c"].get())
+                temp_c = temperature_to_c(float(self.inputs[f"{cur_service}_temp_c"].get()), temp_unit)
                 cases = [
-                    OperatingCase("Min", min_q_var.get(), min_p1_var.get(), min_p2_var.get(), temp_c),
-                    OperatingCase("Normal", norm_q_var.get(), norm_p1_var.get(), norm_p2_var.get(), temp_c),
-                    OperatingCase("Max", max_q_var.get(), max_p1_var.get(), max_p2_var.get(), temp_c),
+                    self._multicase_operating_case(
+                        cur_service, "Min", min_q_var.get(), min_p1_var.get(), min_p2_var.get(), flow_unit, pres_unit, temp_c
+                    ),
+                    self._multicase_operating_case(
+                        cur_service, "Normal", norm_q_var.get(), norm_p1_var.get(), norm_p2_var.get(), flow_unit, pres_unit, temp_c
+                    ),
+                    self._multicase_operating_case(
+                        cur_service, "Max", max_q_var.get(), max_p1_var.get(), max_p2_var.get(), flow_unit, pres_unit, temp_c
+                    ),
                 ]
                 fluid_data: dict[str, Any] = {}
                 if cur_service == "liquid":
+                    pressures = self._liquid_pressures_bar_a()
                     fluid_data = {
                         "density_kg_m3": self.inputs["liquid_density"].get(),
-                        "vapor_pressure_bar_a": self.inputs["liquid_pv"].get(),
-                        "critical_pressure_bar_a": self.inputs["liquid_pc"].get(),
+                        "vapor_pressure_bar_a": pressures["liquid_pv"],
+                        "critical_pressure_bar_a": pressures["liquid_pc"],
                         "viscosity_pa_s": self.inputs["liquid_mu"].get(),
                     }
                 elif cur_service == "gas":
@@ -1576,9 +1787,10 @@ class ValveSizingApp:
         frame = ttk.Frame(dlg, padding=16)
         frame.pack(fill="both", expand=True)
 
-        p1_init = float(self.inputs.get("liquid_p1", tk.StringVar(value="10.0")).get())
-        p2_init = float(self.inputs.get("liquid_p2", tk.StringVar(value="5.0")).get())
-        pv_init = float(self.inputs.get("liquid_pv", tk.StringVar(value="0.0234")).get())
+        pressures = self._liquid_pressures_bar_a()
+        p1_init = pressures["liquid_p1"]
+        p2_init = pressures["liquid_p2"]
+        pv_init = pressures["liquid_pv"]
         cv_init = 25.0
         if hasattr(self, "last_result") and self.last_result:
             cv_init = float(self.last_result.get("required_cv", 25.0))
@@ -2302,6 +2514,7 @@ class ValveSizingApp:
         for key, var in self.inputs.items():
             payload[key] = var.get()
         payload["liquid_source"] = self.liquid_source.get()
+        payload["gas_model"] = self._gas_model_key()
         payload["liquid_preset_label"] = self.liquid_preset_label.get()
         for prefix in ("liquid", "gas", "steam"):
             payload[f"{prefix}_temp_unit"] = getattr(self, f"{prefix}_temp_unit").get()
@@ -2338,16 +2551,18 @@ class ValveSizingApp:
                 text = f.read()
             payload = load_project_json(text)
             data = payload.get("data", {})
+            service = _service_key(payload.get("service") or data.get("service") or "liquid")
             for key, value in data.items():
                 if key in self.inputs:
                     with contextlib.suppress(tk.TclError, ValueError):
                         self.inputs[key].set(value)
-            if "service" in data:
-                self.service_type.set(data["service"])
+            self.service_type.set(service)
             if "vendor_key" in data:
                 self.vendor_key.set(data["vendor_key"])
             if "liquid_source" in data:
                 self.liquid_source.set(data["liquid_source"])
+            if "gas_model" in data:
+                self.gas_model.set(data["gas_model"])
             if "liquid_preset_label" in data:
                 self.liquid_preset_label.set(data["liquid_preset_label"])
             for prefix in ("liquid", "gas", "steam"):
@@ -2355,6 +2570,8 @@ class ValveSizingApp:
                     key = f"{prefix}_{suffix}"
                     if key in data:
                         getattr(self, key).set(data[key])
+            for key in self._unit_previous:
+                self._unit_previous[key] = getattr(self, key).get()
             self._refresh_unit_labels()
             self._toggle_service()
             self._calculate(show_errors=False)

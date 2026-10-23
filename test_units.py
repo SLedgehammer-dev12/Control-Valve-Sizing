@@ -53,7 +53,7 @@ class TestConstants:
         assert abs(M3H_TO_GPM - 4.4028675) < _TOL
 
     def test_nm3h_to_scfh(self):
-        assert abs(NM3H_TO_SCFH - 35.3146667) < _TOL
+        assert abs(NM3H_TO_SCFH - 37.32585086688706) < _TOL
 
     def test_kgh_to_lbh(self):
         assert abs(KGH_TO_LBH - 2.20462262) < _TOL
@@ -277,7 +277,7 @@ class TestGasFlowConverters:
         assert abs(gas_flow_to_nm3h(1000.0, "sm3h") - 1000.0 * NORMAL_T_K / 288.15) < _TOL
 
     def test_scfh_to_nm3h(self):
-        assert abs(gas_flow_to_nm3h(35314.6667, "scfh") - 1000.0) < 0.01
+        assert abs(gas_flow_to_nm3h(NM3H_TO_SCFH, "scfh") - 1.0) < 1e-9
 
     def test_mmscfd_to_nm3h(self):
         assert abs(gas_flow_to_nm3h(1.0, "mmscfd") - 1e6 / 24.0 / NM3H_TO_SCFH) < _TOL
@@ -311,6 +311,20 @@ class TestGasFlowConverters:
     def test_kgh_requires_density(self):
         with pytest.raises(ValueError, match="yogunlugu gereklidir"):
             gas_flow_to_nm3h(100.0, "kgh")
+
+    def test_invalid_process_conditions(self):
+        with pytest.raises(ValueError, match="basinci"):
+            gas_flow_to_nm3h(1.0, "m3h", pressure_bar_a=0.0, temperature_c=20.0)
+        with pytest.raises(ValueError, match="sicakligi"):
+            gas_flow_to_nm3h(1.0, "m3h", pressure_bar_a=1.0, temperature_c=-273.15)
+        with pytest.raises(ValueError, match="sikistirilabilirlik"):
+            gas_flow_from_nm3h(1.0, "m3h", pressure_bar_a=1.0, temperature_c=20.0, z=0.0)
+        with pytest.raises(ValueError, match="sikistirilabilirlik"):
+            gas_flow_to_nm3h(1.0, "m3h", pressure_bar_a=1.0, temperature_c=20.0, z=1e-7)
+        with pytest.raises(ValueError, match="basinc ve sicaklik"):
+            gas_flow_to_nm3h(1.0, "m3h")
+        with pytest.raises(ValueError, match="basinc ve sicaklik"):
+            gas_flow_from_nm3h(1.0, "m3h")
 
     def test_unknown_unit(self):
         with pytest.raises(ValueError, match="Bilinmeyen gaz debi birimi"):
@@ -374,7 +388,7 @@ class TestUnitEdgeCasesAndErrors:
     def test_gas_flow_from_nm3h_kgh_and_errors(self):
         from units import gas_flow_from_nm3h
 
-        val_kgh = gas_flow_from_nm3h(100.0, "kgh", density_kg_m3=1.25)
+        val_kgh = gas_flow_from_nm3h(100.0, "kgh", pressure_bar_a=8.0, temperature_c=20.0, density_kg_m3=1.25)
         assert val_kgh > 0.0
         with pytest.raises(ValueError, match="yogunlugu gereklidir"):
             gas_flow_from_nm3h(100.0, "kgh")
@@ -434,3 +448,10 @@ class TestCentralUnitMapsAndConverter:
         assert UNIT_VALIDATORS["liquid_temp_unit"] is UNIT_MAPS["temperature"]
         assert UNIT_VALIDATORS["gas_flow_unit"] is UNIT_MAPS["gas_flow"]
         assert UNIT_VALIDATORS["steam_pres_unit"] is UNIT_MAPS["pressure"]
+
+
+def test_gauge_pressure_known_values():
+    assert convert_unit("pressure", 0.0, "bar_g", "psi_g") == 0.0
+    assert convert_unit("pressure", -0.5, "bar_g", "psi_g") == pytest.approx(-7.2518869, rel=1e-6)
+    assert convert_unit("pressure", -0.5, "bar_g", "bar_a") == pytest.approx(0.51325, rel=1e-6)
+    assert convert_unit("pressure", 1.0, "bar_g", "bar_a") == pytest.approx(2.01325, rel=1e-6)

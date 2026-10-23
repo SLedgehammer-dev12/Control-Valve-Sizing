@@ -11,7 +11,7 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 - **Windows kurulum sihirbazı**: `ControlValveSizing_Setup_<version>.exe` (Inno Setup). Kullanıcı dizinine kurulur, yönetici izni gerektirmez; Başlat menüsü ve masaüstü kısayolu oluşturur.
 - **Taşınabilir Windows zip**: `ControlValveSizing_windows_x86_64_<version>.zip`.
 - **macOS DMG**: `ControlValveSizing_macos_arm64_<version>.dmg`; içinde `.app` ve `/Applications` kısayolu bulunur.
-- **Web Docker imajı**: `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` ve `latest`; non-root kullanıcı ve `/_stcore/health` healthcheck.
+- **Web Docker imajı**: `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` ve `latest`; non-root kullanıcı ve `/api/health` healthcheck.
 - Tüm çıktı dosyalarının adı sürüm numarasını içerir. Release iş akışı `vX.Y.Z` etiketini `valve_sizing.__version__` ile karşılaştırır.
 
 ### Arayüz

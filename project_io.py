@@ -58,7 +58,7 @@ def migrate_project_payload(payload: dict) -> dict:
     data is never silently misinterpreted.
     """
     version = payload.get("schema_version", 1)
-    if not isinstance(version, int) or version < 1:
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise ValueError("Proje dosyasi gecersiz bir schema_version iceriyor.")
     if version > SCHEMA_VERSION:
         raise ValueError(
@@ -76,9 +76,9 @@ def validate_project_payload(payload: dict) -> None:
     if payload.get("project_type") != PROJECT_TYPE:
         raise ValueError("Bu dosya control valve sizing proje dosyasi degil.")
     service = payload.get("service")
-    if isinstance(service, str) and service.lower() not in {"liquid", "gas", "steam"}:
+    if not isinstance(service, str) or service.lower() not in {"liquid", "gas", "steam"}:
         raise ValueError("Project service degeri Liquid, Gas veya Steam olmalidir.")
-    payload["service"] = service.lower() if isinstance(service, str) else service
+    payload["service"] = service.lower()
     data = payload.get("data")
     if not isinstance(data, dict):
         raise ValueError("Proje data alanı bir JSON nesnesi olmalidir.")
@@ -92,8 +92,18 @@ def validate_project_payload(payload: dict) -> None:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Proje verisinde '{key}' sayisal bir deger olmalidir.")
     for key, allowed in UNIT_VALIDATORS.items():
-        if key in data and data[key] not in allowed:
-            raise ValueError(f"Proje verisinde gecersiz birim: '{key}' = {data[key]!r}.")
+        if key not in data:
+            continue
+        value = data[key]
+        if not isinstance(value, str):
+            raise ValueError(f"Proje verisinde gecersiz birim: '{key}' = {value!r}.")
+        if value in allowed:
+            continue
+        label_map = {label: unit_key for unit_key, label in allowed.items()}
+        if value in label_map:
+            data[key] = label_map[value]
+            continue
+        raise ValueError(f"Proje verisinde gecersiz birim: '{key}' = {value!r}.")
 
 
 def load_project_json(text: str) -> dict:

@@ -5,7 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   prepare:
@@ -220,6 +220,8 @@ jobs:
     name: Publish GitHub Release
     needs: [prepare, build-windows, build-macos, build-web]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

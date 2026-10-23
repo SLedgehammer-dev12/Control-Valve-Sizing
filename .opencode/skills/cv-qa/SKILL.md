@@ -1,11 +1,11 @@
 ---
 name: cv-qa
-description: "Testing and QA workflow for control valve sizing project — 54 pytest tests, 86%% coverage target, ruff linting, CI pipeline. Covers test_valve_sizing (core engine edge cases), test_vendor_catalog (vendor validation), test_integration (Streamlit AppTest), test_desktop_integration (import/syntax), test_app_integration (standalone validation). USE FOR: adding tests, fixing test failures, increasing coverage, debugging CI failures, running lint checks."
+description: "Testing and QA workflow for control valve sizing project — 666 pytest tests, 94% coverage floor, ruff/mypy, CI pipeline. Covers test_valve_sizing (core engine), test_api (FastAPI), test_integration (Streamlit AppTest), test_desktop_integration (desktop logic), test_units (conversions), and domain modules. USE FOR: adding tests, fixing test failures, increasing coverage, debugging CI failures, running lint checks."
 license: MIT
 metadata:
   project: control-valve-sizing
-  test_count: "54"
-  coverage_target: "80"
+  test_count: "666"
+  coverage_target: "94"
   version: "1.0"
 ---
 
@@ -15,11 +15,12 @@ metadata:
 
 | File | Tests | What it covers |
 |---|---|---|
-| `test_valve_sizing.py` | ~30 | Liquid/gas/steam sizing, edge cases (zero flow, negative density, P2>P1), choked detection, overflow, regime classification, fluid composition errors |
-| `test_vendor_catalog.py` | 9 | Vendor key availability, Fl/Xt/Fd validity, size monotonicity |
-| `test_integration.py` | 8 | Streamlit AppTest (render, liquid calc, gas switch), project JSON round-trip, report generation |
-| `test_desktop_integration.py` | 7 | Desktop app syntax check, import verification, preset validation, project_io, reporting |
-| `test_app_integration.py` | 1 | Standalone import + GAS_PRESETS validation (non-pytest) |
+| `test_valve_sizing.py` | core | Liquid/gas/steam sizing, edge cases, choked detection, overflow |
+| `test_units.py` | core | Unit maps, gauge/absolute pressure, gas/liquid/steam conversions |
+| `test_api.py` | API | FastAPI validation, security headers/CSP, mesh contract, unit endpoints |
+| `test_integration.py` | UI | Streamlit AppTest, project JSON round-trip, report generation |
+| `test_desktop_integration.py` | UI | Desktop logic, unit conversion, project load/reset, packaging |
+| Other `test_*.py` | domain | Multi-case, noise, safety, thermal, JT, packing, datasheet, scenarios |
 
 ## Running Tests
 
@@ -27,7 +28,7 @@ metadata:
 # Full suite
 python -m pytest --tb=short -q
 
-# With coverage (target: 80%% excluding app_desktop.py)
+# With coverage (target: 80% excluding app_desktop.py)
 python -m pytest --cov=. --cov-report=term -q
 
 # Single file
@@ -40,7 +41,7 @@ python -m pytest test_valve_sizing.py -v
 ## Linting
 
 ```powershell
-ruff check .          # ~28 pre-existing warnings (E402, E501, ARG005, N806)
+ruff check .          # should be clean
 ruff check --fix .    # auto-fix import sorting, whitespace
 ```
 
@@ -48,9 +49,9 @@ Line length: 150 (configured in pyproject.toml).
 
 ## Coverage Thresholds
 
-- **Fail under**: 80%% overall (excluding `app_desktop.py` — Tkinter GUI not testable in CI)
-- **Current**: 86%% (54 tests passing)
-- **valve_sizing.py**: 98%%
+- **Fail under**: 94% overall (excluding `app_desktop.py` — Tkinter GUI not testable in CI)
+- **Current**: ~95.32% (666 tests passing)
+- **valve_sizing.py**: 100%
 - **vendor_catalog.py**: 100%%
 - **config.py**: 100%%
 
@@ -58,7 +59,7 @@ Line length: 150 (configured in pyproject.toml).
 
 `.github/workflows/ci.yml` — GitHub Actions:
 - Ubuntu, Python 3.11 + 3.12
-- ruff check → pytest
+- ruff check → mypy → pytest
 
 ## When adding tests
 1. Test file naming: `test_<module>.py`

@@ -8,5 +8,3 @@ services:
     ports:
       - "8501:8501"
     restart: unless-stopped
-    environment:
-      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"

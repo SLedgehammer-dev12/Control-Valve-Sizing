@@ -384,8 +384,10 @@ def verify_steam_superheated() -> ScenarioResult:
     )
     result = size_steam_valve(data, valve_series=DEFAULT_VALVE_SERIES)
     rho = CP.PropsSI("D", "P", 12e5, "T", 493.15, "Water")
+    k_iapws = CP.PropsSI("CPMASS", "P", 12e5, "T", 493.15, "Water") / CP.PropsSI("CVMASS", "P", 12e5, "T", 493.15, "Water")
+    z_iapws = CP.PropsSI("Z", "P", 12e5, "T", 493.15, "Water")
     q_actual = 5000.0 / rho
-    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 12.0, 8.0, 220.0, 18.015, 1.30, 1.0, 0.72)
+    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 12.0, 8.0, 220.0, 18.015, k_iapws, z_iapws, 0.72)
     dev = _deviation_pct(result.required_kv, kv_ref)
     checks = [
         dev <= STEAM_DEV_MAX_PCT,
@@ -415,8 +417,10 @@ def verify_steam_near_saturated() -> ScenarioResult:
     )
     result = size_steam_valve(data, valve_series=DEFAULT_VALVE_SERIES)
     rho = CP.PropsSI("D", "P", 6e5, "T", 438.15, "Water")
+    k_iapws = CP.PropsSI("CPMASS", "P", 6e5, "T", 438.15, "Water") / CP.PropsSI("CVMASS", "P", 6e5, "T", 438.15, "Water")
+    z_iapws = CP.PropsSI("Z", "P", 6e5, "T", 438.15, "Water")
     q_actual = 8000.0 / rho
-    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 6.0, 3.0, 165.0, 18.015, 1.30, 1.0, 0.72)
+    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 6.0, 3.0, 165.0, 18.015, k_iapws, z_iapws, 0.72)
     dev = _deviation_pct(result.required_kv, kv_ref)
     checks = [
         dev <= STEAM_DEV_MAX_PCT,

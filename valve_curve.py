@@ -325,7 +325,7 @@ def calc_installed_gain(inherent_gain_ratio: float, cv_ratio: float, valve_autho
     pr = max(1e-4, min(1.0, float(valve_authority_pr)))
     phi_sq = cv_ratio ** 2
     denom = pr + (1.0 - pr) * phi_sq
-    return float((inherent_gain_ratio * math.sqrt(pr)) / (denom ** 1.5))
+    return float((inherent_gain_ratio * pr) / (denom ** 1.5))
 
 
 def generate_installed_characteristic(

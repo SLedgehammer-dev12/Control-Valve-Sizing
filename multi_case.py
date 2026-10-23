@@ -107,27 +107,28 @@ def _build_case_input(
     pipe_inlet_mm: float | None,
     pipe_outlet_mm: float | None,
 ) -> Any:
-    fl = float(base_fluid_data.get("fl", 0.9))
-    fd = float(base_fluid_data.get("fd", 1.0))
-    xt = float(base_fluid_data.get("xt", 0.7))
+    props = {**base_fluid_data, **case.extra_props}
+    fl = float(props.get("fl", 0.9))
+    fd = float(props.get("fd", 1.0))
+    xt = float(props.get("xt", 0.7))
 
     if service == "liquid":
         return LiquidSizingInput(
             flow_m3h=case.flow,
             inlet_pressure_bar_a=case.p1_bar_a,
             outlet_pressure_bar_a=case.p2_bar_a,
-            density_kg_m3=float(base_fluid_data.get("density_kg_m3", 998.0)),
-            vapor_pressure_bar_a=float(base_fluid_data.get("vapor_pressure_bar_a", 0.023)),
-            critical_pressure_bar_a=float(base_fluid_data.get("critical_pressure_bar_a", 220.64)),
-            viscosity_pa_s=float(base_fluid_data.get("viscosity_pa_s", 0.001)),
+            density_kg_m3=float(props.get("density_kg_m3", 998.0)),
+            vapor_pressure_bar_a=float(props.get("vapor_pressure_bar_a", 0.023)),
+            critical_pressure_bar_a=float(props.get("critical_pressure_bar_a", 220.64)),
+            viscosity_pa_s=float(props.get("viscosity_pa_s", 0.001)),
             fl=fl,
             fd=fd,
             pipe_inlet_diameter_mm=pipe_inlet_mm,
             pipe_outlet_diameter_mm=pipe_outlet_mm,
             temperature_c=case.temperature_c,
-            specific_heat_j_kgk=float(base_fluid_data.get("specific_heat_j_kgk", 4186.0)),
-            latent_heat_j_kg=float(base_fluid_data.get("latent_heat_j_kg", 2257000.0)),
-            molecular_weight=float(base_fluid_data.get("molecular_weight", 18.015)),
+            specific_heat_j_kgk=float(props.get("specific_heat_j_kgk", 4186.0)),
+            latent_heat_j_kg=float(props.get("latent_heat_j_kg", 2257000.0)),
+            molecular_weight=float(props.get("molecular_weight", 18.015)),
         )
 
     if service == "gas":
@@ -136,10 +137,10 @@ def _build_case_input(
             inlet_pressure_bar_a=case.p1_bar_a,
             outlet_pressure_bar_a=case.p2_bar_a,
             temperature_c=case.temperature_c,
-            molecular_weight=float(base_fluid_data.get("molecular_weight", 28.96)),
-            specific_heat_ratio=float(base_fluid_data.get("specific_heat_ratio", 1.40)),
-            viscosity_pa_s=float(base_fluid_data.get("viscosity_pa_s", 1.8e-5)),
-            z=float(base_fluid_data.get("z", 1.0)),
+            molecular_weight=float(props.get("molecular_weight", 28.96)),
+            specific_heat_ratio=float(props.get("specific_heat_ratio", 1.40)),
+            viscosity_pa_s=float(props.get("viscosity_pa_s", 1.8e-5)),
+            z=float(props.get("z", 1.0)),
             fl=fl,
             fd=fd,
             xt=xt,
@@ -153,10 +154,10 @@ def _build_case_input(
             inlet_pressure_bar_a=case.p1_bar_a,
             outlet_pressure_bar_a=case.p2_bar_a,
             temperature_c=case.temperature_c,
-            specific_heat_ratio=float(base_fluid_data.get("specific_heat_ratio", 1.30)),
-            z=float(base_fluid_data.get("z", 1.0)),
+            specific_heat_ratio=float(props.get("specific_heat_ratio", 1.30)),
+            z=float(props.get("z", 1.0)),
             xt=xt,
-            fp=float(base_fluid_data.get("fp", 1.0)),
+            fp=float(props.get("fp", 1.0)),
             fl=fl,
             fd=fd,
             pipe_inlet_diameter_mm=pipe_inlet_mm,

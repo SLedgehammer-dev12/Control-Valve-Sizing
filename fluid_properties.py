@@ -192,6 +192,21 @@ class CompositionSummary:
     cv_j_kgk: float | None
     specific_heat_ratio: float | None
     mixture_string: str
+    phase: str | None = None
+    fallback_used: bool = False
+    model_used: str = "unknown"
+
+
+def _phase_name(phase: int) -> str:
+    return {
+        CP.iphase_liquid: "liquid",
+        CP.iphase_supercritical: "supercritical",
+        CP.iphase_supercritical_gas: "supercritical_gas",
+        CP.iphase_supercritical_liquid: "supercritical_liquid",
+        CP.iphase_gas: "gas",
+        CP.iphase_twophase: "two_phase",
+        CP.iphase_critical_point: "critical_point",
+    }.get(int(phase), "unknown")
 
 
 @lru_cache(maxsize=1)
@@ -237,10 +252,30 @@ def get_molecular_weight(fluid: str) -> float:
     return 28.96
 
 
+GAS_COMPONENT_ALIASES: dict[str, str] = {
+    "CO2": "CarbonDioxide",
+    "CH4": "Methane",
+    "C2H6": "Ethane",
+    "C3H8": "Propane",
+    "C4H10": "Butane",
+    "N2": "Nitrogen",
+    "O2": "Oxygen",
+    "H2": "Hydrogen",
+    "H2S": "HydrogenSulfide",
+    "CO": "CarbonMonoxide",
+    "H2O": "Water",
+}
+
+
+def canonical_gas_component(name: str) -> str:
+    stripped = name.strip()
+    return GAS_COMPONENT_ALIASES.get(stripped.upper(), stripped)
+
+
 def _clean_rows(rows: list[dict]) -> list[dict]:
-    cleaned = []
+    cleaned: list[dict[str, Any]] = []
     for row in rows:
-        fluid = str(row.get("component", "")).strip()
+        fluid = canonical_gas_component(str(row.get("component", "")))
         percent = row.get("fraction_pct", 0.0)
         try:
             percent = float(percent)
@@ -248,12 +283,73 @@ def _clean_rows(rows: list[dict]) -> list[dict]:
             continue
         if not fluid:
             continue
-        if percent < 0:
-            raise ValueError("Yuzdeler negatif olamaz.")
+        if not math.isfinite(percent) or percent < 0:
+            raise ValueError("Yuzdeler sonlu ve negatif olmayan degerler olmalidir.")
+        if any(item["component"] == fluid for item in cleaned):
+            raise ValueError(f"Ayni bilesen birden fazla kez girilemez: {fluid}")
         cleaned.append({"component": fluid, "fraction_pct": percent})
     if not cleaned:
         raise ValueError("En az bir bilesen girilmelidir.")
     return cleaned
+
+
+@lru_cache(maxsize=1)
+def gas_component_options() -> list[str]:
+    """Return CoolProp gas names plus components used by built-in presets."""
+    from config import GAS_PRESETS
+
+    options = list(list_coolprop_fluids())
+    seen = set(options)
+    for preset in GAS_PRESETS.values():
+        for row in preset["components"]:
+            name = str(row["component"])
+            if name not in seen:
+                seen.add(name)
+                options.append(name)
+    for alias in GAS_COMPONENT_ALIASES:
+        if alias not in seen:
+            seen.add(alias)
+            options.append(alias)
+    return options
+
+
+def prepare_composition_rows(rows: list[dict]) -> tuple[list[dict], float]:
+    """Validate custom composition rows and normalize positive total to 100%."""
+    if not rows:
+        raise ValueError("En az bir gaz bileseni girilmelidir.")
+    allowed = set(gas_component_options())
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Gaz kompozisyonu satirlari nesne olmalidir.")
+        name = canonical_gas_component(str(row.get("component", "")))
+        if not name:
+            raise ValueError("Bilesen adi bos olamaz.")
+        if name not in allowed:
+            raise ValueError(f"Bilinmeyen gaz bileseni: {name}")
+        if name in seen:
+            raise ValueError(f"Ayni bilesen birden fazla kez girilemez: {name}")
+        seen.add(name)
+        try:
+            percent = float(row.get("fraction_pct", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Gecersiz yuzde degeri: {name}") from exc
+        if not math.isfinite(percent) or percent < 0.0:
+            raise ValueError("Yuzdeler sonlu ve negatif olmayan degerler olmalidir.")
+        cleaned.append({"component": name, "fraction_pct": percent})
+    total = sum(row["fraction_pct"] for row in cleaned)
+    if not math.isfinite(total) or total <= 0.0:
+        raise ValueError("Gaz kompozisyonu toplami sifirdan buyuk olmalidir.")
+    positive = [row for row in cleaned if row["fraction_pct"] > 0.0]
+    if not positive:
+        raise ValueError("En az bir gaz bileseni pozitif olmalidir.")
+    positive_total = sum(row["fraction_pct"] for row in positive)
+    normalized = [
+        {"component": row["component"], "fraction_pct": row["fraction_pct"] / positive_total * 100.0}
+        for row in positive
+    ]
+    return normalized, total
 
 
 def normalize_composition(rows: list[dict], basis: str) -> CompositionSummary:
@@ -323,7 +419,7 @@ def _evaluate_mixture_state_heos(
     mole_fraction_items: tuple[tuple[str, float], ...],
     pressure_bar_a: float,
     temperature_c: float,
-) -> dict[str, float | None] | None:
+) -> dict[str, Any] | None:
     """CoolProp HEOS evaluation. Returns None if the mixture is not supported."""
     try:
         state = CP.AbstractState("HEOS", mixture_string)
@@ -335,8 +431,18 @@ def _evaluate_mixture_state_heos(
         cp = state.cpmass()
         cv = state.cvmass()
         k = (cp / cv) if cv > 0 else None
+        phase = _phase_name(state.phase())
+        # shortcut: CoolProp mixture phase() flags gas blends as liquid; T_reducing/density heuristic, revisit near-critical blends
+        if phase == "liquid" and len(mole_fraction_items) > 1:
+            try:
+                t_k = temperature_c + 273.15
+                if t_k > state.T_reducing() or rho < 0.5 * state.rhomass_reducing():
+                    phase = "gas"
+            except Exception:
+                pass
         return {"z": z, "density_kg_m3": rho, "viscosity_pa_s": mu,
-                "cp_j_kgk": cp, "cv_j_kgk": cv, "specific_heat_ratio": k}
+                "cp_j_kgk": cp, "cv_j_kgk": cv, "specific_heat_ratio": k,
+                "phase": phase}
     except Exception:
         return None
 
@@ -346,32 +452,46 @@ def _evaluate_mixture_state_fallback(
     average_mw: float,
     pressure_bar_a: float,
     temperature_c: float,
-) -> dict[str, float | None]:
+) -> dict[str, Any]:
     """Ideal gas mixture fallback. Uses air-like defaults (k=1.4, Z=1.0)."""
     t_k = temperature_c + 273.15
     p_pa = pressure_bar_a * 1e5
     r = 8314.0
     avg_rho = (p_pa * average_mw) / (r * t_k)
     return {"z": 1.0, "density_kg_m3": avg_rho, "viscosity_pa_s": _gas_viscosity_fallback(t_k),
-            "cp_j_kgk": 1000.0, "cv_j_kgk": 714.0, "specific_heat_ratio": 1.4}
+            "cp_j_kgk": 1000.0, "cv_j_kgk": 714.0, "specific_heat_ratio": 1.4,
+            "phase": None}
 
 
 def evaluate_gas_mixture(
-    rows: list[dict], basis: str, pressure_bar_a: float, temperature_c: float,
+    rows: list[dict],
+    basis: str,
+    pressure_bar_a: float,
+    temperature_c: float,
+    gas_model: str = "auto",
 ) -> CompositionSummary:
     """Return CompositionSummary with Z, k, density, viscosity.
 
-    Cascade: CoolProp HEOS → ideal gas mixture.
+    ``gas_model``: ``auto`` uses HEOS then ideal fallback, ``real`` requires HEOS,
+    ``ideal`` uses ideal-gas properties directly.
     """
+    model = gas_model.strip().lower()
+    if model not in {"auto", "real", "ideal"}:
+        raise ValueError("Gaz modeli 'real', 'auto' veya 'ideal' olmalidir.")
     summary = normalize_composition(rows, basis)
     ordered = list(summary.mole_fractions.items())
     mw = summary.average_molecular_weight
 
-    props = _evaluate_mixture_state_heos(
+    props = None if model == "ideal" else _evaluate_mixture_state_heos(
         summary.mixture_string, tuple(ordered), pressure_bar_a, temperature_c,
     )
+    fallback_used = props is None or model == "ideal"
     if props is None:
+        if model == "real":
+            raise ValueError("Gercek gaz modeli bu karisim icin kullanilamadi; 'auto' veya 'ideal' secin.")
         props = _evaluate_mixture_state_fallback(mw, pressure_bar_a, temperature_c)
+    used_model = "ideal" if fallback_used else "heos"
+    assert props is not None
 
     return CompositionSummary(
         basis=summary.basis,
@@ -386,6 +506,9 @@ def evaluate_gas_mixture(
         cv_j_kgk=props["cv_j_kgk"],
         specific_heat_ratio=props["specific_heat_ratio"],
         mixture_string=summary.mixture_string,
+        phase=props.get("phase") if isinstance(props.get("phase"), str) else None,
+        fallback_used=fallback_used,
+        model_used=used_model,
     )
 
 
@@ -611,6 +734,40 @@ def get_liquid_preset(name: str) -> dict[str, Any]:
     if name not in LIQUID_PRESETS:
         raise ValueError(f"Bilinmeyen sivi preset'i: {name}")
     return LIQUID_PRESETS[name].copy()
+
+
+LIQUID_PRESET_FLUIDS = {
+    "Water": "Water",
+    "Methanol": "Methanol",
+    "Propane": "Propane",
+    "Ammonia": "Ammonia",
+    "Hydrogen": "Hydrogen",
+}
+
+
+def evaluate_liquid_preset(name: str, pressure_bar_a: float, temperature_c: float) -> dict[str, Any]:
+    """Return preset properties, corrected with CoolProp when P/T are in the liquid phase."""
+    result = get_liquid_preset(name)
+    result["temperature_corrected"] = False
+    fluid = LIQUID_PRESET_FLUIDS.get(name)
+    if fluid is None:
+        return result
+    try:
+        phase = _phase_name(int(CP.PropsSI("PHASE", "P", pressure_bar_a * 1e5, "T", temperature_c + 273.15, fluid)))
+        if phase not in {"liquid", "supercritical_liquid"}:
+            result["warning"] = "Seçilen P/T'de akışkan sıvı fazında değil; preset sabit değerleri kullanıldı."
+            return result
+        state = get_pure_fluid_state(fluid, pressure_bar_a, temperature_c)
+        result.update(
+            density_kg_m3=state["density_kg_m3"],
+            viscosity_pa_s=state["viscosity_pa_s"],
+            vapor_pressure_bar_a=state["vapor_pressure_bar_a"],
+            critical_pressure_bar_a=state["critical_pressure_bar_a"] or result["critical_pressure_bar_a"],
+            temperature_corrected=True,
+        )
+    except Exception:
+        pass
+    return result
 
 
 def get_saturated_steam_temperature(pressure_bar_a: float) -> float:

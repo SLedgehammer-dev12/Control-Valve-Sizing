@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
@@ -7,7 +8,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import DEFAULT_GAS_ROWS, GAS_PRESET_NAMES, GAS_PRESETS
-from fluid_properties import LIQUID_PRESETS, evaluate_gas_mixture, get_liquid_preset, get_pure_fluid_state, list_coolprop_fluids
+from fluid_properties import (
+    LIQUID_PRESETS,
+    evaluate_gas_mixture,
+    evaluate_liquid_preset,
+    gas_component_options,
+    get_pure_fluid_state,
+    list_coolprop_fluids,
+)
 from project_io import dump_project_json, load_project_json
 from reporting import build_report
 from units import (
@@ -46,6 +54,7 @@ DEFAULTS = {
     "vendor_key": "fisher_globe_eqpct",
     "liquid_source": "Preset",
     "liquid_preset_label": "Su",
+    "_liquid_props_key": None,
     "liquid_temp_c": 25.0,
     "liquid_ref_pressure_bar_a": 1.01325,
     "liquid_density": 998.0,
@@ -57,37 +66,94 @@ DEFAULTS = {
     "liquid_p2": 5.0,
     "liquid_pipe_in_mm": 50.0,
     "liquid_pipe_out_mm": 50.0,
-    "liquid_temp_unit": "C",
-    "liquid_pres_unit": "bar_a",
-    "liquid_flow_unit": "m3h",
+    "liquid_temp_unit": "°C",
+    "liquid_pres_unit": "bar(a)",
+    "liquid_flow_unit": "m³/h",
     "gas_basis": "molar",
+    "gas_preset": "Doğal Gaz",
+    "gas_model": "real",
     "gas_temp_c": 20.0,
     "gas_p1": 8.0,
     "gas_p2": 6.0,
     "gas_flow_nm3h": 800.0,
     "gas_pipe_in_mm": 80.0,
     "gas_pipe_out_mm": 80.0,
-    "gas_temp_unit": "C",
-    "gas_pres_unit": "bar_a",
-    "gas_flow_unit": "nm3h",
+    "gas_temp_unit": "°C",
+    "gas_pres_unit": "bar(a)",
+    "gas_flow_unit": "Nm³/h",
     "steam_flow_kgh": 2500.0,
     "steam_temp_c": 220.0,
     "steam_p1": 12.0,
     "steam_p2": 8.0,
-    "steam_temp_unit": "C",
-    "steam_pres_unit": "bar_a",
-    "steam_flow_unit": "kgh",
+    "steam_temp_unit": "°C",
+    "steam_pres_unit": "bar(a)",
+    "steam_flow_unit": "kg/h",
     "design_margin": 15.0,
     "flow_characteristic": "equal_percentage",
 }
 
 SERVICE_LABELS = {"Liquid": "Sıvı", "Gas": "Gaz", "Steam": "Buhar"}
 SERVICE_KEYS = {label: key for key, label in SERVICE_LABELS.items()}
+SERVICE_TITLES = {"liquid": "Liquid", "gas": "Gas", "steam": "Steam"}
+UNIT_STATE_MAPS = {
+    "liquid": {"temp": TEMPERATURE_UNITS, "pres": PRESSURE_UNITS, "flow": LIQUID_FLOW_UNITS},
+    "gas": {"temp": TEMPERATURE_UNITS, "pres": PRESSURE_UNITS, "flow": GAS_FLOW_UNITS},
+    "steam": {"temp": TEMPERATURE_UNITS, "pres": PRESSURE_UNITS, "flow": STEAM_FLOW_UNITS},
+}
 
 
-def _unit_key(label: str, unit_map: dict[str, str]) -> str:
+def _unit_key(unit: str, unit_map: dict[str, str]) -> str:
+    if unit in unit_map:
+        return unit
     reverse = {label_value: key for key, label_value in unit_map.items()}
-    return reverse[label]
+    return reverse[unit]
+
+
+def _absolute_pressure_unit(unit: str) -> str:
+    return {"bar_g": "bar_a", "psi_g": "psi_a"}.get(unit, unit)
+
+
+def _convert_state_value(key: str, kind: str, previous: str, new: str, **context: float) -> None:
+    value = st.session_state.get(key)
+    if value is None:
+        return
+    try:
+        st.session_state[key] = float(f"{convert_unit(kind, float(value), previous, new, **context):.6g}")
+    except (TypeError, ValueError) as exc:
+        st.warning(f"{key} birim donusumu yapilamadi: {exc}")
+
+
+def _convert_state_units(prefix: str, kind: str, previous: str, new: str) -> None:
+    if kind == "temp":
+        _convert_state_value(f"{prefix}_temp_c", "temperature", previous, new)
+        return
+    if kind == "pres":
+        _convert_state_value(f"{prefix}_p1", "pressure", previous, new)
+        _convert_state_value(f"{prefix}_p2", "pressure", previous, new)
+        if prefix == "liquid":
+            old_unit = _absolute_pressure_unit(previous)
+            new_unit = _absolute_pressure_unit(new)
+            if old_unit != new_unit:
+                _convert_state_value("liquid_pv", "pressure", old_unit, new_unit)
+                _convert_state_value("liquid_pc", "pressure", old_unit, new_unit)
+        return
+    unit_kind = {"liquid": "liquid_flow", "gas": "gas_flow", "steam": "steam_flow"}[prefix]
+    key = {"liquid": "liquid_flow_m3h", "gas": "gas_flow_nm3h", "steam": "steam_flow_kgh"}[prefix]
+    context: dict[str, float] = {}
+    if prefix == "liquid":
+        context["density_kg_m3"] = float(st.session_state.get("liquid_density", 998.0))
+    elif prefix == "gas" and ({"m3h", "kgh"} & {previous, new}):
+        pres_unit = _unit_key(st.session_state.get("gas_pres_unit", "bar_a"), PRESSURE_UNITS)
+        temp_unit = _unit_key(st.session_state.get("gas_temp_unit", "C"), TEMPERATURE_UNITS)
+        pressure = pressure_to_bar_a(float(st.session_state.get("gas_p1", 1.0)), pres_unit)
+        temperature = temperature_to_c(float(st.session_state.get("gas_temp_c", 15.0)), temp_unit)
+        summary = st.session_state.get("gas_summary")
+        z_factor = float(getattr(summary, "z", None) or 1.0)
+        molecular_weight = float(getattr(summary, "average_molecular_weight", None) or 28.97) / 1000.0
+        # shortcut: ideal-gas density with Z for kgh/m3h unit changes; upgrade to CoolProp density if composition accuracy matters.
+        density = pressure * 1e5 * molecular_weight / (max(z_factor, 1e-6) * 8.314462618 * (temperature + 273.15))
+        context.update(pressure_bar_a=pressure, temperature_c=temperature, z=z_factor, density_kg_m3=density)
+    _convert_state_value(key, unit_kind, previous, new, **context)
 
 
 def _unit_selectors(prefix: str, flow_units: dict[str, str]) -> tuple[str, str, str]:
@@ -98,11 +164,18 @@ def _unit_selectors(prefix: str, flow_units: dict[str, str]) -> tuple[str, str, 
     flow_label = u3.selectbox("Debi birimi", options=list(flow_units.values()), key=f"{prefix}_flow_unit")
     if _unit_key(pres_label, PRESSURE_UNITS).endswith("_g"):
         st.caption("Gauge basinc degerleri 1.01325 bar atmosfer basinciyla mutlak degere cevrilir.")
-    return (
-        _unit_key(temp_label, TEMPERATURE_UNITS),
-        _unit_key(pres_label, PRESSURE_UNITS),
-        _unit_key(flow_label, flow_units),
-    )
+    current = {
+        "temp": _unit_key(temp_label, TEMPERATURE_UNITS),
+        "pres": _unit_key(pres_label, PRESSURE_UNITS),
+        "flow": _unit_key(flow_label, flow_units),
+    }
+    for kind, unit in current.items():
+        previous_key = f"_unit_prev_{prefix}_{kind}"
+        previous = st.session_state.get(previous_key)
+        if previous is not None and previous != unit:
+            _convert_state_units(prefix, kind, previous, unit)
+        st.session_state[previous_key] = unit
+    return current["temp"], current["pres"], current["flow"]
 
 
 def tooltip_label(label: str, help_text: str, key: str | None = None) -> None:
@@ -157,6 +230,31 @@ def _init_state() -> None:
     st.session_state.setdefault("last_report", "")
     st.session_state.setdefault("last_fluid_summary", None)
     st.session_state.setdefault("result_history", [])
+
+
+def _apply_pending_project_load() -> None:
+    pending = st.session_state.pop("_pending_project_load", None)
+    if not pending:
+        return
+    data = dict(pending.get("data", {}))
+    for key, value in data.items():
+        if key in {"service", "vendor_key"} or key.endswith("_unit"):
+            continue
+        st.session_state[key] = value
+    if "vendor_key" in data:
+        st.session_state.vendor_key = data["vendor_key"]
+    service = str(pending.get("service") or data.get("service") or "liquid").lower()
+    if service in SERVICE_TITLES:
+        st.session_state.service = SERVICE_TITLES[service]
+        st.session_state.service_slider = SERVICE_LABELS[SERVICE_TITLES[service]]
+    for prefix, maps in UNIT_STATE_MAPS.items():
+        for kind, unit_map in maps.items():
+            key = f"{prefix}_{kind}_unit"
+            unit_key = _unit_key(data.get(key, st.session_state.get(key, DEFAULTS[key])), unit_map)
+            st.session_state[key] = unit_map[unit_key]
+            st.session_state[f"_unit_prev_{prefix}_{kind}"] = unit_key
+    st.session_state["_liquid_props_key"] = None
+    st.session_state["_project_loaded"] = True
 
 
 def _select_service(service: str) -> None:
@@ -640,15 +738,18 @@ def render_project_tools(service: str, payload: dict) -> None:
             file_name="control_valve_sizing_project.json",
             mime="application/json",
         )
+        if st.session_state.pop("_project_loaded", False):
+            st.sidebar.success("Proje yuklendi.")
         uploaded = st.file_uploader("Proje JSON yukle", type=["json"])
         if uploaded is not None:
-            try:
-                loaded = load_project_json(uploaded.getvalue().decode("utf-8"))
-                for key, value in loaded["data"].items():
-                    st.session_state[key] = value
-                st.sidebar.success("Proje verisi yuklendi. Gerekirse sayfayi yeniden hesaplayin.")
-            except Exception as exc:
-                st.sidebar.error(f"Yukleme hatasi: {exc}")
+            upload_id = getattr(uploaded, "file_id", None) or f"{uploaded.name}:{uploaded.size}"
+            if st.session_state.get("_project_upload_id") != upload_id:
+                st.session_state["_project_upload_id"] = upload_id
+                try:
+                    st.session_state["_pending_project_load"] = load_project_json(uploaded.getvalue().decode("utf-8"))
+                    st.rerun()
+                except Exception as exc:
+                    st.sidebar.error(f"Yukleme hatasi: {exc}")
 
 
 def render_report_tools() -> None:
@@ -754,6 +855,8 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     temp_unit, pres_unit, flow_unit = _unit_selectors("liquid", LIQUID_FLOW_UNITS)
     temp_label = TEMPERATURE_UNITS[temp_unit]
     pres_label = PRESSURE_UNITS[pres_unit]
+    pv_unit = _absolute_pressure_unit(pres_unit)
+    pv_label = PRESSURE_UNITS[pv_unit]
     flow_label = LIQUID_FLOW_UNITS[flow_unit]
 
     # Fluid Properties Section
@@ -770,17 +873,25 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
         pv_default = st.session_state.liquid_pv
         pc_default = st.session_state.liquid_pc
         mu_default = st.session_state.liquid_mu
+        pv_display_default = float(st.session_state.liquid_pv)
+        pc_display_default = float(st.session_state.liquid_pc)
         fluid_label: str = "Custom liquid"
+        auto_key = None
 
         if source == "Preset":
             preset_map = {v["label"]: k for k, v in LIQUID_PRESETS.items()}
             label = st.selectbox("Preset", list(preset_map.keys()), key="liquid_preset_label")
-            preset = get_liquid_preset(preset_map[label])
+            preset = evaluate_liquid_preset(preset_map[label], inlet_pressure, temperature_c)
+            if preset.get("warning"):
+                st.warning(preset["warning"])
             density_default = preset["density_kg_m3"]
             pv_default = preset["vapor_pressure_bar_a"]
             pc_default = preset["critical_pressure_bar_a"]
             mu_default = preset["viscosity_pa_s"]
+            pv_display_default = pressure_from_bar_a(pv_default, pv_unit)
+            pc_display_default = pressure_from_bar_a(pc_default, pv_unit)
             fluid_label = str(label)
+            auto_key = ("Preset", fluid_label, pres_unit, round(inlet_pressure, 6), round(temperature_c, 6))
         elif source == "CoolProp pure fluid":
             fluid = st.selectbox("CoolProp fluid", list_coolprop_fluids(), index=list_coolprop_fluids().index("Water"))
             fluid_label = fluid
@@ -790,23 +901,35 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
                 pv_default = props["vapor_pressure_bar_a"]
                 pc_default = props["critical_pressure_bar_a"]
                 mu_default = props["viscosity_pa_s"]
+                pv_display_default = pressure_from_bar_a(pv_default, pv_unit)
+                pc_display_default = pressure_from_bar_a(pc_default, pv_unit)
+                auto_key = ("CoolProp", fluid, pres_unit, round(inlet_pressure, 6), round(temperature_c, 6))
                 st.caption(
-                    f"Oto ozellikler: rho={density_default:.2f} kg/m3, Pv={pressure_from_bar_a(pv_default, pres_unit):.4f} {pres_label}, "
-                    f"Pc={pressure_from_bar_a(pc_default, pres_unit):.3f} {pres_label}, mu={mu_default:.6g} Pa.s"
+                    f"Oto ozellikler: rho={density_default:.2f} kg/m3, Pv={pressure_from_bar_a(pv_default, pv_unit):.4f} {pv_label}, "
+                    f"Pc={pressure_from_bar_a(pc_default, pv_unit):.3f} {pv_label}, mu={mu_default:.6g} Pa.s"
                 )
             except Exception as exc:
                 st.warning(f"CoolProp ozellikleri okunamadi: {exc}")
+
+        if auto_key and st.session_state.get("_liquid_props_key") != auto_key:
+            st.session_state["liquid_density"] = float(density_default)
+            st.session_state["liquid_pv"] = float(pv_display_default)
+            st.session_state["liquid_pc"] = float(pc_display_default)
+            st.session_state["liquid_mu"] = float(mu_default)
+            st.session_state["_liquid_props_key"] = auto_key
+        elif not auto_key:
+            st.session_state["_liquid_props_key"] = None
 
         c3, c4, c5, c6 = st.columns(4)
         tooltip_label("Yogunluk", "Akiskan yo gunlugu. Mass flow'dan hacimsel debi hesaplamada kullanilir.")
         density = c3.number_input("Yogunluk [kg/m3]", value=float(density_default), key="liquid_density", min_value=0.001, step=1.0)
         tooltip_label("Buhar Basinci", "Akiskan o anki sicakliktaki buhar basinci. Kavitasyon ve flashing riski hesaplamada kullanilir.")
         vapor_pressure = pressure_to_bar_a(
-            c4.number_input(f"Buhar basinci [{pres_label}]", value=float(pv_default), key="liquid_pv", min_value=0.0, step=0.01), pres_unit
+            c4.number_input(f"Buhar basinci [{pv_label}]", value=pv_display_default, key="liquid_pv", min_value=0.0, step=0.01), pv_unit
         )
         tooltip_label("Kritik Basinci", "Akiskan kritik noktasindaki basinc. Critical properties hesaplamada kullanilir.")
         critical_pressure = pressure_to_bar_a(
-            c5.number_input(f"Kritik basinc [{pres_label}]", value=float(pc_default), key="liquid_pc", min_value=0.001, step=0.1), pres_unit
+            c5.number_input(f"Kritik basinc [{pv_label}]", value=pc_display_default, key="liquid_pc", min_value=0.001, step=0.1), pv_unit
         )
         tooltip_label("Viskozite", "Akismanin ici surukleme katsayisi. Reynolds sayisi ve laminar akis kontrolunde kullanilir.")
         viscosity = c6.number_input("Viskozite [Pa.s]", value=float(mu_default), key="liquid_mu", min_value=1e-7, step=0.0001, format="%.7f")
@@ -837,8 +960,8 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
         "Fluid": fluid_label,
         f"Temperature [{temp_label}]": f"{temperature_from_c(temperature_c, temp_unit):.3f}",
         "Density [kg/m3]": f"{density:.4f}",
-        f"Pv [{pres_label}]": f"{pressure_from_bar_a(vapor_pressure, pres_unit):.5f}",
-        f"Pc [{pres_label}]": f"{pressure_from_bar_a(critical_pressure, pres_unit):.5f}",
+        f"Pv [{pv_label}]": f"{pressure_from_bar_a(vapor_pressure, pv_unit):.5f}",
+        f"Pc [{pv_label}]": f"{pressure_from_bar_a(critical_pressure, pv_unit):.5f}",
         "Viscosity [Pa.s]": f"{viscosity:.7g}",
     }
 
@@ -871,7 +994,7 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
                 sigma=float(sigma_val),
                 delta_p_bar=inlet_pressure - outlet_pressure,
                 p1_bar_a=inlet_pressure,
-                pv_bar_a=float(st.session_state.liquid_pv),
+                pv_bar_a=vapor_pressure,
             )
             with st.expander("Kavitasyon & Ağır Hizmet Trim Analizi (ISA-RP75.23)", expanded=False):
                 c_c1, c_c2, c_c3 = st.columns(3)
@@ -894,9 +1017,13 @@ def render_liquid_section(vendor_key: str) -> tuple[dict | None, dict]:
     return (st.session_state.last_result if valid else None), fluid_summary
 
 
+def _gas_component_options() -> list[str]:
+    return gas_component_options()
+
+
 def validate_gas_composition():
     total_pct = 0.0
-    gas_options = set(list_coolprop_fluids())
+    gas_options = set(_gas_component_options())
     valid = True
     for row in st.session_state.gas_rows:
         component = str(row.get("component", "")).strip()
@@ -906,10 +1033,10 @@ def validate_gas_composition():
         except (TypeError, ValueError):
             valid = False
             continue
-        if component not in gas_options or fraction < 0.0:
+        if component not in gas_options or fraction < 0.0 or not math.isfinite(fraction):
             valid = False
         total_pct += fraction
-    if abs(total_pct - 100.0) > 1e-6:
+    if not math.isfinite(total_pct) or abs(total_pct - 100.0) > 1e-6:
         valid = False
     st.session_state.gas_valid = valid
 
@@ -923,6 +1050,12 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
     flow_label = GAS_FLOW_UNITS[flow_unit]
     # Gas Process Data Section
     with st.expander("Gaz Ozellikleri", expanded=True):
+        gas_model = st.selectbox(
+            "Gaz modeli",
+            options=["real", "auto", "ideal"],
+            format_func=lambda value: {"real": "Gerçek gaz (HEOS)", "auto": "Gerçek gaz (mümkünse)", "ideal": "İdeal gaz"}[value],
+            key="gas_model",
+        )
         c1, c2, c3, c4 = st.columns(4)
         basis = c1.radio("Kompozisyon bazisi", ["molar", "mass"], key="gas_basis", horizontal=True)
         tooltip_label("Sicaklik", "Gaz akiskan giris sicakligi. Z faktoru ve density hesaplamada kullanilir.")
@@ -940,15 +1073,14 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
 
     # Gas Composition Section
     with st.expander("Gaz Kompozisyonu", expanded=True):
-        gas_options = list_coolprop_fluids()
+        gas_options = _gas_component_options()
         gas_preset_options = GAS_PRESET_NAMES + ["Özel (Custom)"]
-        if "gas_preset" not in st.session_state:
-            st.session_state.gas_preset = "Özel (Custom)"
-
         def _on_gas_preset_change() -> None:
             name = st.session_state.get("gas_preset", "")
             if name in GAS_PRESETS:
                 st.session_state.gas_rows = [dict(r) for r in GAS_PRESETS[name]["components"]]
+                st.session_state["_gas_editor_version"] = st.session_state.get("_gas_editor_version", 0) + 1
+                validate_gas_composition()
 
         st.selectbox("Gaz preset", gas_preset_options, key="gas_preset", on_change=_on_gas_preset_change)
         gas_df = pd.DataFrame(st.session_state.gas_rows)
@@ -959,17 +1091,32 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
                 "component": st.column_config.SelectboxColumn("Bilesen", options=gas_options, required=True),
                 "fraction_pct": st.column_config.NumberColumn("Yuzde [%]", min_value=0.0, max_value=100.0, step=0.1, format="%.4f"),
             },
-            key=f"gas_editor_{st.session_state.get('gas_preset', '')}",
-            on_change=validate_gas_composition,
+            key=f"gas_editor_{st.session_state.get('gas_preset', '')}_{st.session_state.get('_gas_editor_version', 0)}",
         )
         st.session_state.gas_rows = edited.to_dict("records")
+        validate_gas_composition()
 
         # Real-time validation display
         total_pct = float(edited["fraction_pct"].fillna(0.0).sum()) if "fraction_pct" in edited else 0.0
         if abs(total_pct - 100.0) < 1e-6:
             st.markdown(f'<p class="success-msg">Toplam kompozisyon: {total_pct:.4f}%</p>', unsafe_allow_html=True)
+        elif total_pct > 0.0 and math.isfinite(total_pct):
+            st.markdown(
+                f'<p class="error-msg">Toplam kompozisyon %{total_pct:.3f}; 100% için normalize edilebilir.</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button("100'e normalize et", key="gas_normalize"):
+                normalized = [
+                    {"component": row["component"], "fraction_pct": float(row["fraction_pct"]) / total_pct * 100.0}
+                    for row in st.session_state.gas_rows
+                    if float(row["fraction_pct"]) > 0.0
+                ]
+                st.session_state.gas_rows = normalized
+                st.session_state["_gas_editor_version"] = st.session_state.get("_gas_editor_version", 0) + 1
+                validate_gas_composition()
+                st.rerun()
         else:
-            st.markdown(f'<p class="error-msg">Toplam kompozisyon 100% olmalı. Mevcut toplam: {total_pct:.4f}%</p>', unsafe_allow_html=True)
+            st.markdown('<p class="error-msg">Toplam kompozisyon sıfırdan büyük olmalı.</p>', unsafe_allow_html=True)
 
     vendor = get_vendor_definition(vendor_key)
     st.caption(f"Vendor representative data: {vendor.vendor} / {vendor.style}, xT={vendor.xt}, Fd={vendor.fd}")
@@ -988,7 +1135,7 @@ def render_gas_section(vendor_key: str) -> tuple[dict | None, dict | None]:
         st.session_state.last_result = None
     else:
         try:
-            summary = evaluate_gas_mixture(st.session_state.gas_rows, basis, inlet_pressure, temperature_c)
+            summary = evaluate_gas_mixture(st.session_state.gas_rows, basis, inlet_pressure, temperature_c, gas_model)
             st.session_state.gas_summary = summary
             flow_nm3h = gas_flow_to_nm3h(
                 flow_value,
@@ -1439,6 +1586,12 @@ def main() -> None:
         st.session_state.last_report = ""
         st.session_state.last_fluid_summary = None
         st.session_state.result_history = []
+        for prefix in ("liquid", "gas", "steam"):
+            for kind in ("temp", "pres", "flow"):
+                st.session_state.pop(f"_unit_prev_{prefix}_{kind}", None)
+        st.session_state.pop("_pending_project_load", None)
+
+    _apply_pending_project_load()
 
     st.title("Control Valve Sizing")
     st.caption("Kaynakli Streamlit arayuzu: liquid, gas ve steam servisleri icin IEC/ISA'ya yaklastirilmis sizing uygulamasi.")
@@ -1511,26 +1664,28 @@ def main() -> None:
         "liquid_mu": st.session_state.liquid_mu,
         "liquid_pipe_in_mm": st.session_state.liquid_pipe_in_mm,
         "liquid_pipe_out_mm": st.session_state.liquid_pipe_out_mm,
-        "liquid_temp_unit": st.session_state.liquid_temp_unit,
-        "liquid_pres_unit": st.session_state.liquid_pres_unit,
-        "liquid_flow_unit": st.session_state.liquid_flow_unit,
+        "liquid_temp_unit": _unit_key(st.session_state.liquid_temp_unit, TEMPERATURE_UNITS),
+        "liquid_pres_unit": _unit_key(st.session_state.liquid_pres_unit, PRESSURE_UNITS),
+        "liquid_flow_unit": _unit_key(st.session_state.liquid_flow_unit, LIQUID_FLOW_UNITS),
         "gas_basis": st.session_state.gas_basis,
+        "gas_preset": st.session_state.gas_preset,
+        "gas_model": st.session_state.gas_model,
         "gas_temp_c": st.session_state.gas_temp_c,
         "gas_p1": st.session_state.gas_p1,
         "gas_p2": st.session_state.gas_p2,
         "gas_flow_nm3h": st.session_state.gas_flow_nm3h,
         "gas_pipe_in_mm": st.session_state.gas_pipe_in_mm,
         "gas_pipe_out_mm": st.session_state.gas_pipe_out_mm,
-        "gas_temp_unit": st.session_state.gas_temp_unit,
-        "gas_pres_unit": st.session_state.gas_pres_unit,
-        "gas_flow_unit": st.session_state.gas_flow_unit,
+        "gas_temp_unit": _unit_key(st.session_state.gas_temp_unit, TEMPERATURE_UNITS),
+        "gas_pres_unit": _unit_key(st.session_state.gas_pres_unit, PRESSURE_UNITS),
+        "gas_flow_unit": _unit_key(st.session_state.gas_flow_unit, GAS_FLOW_UNITS),
         "steam_flow_kgh": st.session_state.steam_flow_kgh,
         "steam_temp_c": st.session_state.steam_temp_c,
         "steam_p1": st.session_state.steam_p1,
         "steam_p2": st.session_state.steam_p2,
-        "steam_temp_unit": st.session_state.steam_temp_unit,
-        "steam_pres_unit": st.session_state.steam_pres_unit,
-        "steam_flow_unit": st.session_state.steam_flow_unit,
+        "steam_temp_unit": _unit_key(st.session_state.steam_temp_unit, TEMPERATURE_UNITS),
+        "steam_pres_unit": _unit_key(st.session_state.steam_pres_unit, PRESSURE_UNITS),
+        "steam_flow_unit": _unit_key(st.session_state.steam_flow_unit, STEAM_FLOW_UNITS),
     }
     render_project_tools(st.session_state.service, payload)
 
@@ -1564,43 +1719,88 @@ def main() -> None:
         def_flow = float(st.session_state.get(flow_key, 100.0))
         def_p1 = float(st.session_state.get(f"{cur_serv}_p1", 8.0))
         def_p2 = float(st.session_state.get(f"{cur_serv}_p2", 5.0))
+        flow_units = LIQUID_FLOW_UNITS if cur_serv == "liquid" else GAS_FLOW_UNITS if cur_serv == "gas" else STEAM_FLOW_UNITS
+        flow_unit = _unit_key(st.session_state[f"{cur_serv}_flow_unit"], flow_units)
+        pres_unit = _unit_key(st.session_state[f"{cur_serv}_pres_unit"], PRESSURE_UNITS)
+        temp_unit = _unit_key(st.session_state[f"{cur_serv}_temp_unit"], TEMPERATURE_UNITS)
+        flow_label = flow_units[flow_unit]
+        pres_label = PRESSURE_UNITS[pres_unit]
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
             st.markdown("**Minimum Durum (Startup / Min)**")
-            mc_min_q = st.number_input("Min Debi", value=max(def_flow * 0.4, 0.1), key="mc_min_q")
-            mc_min_p1 = st.number_input("Min P1 [bar]", value=def_p1, key="mc_min_p1")
-            mc_min_p2 = st.number_input("Min P2 [bar]", value=def_p2, key="mc_min_p2")
+            mc_min_q = st.number_input(f"Min Debi [{flow_label}]", value=max(def_flow * 0.4, 0.1), key="mc_min_q")
+            mc_min_p1 = st.number_input(f"Min P1 [{pres_label}]", value=def_p1, key="mc_min_p1")
+            mc_min_p2 = st.number_input(f"Min P2 [{pres_label}]", value=def_p2, key="mc_min_p2")
         with mc2:
             st.markdown("**Normal Durum (Duty Point)**")
-            mc_norm_q = st.number_input("Normal Debi", value=max(def_flow, 0.1), key="mc_norm_q")
-            mc_norm_p1 = st.number_input("Normal P1 [bar]", value=def_p1, key="mc_norm_p1")
-            mc_norm_p2 = st.number_input("Normal P2 [bar]", value=def_p2, key="mc_norm_p2")
+            mc_norm_q = st.number_input(f"Normal Debi [{flow_label}]", value=max(def_flow, 0.1), key="mc_norm_q")
+            mc_norm_p1 = st.number_input(f"Normal P1 [{pres_label}]", value=def_p1, key="mc_norm_p1")
+            mc_norm_p2 = st.number_input(f"Normal P2 [{pres_label}]", value=def_p2, key="mc_norm_p2")
         with mc3:
             st.markdown("**Maksimum Durum (Design / Max)**")
-            mc_max_q = st.number_input("Max Debi", value=max(def_flow * 1.3, 0.1), key="mc_max_q")
-            mc_max_p1 = st.number_input("Max P1 [bar]", value=max(def_p1 * 0.95, 0.1), key="mc_max_p1")
-            mc_max_p2 = st.number_input("Max P2 [bar]", value=def_p2, key="mc_max_p2")
+            mc_max_q = st.number_input(f"Max Debi [{flow_label}]", value=max(def_flow * 1.3, 0.1), key="mc_max_q")
+            mc_max_p1 = st.number_input(f"Max P1 [{pres_label}]", value=max(def_p1 * 0.95, 0.1), key="mc_max_p1")
+            mc_max_p2 = st.number_input(f"Max P2 [{pres_label}]", value=def_p2, key="mc_max_p2")
 
         if st.button("Coklu Durum Boyutlandirma Analizi Yap"):
             from multi_case import OperatingCase, size_multicase
 
-            temp_c = float(st.session_state.get(f"{cur_serv}_temp_c", 25.0))
+            temp_c = temperature_to_c(float(st.session_state.get(f"{cur_serv}_temp_c", 25.0)), temp_unit)
+            gas_s = getattr(st.session_state, "gas_summary", None)
+
+            def _case(name: str, flow: float, p1: float, p2: float) -> OperatingCase:
+                p1_bar_a = pressure_to_bar_a(p1, pres_unit)
+                p2_bar_a = pressure_to_bar_a(p2, pres_unit)
+                if cur_serv == "liquid":
+                    flow_engine = liquid_flow_to_m3h(flow, flow_unit, density_kg_m3=st.session_state.liquid_density)
+                elif cur_serv == "gas":
+                    case_summary: Any = gas_s
+                    try:
+                        case_summary = evaluate_gas_mixture(
+                            st.session_state.gas_rows,
+                            st.session_state.gas_basis,
+                            p1_bar_a,
+                            temp_c,
+                            st.session_state.gas_model,
+                        )
+                    except Exception:
+                        case_summary = gas_s
+                    flow_engine = gas_flow_to_nm3h(
+                        flow,
+                        flow_unit,
+                        pressure_bar_a=p1_bar_a,
+                        temperature_c=temp_c,
+                        z=(case_summary.z if case_summary and case_summary.z else 1.0),
+                        density_kg_m3=case_summary.density_kg_m3 if case_summary else None,
+                    )
+                else:
+                    flow_engine = steam_flow_to_kgh(flow, flow_unit)
+                extra_props: dict[str, Any] = {}
+                if cur_serv == "gas" and case_summary:
+                    extra_props = {
+                        "molecular_weight": case_summary.average_molecular_weight,
+                        "specific_heat_ratio": case_summary.specific_heat_ratio or 1.30,
+                        "viscosity_pa_s": case_summary.viscosity_pa_s or 1.8e-5,
+                        "z": case_summary.z or 1.0,
+                    }
+                return OperatingCase(name, flow_engine, p1_bar_a, p2_bar_a, temp_c, extra_props=extra_props)
+
             cases = [
-                OperatingCase("Min", mc_min_q, mc_min_p1, mc_min_p2, temp_c),
-                OperatingCase("Normal", mc_norm_q, mc_norm_p1, mc_norm_p2, temp_c),
-                OperatingCase("Max", mc_max_q, mc_max_p1, mc_max_p2, temp_c),
+                _case("Min", mc_min_q, mc_min_p1, mc_min_p2),
+                _case("Normal", mc_norm_q, mc_norm_p1, mc_norm_p2),
+                _case("Max", mc_max_q, mc_max_p1, mc_max_p2),
             ]
             mc_fluid_data: dict[str, Any] = {}
             if cur_serv == "liquid":
+                pv_unit = _absolute_pressure_unit(pres_unit)
                 mc_fluid_data = {
                     "density_kg_m3": st.session_state.liquid_density,
-                    "vapor_pressure_bar_a": st.session_state.liquid_pv,
-                    "critical_pressure_bar_a": st.session_state.liquid_pc,
+                    "vapor_pressure_bar_a": pressure_to_bar_a(st.session_state.liquid_pv, pv_unit),
+                    "critical_pressure_bar_a": pressure_to_bar_a(st.session_state.liquid_pc, pv_unit),
                     "viscosity_pa_s": st.session_state.liquid_mu,
                 }
             elif cur_serv == "gas":
-                gas_s = getattr(st.session_state, "gas_summary", None)
                 if gas_s:
                     mc_fluid_data = {
                         "molecular_weight": gas_s.average_molecular_weight,
@@ -1677,9 +1877,10 @@ def main() -> None:
 
         cur_s = st.session_state.service.lower()
         if cur_s == "liquid":
-            def_p1 = float(st.session_state.liquid_p1)
-            def_p2 = float(st.session_state.liquid_p2)
-            def_pv = float(st.session_state.liquid_pv)
+            pres_unit = _unit_key(st.session_state.liquid_pres_unit, PRESSURE_UNITS)
+            def_p1 = pressure_to_bar_a(float(st.session_state.liquid_p1), pres_unit)
+            def_p2 = pressure_to_bar_a(float(st.session_state.liquid_p2), pres_unit)
+            def_pv = pressure_to_bar_a(float(st.session_state.liquid_pv), _absolute_pressure_unit(pres_unit))
         else:
             def_p1 = 50.0
             def_p2 = 10.0
