@@ -47,7 +47,7 @@ from valve_sizing import (
     size_steam_valve,
     z_sensitivity_gas,
 )
-from vendor_catalog import get_vendor_definition, get_vendor_options
+from vendor_catalog import find_catalog_matches, get_vendor_definition, get_vendor_options
 
 DEFAULTS = {
     "service": "Liquid",
@@ -497,6 +497,60 @@ def render_result(result: SizingResult) -> None:
             st.write(f"- Onerilen fail-safe: {spec['fail_safe_recommended']}")
 
     char_type = st.session_state.get("flow_characteristic", "equal_percentage")
+    req_cv = float(result.get("required_cv", 0.0))
+    if req_cv > 0:
+        with st.expander("🌐 Global Vana Üreticileri & Model Eşleştirme (Vendor Match)", expanded=True):
+            st.markdown(
+                f"**Gerekli $C_v$:** `{req_cv:.2f}` | **Akış Karakteristiği:** `{char_type}` — "
+                "Tüm üretici kataloglarındaki alternatif vanalar taranıyor."
+            )
+            col_reg, col_stat = st.columns([1, 1])
+            with col_reg:
+                sel_region = st.selectbox(
+                    "Bölge Filtresi",
+                    ["Tümü", "USA", "Europe", "Asia"],
+                    index=0,
+                    key=f"sel_reg_{result['service']}",
+                )
+            with col_stat:
+                only_ideal = st.checkbox(
+                    "Yalnızca İdeal Açıklık (%20 - %80)",
+                    value=True,
+                    key=f"cb_ideal_{result['service']}",
+                )
+
+            reg_param = None if sel_region == "Tümü" else sel_region
+            matches = find_catalog_matches(
+                required_cv=req_cv,
+                design_margin_pct=float(st.session_state.get("design_margin", 10.0)),
+                flow_characteristic=char_type,
+                region_filter=reg_param,
+            )
+            if only_ideal:
+                matches = [m for m in matches if m.status == "ideal"]
+
+            if matches:
+                match_data = [
+                    {
+                        "Üretici": m.vendor_name,
+                        "Bölge": m.region,
+                        "Model / Seri": f"{m.family} ({m.style})",
+                        "Çap": f"DN{m.dn_mm} ({m.dn_inch})",
+                        "Nominal Cv": m.rated_cv,
+                        "Hesaplanan Açıklık": f"%{m.opening_pct:.1f}",
+                        "Durum": m.status_label,
+                        "Basınç / Kaçak Sınıfı": f"{m.pressure_class} / Class {m.leakage_class}",
+                    }
+                    for m in matches
+                ]
+                st.dataframe(pd.DataFrame(match_data), hide_index=True, use_container_width=True)
+                st.caption(
+                    f"Toplam {len(matches)} uygun model listelendi. "
+                    "Sıralama: En ideal kontrol açıklığına (~%65) en yakın modeller başta gösterilir."
+                )
+            else:
+                st.info("Seçilen filtre kriterlerine uygun model bulunamadı.")
+
     curve = generate_characteristic_curve(
         rated_cv=float(result["rated_cv"]),
         required_cv=float(result["required_cv"]),
@@ -628,49 +682,54 @@ def render_result(result: SizingResult) -> None:
             st.markdown("### 3D Vana Karakteristik Eğrisi")
             st.markdown("Bu 3D yüzey, vananın açıklık ve tasarım marjına göre gerekli Cv değerlerinin değişimini gösterir.")
 
-            openings, margins, z_matrix = _cv_margin_surface(
-                float(result["required_cv"]),
-                float(result.get("p1", 8.0)),
-                float(result.get("p2", 5.0)),
-                float(result.get("extra", {}).get("density", 998.0)),
-                float(result.get("extra", {}).get("vapor_pressure_bar_a", 0.023)),
-                float(result.get("extra", {}).get("critical_pressure_bar_a", 220.64)),
-                float(result.get("extra", {}).get("viscosity_pa_s", 0.00089)),
-                float(result.get("extra", {}).get("fl", 0.85)),
-                float(result.get("extra", {}).get("fd", 1.0)),
-                float(result.get("extra", {}).get("pipe_inlet_diameter_mm", 50.0)),
-                float(result.get("extra", {}).get("pipe_outlet_diameter_mm", 50.0)),
-                char_type,
-            )
+            if st.checkbox("3D Cv Marj Yüzeyini Hesapla ve Göster", value=False, key="cb_show_3d_cv_surface"):
+                openings, margins, z_matrix = _cv_margin_surface(
+                    float(result["required_cv"]),
+                    float(result.get("p1", 8.0)),
+                    float(result.get("p2", 5.0)),
+                    float(result.get("extra", {}).get("density", 998.0)),
+                    float(result.get("extra", {}).get("vapor_pressure_bar_a", 0.023)),
+                    float(result.get("extra", {}).get("critical_pressure_bar_a", 220.64)),
+                    float(result.get("extra", {}).get("viscosity_pa_s", 0.00089)),
+                    float(result.get("extra", {}).get("fl", 0.85)),
+                    float(result.get("extra", {}).get("fd", 1.0)),
+                    float(result.get("extra", {}).get("pipe_inlet_diameter_mm", 50.0)),
+                    float(result.get("extra", {}).get("pipe_outlet_diameter_mm", 50.0)),
+                    char_type,
+                )
 
-            fig_3d = go.Figure(data=[go.Surface(
-                z=z_matrix,
-                x=openings,
-                y=[f"{m*100:.0f}%" for m in margins],
-                colorscale="Viridis",
-                colorbar=dict(title="Gerekli Cv"),
-            )])
+                fig_3d = go.Figure(data=[go.Surface(
+                    z=z_matrix,
+                    x=openings,
+                    y=[f"{m*100:.0f}%" for m in margins],
+                    colorscale="Viridis",
+                    colorbar=dict(title="Gerekli Cv"),
+                )])
 
-            fig_3d.update_layout(
-                title="Gerekli Cv - Açıklık vs Tasarım Marjı 3D Yüzeyi",
-                scene=dict(
-                    xaxis_title="Açıklık [%]",
-                    yaxis_title="Tasarım Marjı [%]",
-                    zaxis_title="Gerekli Cv",
-                ),
-                height=600,
-                margin=dict(l=0, r=0, t=40, b=0),
-            )
+                fig_3d.update_layout(
+                    title="Gerekli Cv - Açıklık vs Tasarım Marjı 3D Yüzeyi",
+                    scene=dict(
+                        xaxis_title="Açıklık [%]",
+                        yaxis_title="Tasarım Marjı [%]",
+                        zaxis_title="Gerekli Cv",
+                    ),
+                    height=600,
+                    margin=dict(l=0, r=0, t=40, b=0),
+                )
 
-            st.plotly_chart(fig_3d, use_container_width=True)
-
-            st.caption("3D yüzey, vananın açıklık ve tasarım marjına bağlı olarak gerekli Cv değerlerinin nasıl değiştiğini gösterir.")
+                st.plotly_chart(fig_3d, use_container_width=True)
+                st.caption("3D yüzey, vananın açıklık ve tasarım marjına bağlı olarak gerekli Cv değerlerinin nasıl değiştiğini gösterir.")
+            else:
+                st.info("💡 Hesaplama hızını korumak için 3D yüzey isteğe bağlı yüklenir. Görüntülemek için onay kutusunu işaretleyin.")
 
         with tab_model:
             from valve_3d import build_valve_figure
 
             st.caption("Seçilen vana boyutuna (DN) göre parametrik gövde, flanş, bonnet, mil ve el çarkı modeli (sematik).")
-            st.plotly_chart(build_valve_figure(float(result["valve_dn_mm"])), use_container_width=True)
+            if st.checkbox("3D Vana Modelini Yükle", value=False, key="cb_show_3d_valve_model"):
+                st.plotly_chart(build_valve_figure(float(result["valve_dn_mm"])), use_container_width=True)
+            else:
+                st.info("💡 3D WebGL vana modeli isteğe bağlı yüklenir.")
 
     with st.expander("3D Tesisat Karakteristigi (Vana Otoritesi Etkisi)", expanded=False):
         from valve_curve import calc_installed_flow_ratio, cv_at_opening
@@ -680,26 +739,29 @@ def render_result(result: SizingResult) -> None:
         if rated_3d <= 0:
             st.write("-")
         else:
-            openings = list(range(0, 101, 5))
-            authorities = [round(0.05 + 0.05 * i, 2) for i in range(20)]
-            surface = [
-                [calc_installed_flow_ratio(cv_at_opening(float(pct), rated_3d, char_3d) / rated_3d, pr) * 100.0 for pct in openings]
-                for pr in authorities
-            ]
-            fig3d = go.Figure(go.Surface(x=openings, y=authorities, z=surface, colorscale="Viridis",
-                                         colorbar={"title": "Q/Qmax [%]"}))
-            op_pr = float(st.session_state.get(f"pr_slider_{result['service']}", 0.5))
-            op_pct = min(float(result["opening_percent"]), 100.0)
-            op_flow = calc_installed_flow_ratio(cv_at_opening(op_pct, rated_3d, char_3d) / rated_3d, op_pr) * 100.0
-            fig3d.add_trace(go.Scatter3d(x=[op_pct], y=[op_pr], z=[op_flow], mode="markers",
-                                         marker={"size": 5, "color": "red"}, name="Calisma noktasi"))
-            fig3d.update_layout(
-                scene={"xaxis_title": "Aciklik [%]", "yaxis_title": "Vana Otoritesi PR",
-                       "zaxis_title": "Kurulu Debi Q/Qmax [%]"},
-                margin={"l": 0, "r": 0, "t": 10, "b": 0}, height=480,
-            )
-            st.plotly_chart(fig3d, use_container_width=True)
-            st.caption("Yuzey, vana otoritesi PR degistikce kurulu debi karakteristiginin nasil bozuldugunu gosterir (IEC 60534-2-4).")
+            if st.checkbox("3D Tesisat Otoritesi Yüzeyini Hesapla", value=False, key="cb_show_3d_inst_surface"):
+                openings = list(range(0, 101, 5))
+                authorities = [round(0.05 + 0.05 * i, 2) for i in range(20)]
+                surface = [
+                    [calc_installed_flow_ratio(cv_at_opening(float(pct), rated_3d, char_3d) / rated_3d, pr) * 100.0 for pct in openings]
+                    for pr in authorities
+                ]
+                fig3d = go.Figure(go.Surface(x=openings, y=authorities, z=surface, colorscale="Viridis",
+                                             colorbar={"title": "Q/Qmax [%]"}))
+                op_pr = float(st.session_state.get(f"pr_slider_{result['service']}", 0.5))
+                op_pct = min(float(result["opening_percent"]), 100.0)
+                op_flow = calc_installed_flow_ratio(cv_at_opening(op_pct, rated_3d, char_3d) / rated_3d, op_pr) * 100.0
+                fig3d.add_trace(go.Scatter3d(x=[op_pct], y=[op_pr], z=[op_flow], mode="markers",
+                                             marker={"size": 5, "color": "red"}, name="Calisma noktasi"))
+                fig3d.update_layout(
+                    scene={"xaxis_title": "Aciklik [%]", "yaxis_title": "Vana Otoritesi PR",
+                           "zaxis_title": "Kurulu Debi Q/Qmax [%]"},
+                    margin={"l": 0, "r": 0, "t": 10, "b": 0}, height=480,
+                )
+                st.plotly_chart(fig3d, use_container_width=True)
+                st.caption("Yuzey, vana otoritesi PR degistikce kurulu debi karakteristiginin nasil bozuldugunu gosterir (IEC 60534-2-4).")
+            else:
+                st.info("💡 420-noktalı 3D otorite matrisi hesaplamasını başlatmak için onay kutusunu işaretleyin.")
 
     if result.get("warning"):
         st.warning(result["warning"])

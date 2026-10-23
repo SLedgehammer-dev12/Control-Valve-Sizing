@@ -133,3 +133,13 @@ class TestFlashingCvEstimate:
 
         cv = flashing_cv_estimate(20.0, 0.5, 1000.0, -1.0)
         assert cv == 20.0
+
+
+class TestCavitationRecoveryScaling:
+    def test_rotary_valve_cavitates_earlier(self):
+        # Sigma = 1.2: safe for globe valve (FL=0.90) but cavitating for rotary valve (FL=0.55)
+        globe_sev = cavitation_severity(1.2, fl=0.90)
+        rotary_sev = cavitation_severity(1.2, fl=0.55)
+        assert globe_sev == "Kavitasyon yok"
+        assert rotary_sev in {"Orta kavitasyon", "Siddetli kavitasyon"}
+

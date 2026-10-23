@@ -1314,3 +1314,26 @@ def test_prepare_composition_rows_normalizes_and_rejects_bad_rows():
     ):
         with pytest.raises(ValueError):
             prepare_composition_rows(bad)
+
+
+def test_liquid_sizing_fr_and_reducer_dp_max():
+    from valve_sizing import LiquidSizingInput, size_liquid_valve
+
+    inp = LiquidSizingInput(
+        flow_m3h=50.0,
+        inlet_pressure_bar_a=10.0,
+        outlet_pressure_bar_a=6.0,
+        density_kg_m3=1000.0,
+        vapor_pressure_bar_a=0.023,
+        critical_pressure_bar_a=220.64,
+        viscosity_pa_s=0.001,
+        fl=0.90,
+        pipe_inlet_diameter_mm=100.0,
+        pipe_outlet_diameter_mm=100.0,
+    )
+    res = size_liquid_valve(inp)
+    assert "fr" in res
+    assert res["fr"] > 0
+    assert "FR" in res["intermediate_values"]
+    assert res["dp_choked_bar"] > 0
+

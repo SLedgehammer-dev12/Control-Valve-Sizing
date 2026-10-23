@@ -6,6 +6,7 @@ IEC 60534, ASME B16.34, and ISO 15848-1 standards in Markdown and HTML/Excel for
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -302,8 +303,10 @@ def generate_isa20_markdown(sheet: ISA20Datasheet) -> str:
 
 def generate_isa20_html(sheet: ISA20Datasheet) -> str:
     """Generate a cleanly styled HTML / Excel-compatible table for ISA-20 datasheet."""
-    cases_th = "".join(f"<th style='border:1px solid #999;padding:6px;background:#f2f5f8;'>{c.case_name}</th>" for c in sheet.cases)
-    flow_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'>{c.flow:.1f} {c.flow_unit}</td>" for c in sheet.cases)
+    cases_th = "".join(f"<th style='border:1px solid #999;padding:6px;background:#f2f5f8;'>{html.escape(c.case_name)}</th>" for c in sheet.cases)
+    flow_td = "".join(
+        f"<td style='border:1px solid #999;padding:6px;text-align:center;'>{c.flow:.1f} {html.escape(c.flow_unit)}</td>" for c in sheet.cases
+    )
     p1_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'>{c.p1_bar_a:.2f}</td>" for c in sheet.cases)
     p2_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'>{c.p2_bar_a:.2f}</td>" for c in sheet.cases)
     dp_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'>{c.delta_p_bar:.2f}</td>" for c in sheet.cases)
@@ -311,13 +314,39 @@ def generate_isa20_html(sheet: ISA20Datasheet) -> str:
     cv_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'><b>{c.calculated_cv:.2f}</b></td>" for c in sheet.cases)
     open_td = "".join(f"<td style='border:1px solid #999;padding:6px;text-align:center;'><b>%{c.opening_percent:.1f}</b></td>" for c in sheet.cases)
 
-    notes_html = "".join(f"<li>{n}</li>" for n in sheet.engineering_notes)
+    notes_html = "".join(f"<li>{html.escape(n)}</li>" for n in sheet.engineering_notes)
 
-    html = f"""<!DOCTYPE html>
+    tag_number = html.escape(sheet.tag_number)
+    date_iso = html.escape(sheet.date_iso)
+    service_description = html.escape(sheet.service_description)
+    fluid_name = html.escape(sheet.fluid_name)
+    service_type = html.escape(sheet.service_type)
+    line_number = html.escape(sheet.line_number)
+    pid_number = html.escape(sheet.pid_number)
+    valve_inch = html.escape(sheet.valve_inch)
+    valve_style = html.escape(sheet.valve_style)
+    pressure_class = html.escape(sheet.pressure_class)
+    end_connections = html.escape(sheet.end_connections)
+    body_material = html.escape(sheet.body_material)
+    bonnet_type = html.escape(sheet.bonnet_type)
+    packing_type = html.escape(sheet.packing_type)
+    emission_standard = html.escape(sheet.emission_standard)
+    trim_type = html.escape(sheet.trim_type)
+    trim_characteristic = html.escape(sheet.trim_characteristic)
+    leakage_class = html.escape(sheet.leakage_class)
+    plug_material = html.escape(sheet.plug_material)
+    seat_material = html.escape(sheet.seat_material)
+    stem_material = html.escape(sheet.stem_material)
+    actuator_type = html.escape(sheet.actuator_type)
+    actuator_model = html.escape(sheet.actuator_model)
+    fail_action = html.escape(sheet.fail_action)
+    positioner = html.escape(sheet.positioner)
+
+    return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>ISA-20 Datasheet - {sheet.tag_number}</title>
+<title>ISA-20 Datasheet - {tag_number}</title>
 <style>
 body {{ font-family: Arial, sans-serif; font-size: 13px; color: #333; margin: 20px; }}
 table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
@@ -330,81 +359,80 @@ th {{ background-color: #12344d; color: white; text-align: left; }}
 <h2>ISA FORM 20 — KONTROL VANASI SPESİFİKASYON VERİ SAYFASI</h2>
 <table>
   <tr><th colspan="4" style="background:#12344d;color:white;">PROJE VE GENEL BİLGİLER</th></tr>
-  <tr><td><b>Vana Tag No:</b></td><td>{sheet.tag_number}</td><td><b>Tarih:</b></td><td>{sheet.date_iso}</td></tr>
+  <tr><td><b>Vana Tag No:</b></td><td>{tag_number}</td><td><b>Tarih:</b></td><td>{date_iso}</td></tr>
   <tr>
-    <td><b>Hizmet Tanımı:</b></td><td>{sheet.service_description}</td>
-    <td><b>Akışkan:</b></td><td>{sheet.fluid_name} ({sheet.service_type})</td>
+    <td><b>Hizmet Tanımı:</b></td><td>{service_description}</td>
+    <td><b>Akışkan:</b></td><td>{fluid_name} ({service_type})</td>
   </tr>
-  <tr><td><b>Hat No:</b></td><td>{sheet.line_number}</td><td><b>P&ID No:</b></td><td>{sheet.pid_number}</td></tr>
+  <tr><td><b>Hat No:</b></td><td>{line_number}</td><td><b>P&ID No:</b></td><td>{pid_number}</td></tr>
 </table>
 
 <table>
   <tr><th colspan="4">VANA GÖVDE VE BAĞLANTI SPESİFİKASYONU</th></tr>
   <tr>
-    <td><b>Anma Çapı:</b></td><td>DN{sheet.valve_dn_mm} ({sheet.valve_inch})</td>
-    <td><b>Gövde Tipi:</b></td><td>{sheet.valve_style}</td>
+    <td><b>Anma Çapı:</b></td><td>DN{sheet.valve_dn_mm} ({valve_inch})</td>
+    <td><b>Gövde Tipi:</b></td><td>{valve_style}</td>
   </tr>
   <tr>
-    <td><b>Basınç Sınıfı:</b></td><td>{sheet.pressure_class}</td>
-    <td><b>Bağlantı Tipi:</b></td><td>{sheet.end_connections}</td>
+    <td><b>Basınç Sınıfı:</b></td><td>{pressure_class}</td>
+    <td><b>Bağlantı Tipi:</b></td><td>{end_connections}</td>
   </tr>
   <tr>
-    <td><b>Gövde Malzemesi:</b></td><td>{sheet.body_material}</td>
-    <td><b>Bonnet Tipi:</b></td><td>{sheet.bonnet_type}</td>
+    <td><b>Gövde Malzemesi:</b></td><td>{body_material}</td>
+    <td><b>Bonnet Tipi:</b></td><td>{bonnet_type}</td>
   </tr>
   <tr>
-    <td><b>Salmastra:</b></td><td>{sheet.packing_type}</td>
-    <td><b>Kaçak Standardı:</b></td><td>{sheet.emission_standard}</td>
+    <td><b>Salmastra:</b></td><td>{packing_type}</td>
+    <td><b>Kaçak Standardı:</b></td><td>{emission_standard}</td>
   </tr>
 </table>
 
 <table>
   <tr><th colspan="4">TRİM VE SIZDIRMAZLIK SPESİFİKASYONU</th></tr>
   <tr>
-    <td><b>Trim Tipi:</b></td><td>{sheet.trim_type}</td>
-    <td><b>Akış Karakteristiği:</b></td><td>{sheet.trim_characteristic}</td>
+    <td><b>Trim Tipi:</b></td><td>{trim_type}</td>
+    <td><b>Akış Karakteristiği:</b></td><td>{trim_characteristic}</td>
   </tr>
   <tr>
     <td><b>Nominal Kapasite (Rated Cv):</b></td><td>{sheet.rated_cv:.1f}</td>
-    <td><b>Sit Kaçak Sınıfı:</b></td><td>{sheet.leakage_class}</td>
+    <td><b>Sit Kaçak Sınıfı:</b></td><td>{leakage_class}</td>
   </tr>
   <tr>
-    <td><b>Klape Malzemesi:</b></td><td>{sheet.plug_material}</td>
-    <td><b>Sit Malzemesi:</b></td><td>{sheet.seat_material}</td>
+    <td><b>Klape Malzemesi:</b></td><td>{plug_material}</td>
+    <td><b>Sit Malzemesi:</b></td><td>{seat_material}</td>
   </tr>
-  <tr><td><b>Mil Malzemesi:</b></td><td>{sheet.stem_material}</td><td><b>Test Standardı:</b></td><td>ANSI FCI 70-2 / IEC 60534-4</td></tr>
+  <tr><td><b>Mil Malzemesi:</b></td><td>{stem_material}</td><td><b>Test Standardı:</b></td><td>ANSI FCI 70-2 / IEC 60534-4</td></tr>
 </table>
 
 <table>
   <tr><th colspan="4">AKTÜATÖR VE POZİSYONER</th></tr>
   <tr>
-    <td><b>Aktüatör Tipi:</b></td><td>{sheet.actuator_type}</td>
-    <td><b>Aktüatör Modeli:</b></td><td>{sheet.actuator_model}</td>
+    <td><b>Aktüatör Tipi:</b></td><td>{actuator_type}</td>
+    <td><b>Aktüatör Modeli:</b></td><td>{actuator_model}</td>
   </tr>
   <tr>
-    <td><b>Arıza Konumu:</b></td><td>{sheet.fail_action}</td>
+    <td><b>Arıza Konumu:</b></td><td>{fail_action}</td>
     <td><b>Gereken Kuvvet:</b></td><td>{sheet.actuator_thrust_n:.1f} N</td>
   </tr>
-  <tr><td><b>Hava Beslemesi:</b></td><td>{sheet.air_supply_bar:.1f} bar(g)</td><td><b>Pozisyoner:</b></td><td>{sheet.positioner}</td></tr>
+  <tr><td><b>Hava Beslemesi:</b></td><td>{sheet.air_supply_bar:.1f} bar(g)</td><td><b>Pozisyoner:</b></td><td>{positioner}</td></tr>
 </table>
 
 <table>
-  <tr><th colspan="{len(sheet.cases) + 1}">PROSES \u00c7ALI\u015eMA KO\u015eULLARI (PROCESS CONDITIONS)</th></tr>
+  <tr><th colspan="{len(sheet.cases) + 1}">PROSES ÇALIŞMA KOŞULLARI (PROCESS CONDITIONS)</th></tr>
   <tr><th>Parametre</th>{cases_th}</tr>
   <tr><td>Debi</td>{flow_td}</tr>
-  <tr><td>Giri\u015f Bas\u0131nc\u0131 P1 [bar(a)]</td>{p1_td}</tr>
-  <tr><td>\u00c7\u0131k\u0131\u015f Bas\u0131nc\u0131 P2 [bar(a)]</td>{p2_td}</tr>
-  <tr><td>Fark Bas\u0131n\u00e7 DeltaP [bar]</td>{dp_td}</tr>
-  <tr><td>S\u0131cakl\u0131k [\u00b0C]</td>{t_td}</tr>
+  <tr><td>Giriş Basıncı P1 [bar(a)]</td>{p1_td}</tr>
+  <tr><td>Çıkış Basıncı P2 [bar(a)]</td>{p2_td}</tr>
+  <tr><td>Fark Basınç DeltaP [bar]</td>{dp_td}</tr>
+  <tr><td>Sıcaklık [°C]</td>{t_td}</tr>
   <tr><td>Hesaplanan Gerekli Cv</td>{cv_td}</tr>
-  <tr><td>Vana A\u00e7\u0131kl\u0131\u011f\u0131 (%)</td>{open_td}</tr>
+  <tr><td>Vana Açıklığı (%)</td>{open_td}</tr>
 </table>
 
-<h3>M\u00dcHEND\u0130SL\u0130K NOTLARI</h3>
+<h3>MÜHENDİSLİK NOTLARI</h3>
 <ul>
 {notes_html}
 </ul>
 </body>
 </html>
 """
-    return html

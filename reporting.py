@@ -145,6 +145,24 @@ def build_report(service: str, fluid_summary: dict | None, result: SizingResult)
         for key, value in meta.items():
             lines.append(f"- {key}: {value}")
 
+    try:
+        from vendor_catalog import find_catalog_matches
+
+        req_cv = float(result.get("required_cv", 0.0))
+        if req_cv > 0:
+            matches = find_catalog_matches(req_cv)
+            if matches:
+                lines.extend(["", "## Suitable Vendor Valve Models (Global Catalog Matches)"])
+                lines.append("| Manufacturer | Model | Type | DN (inch) | Rated Cv | Opening % | Status |")
+                lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+                for m in matches[:6]:
+                    lines.append(
+                        f"| {m['manufacturer']} | {m['model_name']} | {m['valve_type']} | "
+                        f"DN{m['dn_mm']} ({m['inch']}) | {m['cv_rated']:.1f} | {m['opening_percent']:.1f}% | {m['status']} |"
+                    )
+    except Exception:
+        pass
+
     return "\n".join(lines) + "\n"
 
 
@@ -650,6 +668,34 @@ def build_pdf_report(service: str, fluid_summary: dict | None, result: SizingRes
         meta = result["valve_meta"]
         for key, value in meta.items():
             field(f"{key}:", str(value))
+
+    try:
+        from vendor_catalog import find_catalog_matches
+
+        req_cv = float(result.get("required_cv", 0.0))
+        if req_cv > 0:
+            matches = find_catalog_matches(req_cv)
+            if matches:
+                heading("Suitable Vendor Valve Models (Global Matches)")
+                pdf.set_font("Helvetica", style="B", size=8)
+                pdf.set_fill_color(240, 240, 240)
+                col_w = [30, 32, 28, 26, 20, 22, 28]
+                for i, h in enumerate(["Vendor", "Model", "Type", "Size", "Rated Cv", "Opening", "Status"]):
+                    pdf.cell(col_w[i], 5, _pdf_safe(h), border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_font("Helvetica", size=8)
+                for m in matches[:6]:
+                    pdf.cell(col_w[0], 5, _pdf_safe(m["manufacturer"][:14]), border=1)
+                    pdf.cell(col_w[1], 5, _pdf_safe(m["model_name"][:16]), border=1)
+                    pdf.cell(col_w[2], 5, _pdf_safe(m["valve_type"][:14]), border=1)
+                    pdf.cell(col_w[3], 5, _pdf_safe(f"DN{m['dn_mm']} {m['inch']}"), border=1, align="C")
+                    pdf.cell(col_w[4], 5, f"{m['cv_rated']:.1f}", border=1, align="R")
+                    pdf.cell(col_w[5], 5, f"{m['opening_percent']:.1f}%", border=1, align="R")
+                    pdf.cell(col_w[6], 5, _pdf_safe(m["status"][:16]), border=1, align="C")
+                    pdf.ln()
+                pdf.ln(1)
+    except Exception:
+        pass
 
     return bytes(pdf.output())  # type: ignore[call-overload]
 

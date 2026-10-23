@@ -97,11 +97,15 @@ def evaluate_cavitation_severity(
     delta_p_bar: float,
     p1_bar_a: float,
     pv_bar_a: float,
+    fl: float = 0.90,
 ) -> CavitationAnalysis:
     """Evaluate liquid cavitation severity and determine required trim stages per ISA-RP75.23."""
     dp = max(float(delta_p_bar), 0.001)
     p1 = max(float(p1_bar_a), 0.001)
     pv = max(float(pv_bar_a), 0.0)
+
+    scale = (fl / 0.90) ** 2 if fl > 0 else 1.0
+    sigma_eff = sigma * scale
 
     warnings: list[str] = []
     notes: list[str] = []
@@ -113,20 +117,20 @@ def evaluate_cavitation_severity(
         max_dp_stage = dp
         warnings.append("Akışkan girişte kaynıyor (P1 <= Pv). Kavitasyon değil iki fazlı flashing rejimindedir.")
         notes.append("Yüksek hızlı sıvı damlacık erozyonuna karşı gövde genişletilmeli ve sertleştirilmiş yüzey seçilmelidir.")
-    elif sigma > 2.0:
+    elif sigma_eff > 2.0:
         severity = "Güvenli (Kavitasyonsuz)"
         stages = 1
         trim = "Standart Trim"
         max_dp_stage = dp
-        notes.append("Kavitasyon indeksi sigma > 2.0: Kavitasyon hasarı veya gürültü riski bulunmamaktadır.")
-    elif sigma > 1.5:
+        notes.append("Kavitasyon hasarı veya gürültü riski bulunmamaktadır.")
+    elif sigma_eff > 1.5:
         severity = "Başlangıç Kavitasyonu (Incipient Cavitation)"
         stages = 1
         trim = "Sertleştirilmiş Trim (Stellite 6 / CoCr veya 410SS)"
-        max_dp_stage = (p1 - pv) / 1.5
+        max_dp_stage = (p1 - pv) / (1.5 / scale) if scale > 0 else dp
         warnings.append("Düşük düzeyde kavitasyon başlangıcı tespit edildi. Uzun dönemli sit aşınması mümkündür.")
         notes.append("Tek kademeli sertleştirilmiş trim (Stellite sit/klape) yüzey ömrünü korur.")
-    elif sigma > 1.1:
+    elif sigma_eff > 1.1:
         severity = "Yoğun Kavitasyon (Constant Cavitation)"
         stages = 2
         trim = "2-Kademeli Anti-Kavitasyon Kafesi (Cavitrol II / Q-Trim benzeri)"
@@ -167,12 +171,13 @@ def recommend_trim(
     delta_p_bar: float = 1.0,
     p1_bar_a: float = 5.0,
     pv_bar_a: float = 0.023,
+    fl: float = 0.90,
 ) -> list[str]:
     """Return a list of trim recommendations based on operating conditions."""
     recs: list[str] = []
 
     if service == "liquid" and cavitation_index is not None:
-        analysis = evaluate_cavitation_severity(cavitation_index, delta_p_bar, p1_bar_a, pv_bar_a)
+        analysis = evaluate_cavitation_severity(cavitation_index, delta_p_bar, p1_bar_a, pv_bar_a, fl=fl)
         if analysis.stages_recommended > 1 or analysis.severity_level != "Güvenli (Kavitasyonsuz)":
             recs.append(f"Kavitasyon: {analysis.severity_level} -> {analysis.trim_recommendation}.")
     elif service == "liquid" and flow_regime == "flashing":

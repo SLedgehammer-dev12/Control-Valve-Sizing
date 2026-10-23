@@ -62,7 +62,7 @@ from valve_sizing import (
     size_liquid_valve,
     size_steam_valve,
 )
-from vendor_catalog import get_vendor_definition, get_vendor_options
+from vendor_catalog import find_catalog_matches, get_vendor_definition, get_vendor_options
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +617,7 @@ def _vendor_list() -> list[dict[str, Any]]:
                 "key": key,
                 "label": f"{definition.vendor} · {definition.family} · {definition.style}",
                 "vendor": definition.vendor,
+                "region": definition.region,
                 "family": definition.family,
                 "style": definition.style,
                 "service": definition.service,
@@ -635,6 +636,42 @@ def _vendor_list() -> list[dict[str, Any]]:
 @app.get("/api/vendors")
 def vendors() -> list[dict[str, Any]]:
     return _vendor_list()
+
+
+@app.get("/api/catalog-matches")
+def catalog_matches(
+    required_cv: float,
+    design_margin: float = 10.0,
+    characteristic: str = "equal_percentage",
+    region: str | None = None,
+) -> list[dict[str, Any]]:
+    matches = find_catalog_matches(
+        required_cv=required_cv,
+        design_margin_pct=design_margin,
+        flow_characteristic=characteristic,
+        region_filter=region,
+    )
+    return [
+        {
+            "vendor_key": m.vendor_key,
+            "vendor_name": m.vendor_name,
+            "region": m.region,
+            "family": m.family,
+            "style": m.style,
+            "dn_mm": m.dn_mm,
+            "dn_inch": m.dn_inch,
+            "rated_cv": m.rated_cv,
+            "required_cv": m.required_cv,
+            "opening_pct": m.opening_pct,
+            "status": m.status,
+            "status_label": m.status_label,
+            "pressure_class": m.pressure_class,
+            "leakage_class": m.leakage_class,
+            "fl": m.fl,
+            "xt": m.xt,
+        }
+        for m in matches
+    ]
 
 
 @app.get("/api/meta")

@@ -1066,3 +1066,18 @@ def test_convert_liquid_flow() -> None:
     )
     assert response.status_code == 200
     assert response.json()["values"][0] == pytest.approx(110.0717, rel=1e-3)
+
+
+def test_api_catalog_matches() -> None:
+    response = client.get("/api/catalog-matches", params={"required_cv": 35.0, "design_margin": 15.0})
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    assert "vendor_name" in data[0]
+    assert "opening_pct" in data[0]
+    # Check region filter
+    res_asia = client.get("/api/catalog-matches", params={"required_cv": 35.0, "region": "Asia"})
+    assert res_asia.status_code == 200
+    asia_data = res_asia.json()
+    assert all("Asia" in m["region"] for m in asia_data)

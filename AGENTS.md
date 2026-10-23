@@ -129,13 +129,14 @@ python app_desktop.py
 This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mode, minimal diffs) and **addyosmani/agent-skills** (lifecycle engineering skills & subagent personas) across both **OpenCode** and **Antigravity**:
 
 1. **Submodules**: `vendor/ponytail` and `vendor/agent-skills`
-2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`orchestrator`, `cv-orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), commands in `.opencode/command/` (`orchestrate`, `build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
-3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/` (`orchestrator`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), and skills in `.agents/skills/`.
+2. **OpenCode**: Configured via `.opencode/opencode.jsonc`, agents in `.opencode/agents/` (`orchestrator`, `cv-orchestrator`, `engineering-agent`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), commands in `.opencode/command/` (`orchestrate`, `build`, `code-simplify`, `constraints`, `plan`, `review`, `ship`, `spec`, `test`, `webperf`, `ponytail*`), and skills in `.opencode/skills/`.
+3. **Antigravity**: Configured via `.agents/plugins/marketplace.json`, rules in `.agents/rules/` (`ponytail.md`, `agent-skills.md`), subagents in `.agents/agents/` (`orchestrator`, `engineering-agent`, `code-reviewer`, `security-auditor`, `test-engineer`, `web-performance-auditor`, `cv-engineer`, `cv-reviewer`, `cv-documenter`, `ui-ux-engineer`, `unit-conversion-manager`), and skills in `.agents/skills/`.
 4. **Master Orchestrator**: `orchestrator` runs a state-driven continuous improvement cycle: it snapshots the current build/test state, selects one test/UI-UX/development slice, manages the human confirmation gate, dispatches specialists, verifies, and re-dispatches until green. It repeats while standing approval remains and stops on no valuable slice, repeated failures, security/data risk, scope expansion, or user stop.
 5. **Orchestration Matrix**:
    - **SPEC / DEFINE**: `spec-driven-development`, `api-and-interface-design`, `idea-refine`
    - **PLAN**: `planning-and-task-breakdown`, `interview-me`, `constraint-driven-development`
    - **BUILD**: `incremental-implementation`, `test-driven-development`, `frontend-ui-engineering`
+   - **ENGINEERING DOMAIN**: `engineering-agent` / `cv-engineer` for IEC 60534, ISA-75, CoolProp thermodynamics, and benchmark verification
    - **UI/UX**: `ui-ux-engineer` with `frontend-ui-engineering` and `browser-testing-with-devtools`
    - **UNIT CONSISTENCY**: `unit-conversion-manager` for `units.py`, API conversion, engine boundaries, and UI unit maps
    - **VERIFY**: `debugging-and-error-recovery`, `browser-testing-with-devtools`, `observability-and-instrumentation`
@@ -144,7 +145,7 @@ This repository integrates both **DietrichGebert/ponytail** (lazy senior dev mod
 
 ### Test Status
 
-- **666 tests, 100% passing**
+- **682 tests, 100% passing**
 - **Coverage**: 95.32% (core modules at 100% statement coverage)
 - **CI**: GitHub Actions (Ubuntu, Python 3.11/3.12, ruff + mypy + pytest)
 - **Scenario verification**: `verify_50_scenarios.py` (52 independent cross-checks, 52/52 PASS) + `verify_scenarios.py` (12 IEC benchmarks, 12/12 PASS)

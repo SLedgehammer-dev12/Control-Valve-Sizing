@@ -41,6 +41,17 @@
         },
         "edit": "ask"
       }
+    },
+    "engineering-agent": {
+      "permission": {
+        "skill": {
+          "*": "allow"
+        },
+        "agent": {
+          "*": "allow"
+        },
+        "edit": "ask"
+      }
     }
   },
   "plugin": [

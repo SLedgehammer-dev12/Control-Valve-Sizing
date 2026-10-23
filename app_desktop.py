@@ -29,7 +29,7 @@ from units import (
 )
 from valve_curve import evaluate_operating_point, generate_characteristic_curve, generate_installed_characteristic
 from valve_sizing import GasSizingInput, LiquidSizingInput, SteamSizingInput, size_gas_valve, size_liquid_valve, size_steam_valve
-from vendor_catalog import get_vendor_definition, get_vendor_options
+from vendor_catalog import find_catalog_matches, get_vendor_definition, get_vendor_options
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +182,7 @@ class ValveSizingApp:
         # Live-calculation bookkeeping
         self._live_enabled = False
         self._syncing_service = False
+        self._debounce_timer: str | None = None
         self._unit_previous: dict[str, str] = {}
         self._field_labels: dict[str, ttk.Label] = {}
         self._field_family: dict[str, str] = {}
@@ -257,6 +258,10 @@ class ValveSizingApp:
         tools_menu.add_command(label="Termal Genlesme (Boru Hatti)", command=self._open_thermal_expansion_dialog)
         tools_menu.add_command(label="Joule-Thomson ve Gaz Hidrat Analizi", command=self._open_joule_thomson_dialog)
         tools_menu.add_command(label="Coklu Calisma Durumu (Multi-Case Sizing)", command=self._open_multicase_dialog)
+        tools_menu.add_command(
+            label="Global Vana Üreticileri & Model Eşleştirme (Vendor Match)",
+            command=self._open_vendor_match_dialog,
+        )
         tools_menu.add_separator()
         tools_menu.add_command(label="Kavitasyon Kademe Analizi (ISA-RP75.23)", command=self._open_cavitation_dialog)
         tools_menu.add_command(label="Salmastra ve Kacak Emisyon (ISO 15848-1)", command=self._open_packing_dialog)
@@ -357,16 +362,16 @@ class ValveSizingApp:
         self._build_form_steam(self.steam_frame)
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # Live calculation: re-run on any flow / pressure / temperature edit
+        # Live calculation: re-run on any flow / pressure / temperature edit with debounce
         live_keys = (
             "liquid_flow_m3h", "liquid_p1", "liquid_p2", "liquid_temp_c",
             "gas_flow_nm3h", "gas_p1", "gas_p2", "gas_temp_c",
             "steam_flow_kgh", "steam_p1", "steam_p2", "steam_temp_c",
         )
         for key in live_keys:
-            self.inputs[key].trace_add("write", self._on_live_change)
+            self.inputs[key].trace_add("write", self._queue_live_change)
         for key in ("liquid_p1", "liquid_temp_c"):
-            self.inputs[key].trace_add("write", lambda *_args: self._on_liquid_conditions_change())
+            self.inputs[key].trace_add("write", self._queue_liquid_conditions_change)
 
         # Row 3: Action bar
         action_bar = tk.Frame(body, bg="#eef3f8")
@@ -651,8 +656,23 @@ class ValveSizingApp:
         self._update_liquid_properties()
         return self._on_live_change()
 
+    def _queue_live_change(self, *_args) -> None:
+        if self._debounce_timer is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._debounce_timer)
+        self._debounce_timer = self.root.after(300, self._on_live_change)
+
+    def _queue_liquid_conditions_change(self, *_args) -> None:
+        if not getattr(self, "_live_enabled", False) or self.liquid_source.get() == "Custom":
+            return
+        if self._debounce_timer is not None:
+            with contextlib.suppress(Exception):
+                self.root.after_cancel(self._debounce_timer)
+        self._debounce_timer = self.root.after(300, self._on_liquid_conditions_change)
+
     def _on_live_change(self, *_args) -> str:
         """Re-calculate silently on unit changes or input edits."""
+        self._debounce_timer = None
         if not getattr(self, "_live_enabled", False):
             return ""
         with contextlib.suppress(tk.TclError):
@@ -2452,6 +2472,100 @@ class ValveSizingApp:
         ttk.Button(btn_frame, text="Hesapla", command=_calc).pack(side="left", padx=4)
         ttk.Button(btn_frame, text="Kapat", command=dlg.destroy).pack(side="left", padx=4)
         _calc()
+
+    def _open_vendor_match_dialog(self) -> None:
+        """Open Global Vendor Match dialog comparing suitable models from all manufacturers."""
+        if not hasattr(self, "last_result") or self.last_result is None:
+            messagebox.showinfo("Bilgi", "Once ana ekranda bir hesaplama yapin.")
+            return
+
+        req_cv = float(self.last_result.get("required_cv", 0.0))
+        if req_cv <= 0:
+            messagebox.showinfo("Bilgi", "Gecerli bir gerekli Cv hesaplanamadi.")
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Global Vana Üreticileri & Model Eşleştirme (Vendor Match)")
+        dlg.geometry("920x540")
+        dlg.minsize(750, 420)
+        dlg.transient(self.root)
+
+        frame = ttk.Frame(dlg, padding=12)
+        frame.pack(fill="both", expand=True)
+
+        header_lbl = ttk.Label(
+            frame,
+            text=f"Gerekli Cv: {req_cv:.2f} — Tüm üretici kataloglarından uygun vana adayları taranıyor",
+            font=("Segoe UI", 11, "bold"),
+        )
+        header_lbl.pack(anchor="w", pady=(0, 8))
+
+        filter_bar = ttk.Frame(frame)
+        filter_bar.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(filter_bar, text="Bölge Filtresi:").pack(side="left", padx=(0, 4))
+        reg_var = tk.StringVar(value="Tümü")
+        reg_cb = ttk.Combobox(filter_bar, textvariable=reg_var, values=["Tümü", "USA", "Europe", "Asia"], state="readonly", width=12)
+        reg_cb.pack(side="left", padx=(0, 16))
+
+        only_ideal_var = tk.BooleanVar(value=True)
+        ideal_chk = ttk.Checkbutton(filter_bar, text="Yalnızca İdeal Açıklık (%20 - %80)", variable=only_ideal_var)
+        ideal_chk.pack(side="left")
+
+        cols = ("vendor", "region", "model", "dn", "rated_cv", "opening", "status", "class")
+        tree = ttk.Treeview(frame, columns=cols, show="headings", height=15)
+        tree.heading("vendor", text="Üretici")
+        tree.heading("region", text="Bölge")
+        tree.heading("model", text="Model / Seri")
+        tree.heading("dn", text="Çap")
+        tree.heading("rated_cv", text="Nominal Cv")
+        tree.heading("opening", text="Açıklık")
+        tree.heading("status", text="Durum")
+        tree.heading("class", text="Sınıf")
+
+        tree.column("vendor", width=140)
+        tree.column("region", width=80)
+        tree.column("model", width=220)
+        tree.column("dn", width=70, anchor="center")
+        tree.column("rated_cv", width=80, anchor="e")
+        tree.column("opening", width=80, anchor="e")
+        tree.column("status", width=110, anchor="center")
+        tree.column("class", width=70, anchor="center")
+
+        tree.pack(fill="both", expand=True, side="left")
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="left", fill="y")
+
+        def _populate():
+            for item in tree.get_children():
+                tree.delete(item)
+            reg = None if reg_var.get() == "Tümü" else reg_var.get()
+            char_t = getattr(self, "flow_characteristic", None)
+            char_val = char_t.get() if char_t else "equal_percentage"
+            matches = find_catalog_matches(
+                required_cv=req_cv,
+                design_margin_pct=float(self.design_margin.get() if hasattr(self, "design_margin") else 10.0),
+                flow_characteristic=char_val,
+                region_filter=reg,
+            )
+            if only_ideal_var.get():
+                matches = [m for m in matches if m.status == "ideal"]
+            for m in matches:
+                tree.insert("", "end", values=(
+                    m.vendor_name,
+                    m.region,
+                    f"{m.family} ({m.style})",
+                    f"DN{m.dn_mm}",
+                    f"{m.rated_cv:.1f}",
+                    f"%{m.opening_pct:.1f}",
+                    m.status_label,
+                    m.pressure_class,
+                ))
+
+        reg_cb.bind("<<ComboboxSelected>>", lambda _e: _populate())
+        ideal_chk.configure(command=_populate)
+        _populate()
 
 
 

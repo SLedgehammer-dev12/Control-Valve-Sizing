@@ -3,15 +3,31 @@ import pytest
 from valve_sizing import ValveSize
 from vendor_catalog import (
     ARCA_VENDOR_CATALOG,
+    AZBIL_VENDOR_CATALOG,
     FISHER_VENDOR_CATALOG,
+    FLOWSERVE_VENDOR_CATALOG,
+    IMI_VENDOR_CATALOG,
+    MASONEILAN_VENDOR_CATALOG,
     METSO_VENDOR_CATALOG,
     SAMSON_VENDOR_CATALOG,
     VENDOR_CATALOG,
+    WUZHONG_VENDOR_CATALOG,
+    find_catalog_matches,
     get_vendor_definition,
     get_vendor_options,
 )
 
-ALL_CATALOGS = {"fisher": FISHER_VENDOR_CATALOG, "metso": METSO_VENDOR_CATALOG, "samson": SAMSON_VENDOR_CATALOG, "arca": ARCA_VENDOR_CATALOG}
+ALL_CATALOGS = {
+    "fisher": FISHER_VENDOR_CATALOG,
+    "metso": METSO_VENDOR_CATALOG,
+    "samson": SAMSON_VENDOR_CATALOG,
+    "arca": ARCA_VENDOR_CATALOG,
+    "masoneilan": MASONEILAN_VENDOR_CATALOG,
+    "flowserve": FLOWSERVE_VENDOR_CATALOG,
+    "imi": IMI_VENDOR_CATALOG,
+    "wuzhong": WUZHONG_VENDOR_CATALOG,
+    "azbil": AZBIL_VENDOR_CATALOG,
+}
 
 
 def test_all_catalogs_have_entries():
@@ -240,4 +256,43 @@ def test_allowable_leakage_rate():
     rate_vi = allowable_leakage_rate(rated_cv=100.0, leakage_class="VI", port_diameter_mm=50.8)
     assert rate_vi["class"] == "VI"
     assert rate_vi["max_rate"] == pytest.approx(8 * 0.15, rel=1e-3)
+
+
+def test_new_regional_catalogs_present():
+    assert len(MASONEILAN_VENDOR_CATALOG) >= 2
+    assert "masoneilan_camflex_eqpct" in MASONEILAN_VENDOR_CATALOG
+    assert len(FLOWSERVE_VENDOR_CATALOG) >= 2
+    assert "flowserve_valtek_mark_one" in FLOWSERVE_VENDOR_CATALOG
+    assert len(IMI_VENDOR_CATALOG) >= 1
+    assert "imi_cci_severe_globe" in IMI_VENDOR_CATALOG
+    assert len(WUZHONG_VENDOR_CATALOG) >= 2
+    assert "wuzhong_globe_300" in WUZHONG_VENDOR_CATALOG
+    assert len(AZBIL_VENDOR_CATALOG) >= 1
+    assert "azbil_globe_ag9000" in AZBIL_VENDOR_CATALOG
+
+
+def test_find_catalog_matches_returns_ranked_candidates():
+    matches = find_catalog_matches(required_cv=42.0, design_margin_pct=10.0)
+    assert len(matches) > 0
+    # Top match should be an ideal selection
+    assert matches[0].status == "ideal"
+    assert 20.0 <= matches[0].opening_pct <= 80.0
+    # Multiple vendors should be represented
+    vendors = {m.vendor_name for m in matches}
+    assert len(vendors) >= 3
+
+
+def test_find_catalog_matches_region_filtering():
+    usa_matches = find_catalog_matches(required_cv=30.0, region_filter="USA")
+    assert all("USA" in m.region for m in usa_matches)
+
+    asia_matches = find_catalog_matches(required_cv=30.0, region_filter="Asia")
+    assert all("Asia" in m.region for m in asia_matches)
+    assert any("WuZhong" in m.vendor_name or "Azbil" in m.vendor_name for m in asia_matches)
+
+
+def test_find_catalog_matches_empty_on_zero():
+    assert find_catalog_matches(required_cv=0.0) == []
+    assert find_catalog_matches(required_cv=-10.0) == []
+
 

@@ -69,6 +69,9 @@ def migrate_project_payload(payload: dict) -> dict:
     return payload
 
 
+MAX_PROJECT_JSON_BYTES = 512 * 1024
+
+
 def validate_project_payload(payload: dict) -> None:
     """Raise ValueError if payload is not a valid control valve sizing project."""
     if not isinstance(payload, dict):
@@ -91,6 +94,12 @@ def validate_project_payload(payload: dict) -> None:
         value = data[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"Proje verisinde '{key}' sayisal bir deger olmalidir.")
+    for key, value in data.items():
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if not math.isfinite(value):
+                raise ValueError(f"Proje verisinde '{key}' sonlu bir sayisal deger olmalidir.")
+            if ("density" in key or "pipe" in key or "roughness" in key) and value <= 0:
+                raise ValueError(f"Proje verisinde '{key}' pozitif olmalidir: {value}.")
     for key, allowed in UNIT_VALIDATORS.items():
         if key not in data:
             continue
@@ -108,6 +117,8 @@ def validate_project_payload(payload: dict) -> None:
 
 def load_project_json(text: str) -> dict:
     """Parse JSON string, validate, migrate, and return project payload."""
+    if len(text.encode("utf-8")) > MAX_PROJECT_JSON_BYTES:
+        raise ValueError("Proje dosyasi boyutu izin verilen siniri (512 KB) asiyor.")
     payload = json.loads(text)
     validate_project_payload(payload)
     return migrate_project_payload(payload)

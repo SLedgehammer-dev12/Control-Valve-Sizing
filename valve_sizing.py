@@ -174,6 +174,9 @@ class SizingResult:
         except AttributeError:
             return self.extra[key]
 
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key) or key in self.extra
+
     def get(self, key: str, default: Any = None) -> Any:
         try:
             return self[key]
@@ -513,9 +516,11 @@ def size_liquid_valve(
     flp = details.get("FLP")
     rev = details.get("Rev")
     laminar = details.get("laminar")
+    fr = details.get("FR") or 1.0
 
     fl_effective = flp if flp else fl
-    dp_max_bar = (fl_effective ** 2) * (data.inlet_pressure_bar_a - ff * pv)
+    fl_ratio = (fl_effective / fp) if fp > 0 else fl_effective
+    dp_max_bar = (fl_ratio ** 2) * (data.inlet_pressure_bar_a - ff * pv)
     dp_max_bar = max(dp_max_bar, 1e-9)
     is_choked = delta_p_bar >= dp_max_bar
     effective_dp_bar = min(delta_p_bar, dp_max_bar)
@@ -555,7 +560,7 @@ def size_liquid_valve(
     noise_db = _predict_valve_noise(
         "liquid", flow_kg_s_liquid, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         0.0, density, 0.0, 0.0, required_kv,
-        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        valve.dn_mm / 1000.0, (data.pipe_outlet_diameter_mm or data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fl, fd, pv,
     )
 
@@ -617,6 +622,7 @@ def size_liquid_valve(
             "laminar": laminar,
             "fp": fp,
             "flp": flp,
+            "fr": fr,
             "noise_db": noise_db,
             "actuator_thrust_n": act_thrust,
             "actuator_selection": act_selection,
@@ -634,6 +640,7 @@ def size_liquid_valve(
             data.temperature_c,
             data.specific_heat_j_kgk,
             data.latent_heat_j_kg,
+            vapor_pressure_bar=pv,
         )
         rho_g = vapor_density_ideal_gas(
             data.outlet_pressure_bar_a, data.temperature_c, data.molecular_weight,
@@ -672,11 +679,12 @@ def size_liquid_valve(
     result["trim_guidance"] = recommend_trim(
         "liquid", regime, is_choked, noise_db,
         float(opening_metrics["opening_percent"]), sigma, temperature_c=data.temperature_c,
+        delta_p_bar=delta_p_bar, p1_bar_a=data.inlet_pressure_bar_a, pv_bar_a=pv, fl=fl,
     )
 
     result["equations"] = [
         "FF = 0.96 - 0.28*sqrt(Pv/Pc)",
-        "DeltaP_max = FL^2 * (P1 - FF*Pv)",
+        "DeltaP_max = (FLP / FP)^2 * (P1 - FF*Pv)",
         "IEC candidate sizing via fluids.control_valve.size_control_valve_l",
         "Kv = 0.865 * Cv",
     ]
@@ -698,6 +706,7 @@ def size_liquid_valve(
         "FL_valve_only": fl,
         "Fd": fd,
         "Fp": fp,
+        "FR": fr,
         "mu_Pa_s": mu,
         "Rev": rev,
         "Laminar": laminar,
@@ -910,7 +919,7 @@ def size_gas_valve(
     noise_db = _predict_valve_noise(
         "gas", flow_kg_s_gas, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, gas_density_kg_m3, k, mw, required_kv,
-        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        valve.dn_mm / 1000.0, (data.pipe_outlet_diameter_mm or data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fl=fl, fd=fd,
     )
 
@@ -1075,6 +1084,11 @@ def size_steam_valve(
             density = CP.PropsSI("D", "P", p_pa, "T", t_k, "Water")
             mu = CP.PropsSI("V", "P", p_pa, "T", t_k, "Water")
             mw = CP.PropsSI("M", "Water") * 1000.0
+            cp = CP.PropsSI("CPMASS", "P", p_pa, "T", t_k, "Water")
+            cv = CP.PropsSI("CVMASS", "P", p_pa, "T", t_k, "Water")
+            if cv > 0:
+                k = cp / cv
+            z = CP.PropsSI("Z", "P", p_pa, "T", t_k, "Water")
             coolprop_ok = True
         except Exception:
             density = (data.inlet_pressure_bar_a * 1e5 * 0.018015) / (8.314 * t_k * max(z, 0.001))
@@ -1121,6 +1135,15 @@ def size_steam_valve(
     x_for_eq = min(x, x_choked_effective)
     is_choked = x >= x_choked_effective
 
+    # IEC 60534-2-1 Clause 8.3 Eq. 6a direct steam mass formulation (N6 = 27.3)
+    n6 = 27.3
+    x_steam = min(x, x_choked_effective)
+    y_steam = max(1.0 - x_steam / (3.0 * x_choked_effective), 2.0 / 3.0) if x_choked_effective > 0 else 0.667
+    cv_iec_direct_mass = flow_kg_h / (
+        n6 * fp_val * y_steam * math.sqrt(max(x_steam * data.inlet_pressure_bar_a * density, 1e-9))
+    )
+    kv_iec_direct_mass = cv_to_kv(cv_iec_direct_mass)
+
     warning = "Steam sizing IEC/ISA'ya yaklastirilmistir; yine de final secim vendor yazilimi ile dogrulanmali."
     if not iapws_ok and not coolprop_ok:
         warning += " Uyari: CoolProp devre disi, ideal gaz yaklasimi kullanildi (30 bar(a) uzerinde hata >%10)."
@@ -1158,7 +1181,7 @@ def size_steam_valve(
     noise_db = _predict_valve_noise(
         "steam", flow_kg_h / 3600.0, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, density, k, mw, required_kv,
-        valve.dn_mm / 1000.0, (data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
+        valve.dn_mm / 1000.0, (data.pipe_outlet_diameter_mm or data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
         fl=fl, fd=fd,
     )
 
@@ -1207,6 +1230,8 @@ def size_steam_valve(
             "noise_db": noise_db,
             "actuator_thrust_n": act_thrust,
             "actuator_selection": act_selection,
+            "cv_iec_direct_mass": cv_iec_direct_mass,
+            "kv_iec_direct_mass": kv_iec_direct_mass,
             "valve_spec": build_valve_spec(
                 "steam", data.inlet_pressure_bar_a, is_choked,
                 vendor_pressure_class="", vendor_leakage_class="",
@@ -1221,6 +1246,7 @@ def size_steam_valve(
         "Fk = k/1.4",
         "x = DeltaP/P1",
         "x_choked = Fk* xTP_e  where xTP_e = xT or xTP (with reducers)",
+        "IEC 60534-2-1 Eq. 6a: C = W / (N6 * FP * Y * sqrt(x * P1 * rho1)) [N6=27.3]",
         "IEC candidate sizing via fluids.control_valve.size_control_valve_g (steam -> actual volume via CoolProp density)",
         "Kv = 0.865 * Cv",
     ]
@@ -1244,6 +1270,8 @@ def size_steam_valve(
         "Y": expansion_factor,
         "Fp": fp_val,
         "xTP": xtp,
+        "Cv_IEC_direct_mass": cv_iec_direct_mass,
+        "Kv_IEC_direct_mass": kv_iec_direct_mass,
         "mu_Pa_s": mu,
         "Rev": rev,
         "Laminar": laminar,

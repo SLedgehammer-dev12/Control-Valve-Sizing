@@ -35,14 +35,8 @@ try:
 except ImportError:
     logger.debug("chemicals library not available; chemical lookup features disabled.")
 
-_CHEMICAL_CACHE: dict[str, dict[str, Any]] = {}
-
-
-_CHEMICAL_CACHE_MAX = 512
-
+@lru_cache(maxsize=512)
 def _safe_chemical_props(name: str) -> dict[str, Any]:
-    if name in _CHEMICAL_CACHE:
-        return _CHEMICAL_CACHE[name]
     if not _HAS_CHEMICALS:
         return {}
     props: dict[str, Any] = {}
@@ -84,8 +78,6 @@ def _safe_chemical_props(name: str) -> dict[str, Any]:
     except Exception:
         pass
 
-    if props and len(_CHEMICAL_CACHE) < _CHEMICAL_CACHE_MAX:
-        _CHEMICAL_CACHE[name] = props
     return props
 
 
@@ -673,19 +665,27 @@ def get_pure_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float
     t_k = temperature_c + 273.15
 
     try:
+        try:
+            vp = CP.PropsSI("P", "T", t_k, "Q", 0, fluid) / 1e5
+        except Exception:
+            vp = None
+        d = CP.PropsSI("D", "P", p_pa, "T", t_k, fluid)
+        mu = CP.PropsSI("V", "P", p_pa, "T", t_k, fluid)
+        cp = CP.PropsSI("C", "P", p_pa, "T", t_k, fluid)
+        cv = CP.PropsSI("O", "P", p_pa, "T", t_k, fluid)
+        z = CP.PropsSI("Z", "P", p_pa, "T", t_k, fluid)
+        mw = CP.PropsSI("M", fluid) * 1000.0
+        pc = CP.PropsSI("PCRIT", fluid) / 1e5
         return {
-            "density_kg_m3": CP.PropsSI("D", "P", p_pa, "T", t_k, fluid),
-            "vapor_pressure_bar_a": CP.PropsSI("P", "T", t_k, "Q", 0, fluid) / 1e5,
-            "viscosity_pa_s": CP.PropsSI("V", "P", p_pa, "T", t_k, fluid),
-            "cp_j_kgk": CP.PropsSI("C", "P", p_pa, "T", t_k, fluid),
-            "cv_j_kgk": CP.PropsSI("O", "P", p_pa, "T", t_k, fluid),
-            "z": CP.PropsSI("Z", "P", p_pa, "T", t_k, fluid),
-            "molecular_weight": CP.PropsSI("M", fluid) * 1000.0,
-            "critical_pressure_bar_a": CP.PropsSI("PCRIT", fluid) / 1e5,
-            "specific_heat_ratio": (
-                CP.PropsSI("C", "P", p_pa, "T", t_k, fluid)
-                / CP.PropsSI("O", "P", p_pa, "T", t_k, fluid)
-            ),
+            "density_kg_m3": d,
+            "vapor_pressure_bar_a": vp,
+            "viscosity_pa_s": mu,
+            "cp_j_kgk": cp,
+            "cv_j_kgk": cv,
+            "z": z,
+            "molecular_weight": mw,
+            "critical_pressure_bar_a": pc,
+            "specific_heat_ratio": cp / cv if cv > 0 else 1.4,
         }
     except Exception:
         pass
@@ -745,19 +745,19 @@ LIQUID_PRESET_FLUIDS = {
 }
 
 
-def evaluate_liquid_preset(name: str, pressure_bar_a: float, temperature_c: float) -> dict[str, Any]:
-    """Return preset properties, corrected with CoolProp when P/T are in the liquid phase."""
+@lru_cache(maxsize=128)
+def _evaluate_liquid_preset_cached(name: str, p_rounded: float, t_rounded: float) -> tuple[tuple[str, Any], ...]:
     result = get_liquid_preset(name)
     result["temperature_corrected"] = False
     fluid = LIQUID_PRESET_FLUIDS.get(name)
     if fluid is None:
-        return result
+        return tuple(result.items())
     try:
-        phase = _phase_name(int(CP.PropsSI("PHASE", "P", pressure_bar_a * 1e5, "T", temperature_c + 273.15, fluid)))
+        phase = _phase_name(int(CP.PropsSI("PHASE", "P", p_rounded * 1e5, "T", t_rounded + 273.15, fluid)))
         if phase not in {"liquid", "supercritical_liquid"}:
             result["warning"] = "Seçilen P/T'de akışkan sıvı fazında değil; preset sabit değerleri kullanıldı."
-            return result
-        state = get_pure_fluid_state(fluid, pressure_bar_a, temperature_c)
+            return tuple(result.items())
+        state = get_pure_fluid_state(fluid, p_rounded, t_rounded)
         result.update(
             density_kg_m3=state["density_kg_m3"],
             viscosity_pa_s=state["viscosity_pa_s"],
@@ -767,9 +767,15 @@ def evaluate_liquid_preset(name: str, pressure_bar_a: float, temperature_c: floa
         )
     except Exception:
         pass
-    return result
+    return tuple(result.items())
 
 
+def evaluate_liquid_preset(name: str, pressure_bar_a: float, temperature_c: float) -> dict[str, Any]:
+    """Return preset properties, corrected with CoolProp when P/T are in the liquid phase."""
+    return dict(_evaluate_liquid_preset_cached(name, round(pressure_bar_a, 4), round(temperature_c, 3)))
+
+
+@lru_cache(maxsize=128)
 def get_saturated_steam_temperature(pressure_bar_a: float) -> float:
     """Return saturation temperature in Celsius for water/steam at given absolute pressure in bar."""
     p = float(pressure_bar_a)
@@ -782,6 +788,7 @@ def get_saturated_steam_temperature(pressure_bar_a: float) -> float:
         return 100.0 + 28.0 * math.log(max(p, 0.1))
 
 
+@lru_cache(maxsize=128)
 def get_saturated_steam_pressure(temperature_c: float) -> float:
     """Return saturation pressure in bar(a) for water/steam at given temperature in Celsius."""
     t = float(temperature_c)

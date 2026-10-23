@@ -93,24 +93,27 @@ def xfz_cavitation_factor(
     return numerator / denominator
 
 
-def cavitation_severity(sigma: float) -> str:
-    """Classify cavitation severity from cavitation index.
+def cavitation_severity(sigma: float, fl: float = 0.90) -> str:
+    """Classify cavitation severity from cavitation index and recovery factor FL.
 
     Parameters
     ----------
     sigma : Cavitation index [-]
+    fl : Liquid pressure recovery factor [-] (default 0.90 for standard globe)
 
     Returns
     -------
     Severity label string (Turkish).
     """
-    if sigma >= 1.0:
+    scale = (fl / 0.90) ** 2 if fl > 0 else 1.0
+    sigma_eff = sigma * scale
+    if sigma_eff >= 1.0:
         return "Kavitasyon yok"
-    if sigma >= 0.7:
+    if sigma_eff >= 0.7:
         return "Hafif kavitasyon"
-    if sigma >= 0.5:
+    if sigma_eff >= 0.5:
         return "Orta kavitasyon"
-    if sigma >= 0.3:
+    if sigma_eff >= 0.3:
         return "Siddetli kavitasyon"
     return "Flashing / tam kavitasyon"
 
@@ -168,11 +171,13 @@ def flash_fraction(
     liquid_cp_j_kgk: float,
     h_vap_j_kg: float,
     gas_constant_kj_kgk: float = 0.4615,
+    vapor_pressure_bar: float | None = None,
 ) -> float:
     """Estimate flashed vapor fraction for adiabatic flashing across a valve.
 
     Uses Clausius-Clapeyron to estimate saturation temperature drop,
     then energy balance: x = Cp_l * DeltaT_sat / h_fg.
+    For subcooled liquid (P1 > Pv), flashing initiates at Pv.
 
     Parameters
     ----------
@@ -184,20 +189,22 @@ def flash_fraction(
     gas_constant_kj_kgk : Fluid-specific gas constant [kJ/(kg*K)].
         Default 0.4615 = water (R/M = 8.314/18.015).
         For hydrocarbons: ~0.143 kJ/(kg·K) (R/M = 8.314/58).
+    vapor_pressure_bar : Vapor pressure [bar(a)] at inlet temperature.
 
     Returns
     -------
     Flashed vapor fraction [0-1]. Returns 0.0 if no flashing expected.
     """
-    if outlet_pressure_bar >= inlet_pressure_bar:
+    p_start = min(inlet_pressure_bar, vapor_pressure_bar) if (vapor_pressure_bar is not None and vapor_pressure_bar > 0) else inlet_pressure_bar
+    if outlet_pressure_bar >= p_start:
         return 0.0
     if h_vap_j_kg <= 0:
         return 0.0
     t_k = inlet_temperature_c + 273.15
     r_kj_kgk = max(gas_constant_kj_kgk, 0.01)
-    p_avg_bar = max((inlet_pressure_bar + outlet_pressure_bar) / 2.0, 0.01)
+    p_avg_bar = max((p_start + outlet_pressure_bar) / 2.0, 0.01)
     dtdp = (r_kj_kgk * t_k * t_k) / (p_avg_bar * h_vap_j_kg * 1e-3)
-    delta_p_bar = inlet_pressure_bar - outlet_pressure_bar
+    delta_p_bar = p_start - outlet_pressure_bar
     delta_t_sat = dtdp * delta_p_bar
     x = liquid_cp_j_kgk * delta_t_sat / h_vap_j_kg
     return max(0.0, min(x, 1.0))
