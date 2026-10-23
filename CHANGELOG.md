@@ -2,6 +2,19 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.4.0]
+
+### Added
+- Web UI standalone packaging: PyInstaller spec (`app_web.spec`), Inno Setup installer (`installer_web.iss`), and launcher (`app_web_launcher.py`) producing `ControlValveSizing_Web_Setup_<ver>.exe`, portable `.zip`, and macOS Apple Silicon `ControlValveSizing_Web_macos_arm64_<ver>.dmg`.
+- Global vendor catalog expansion: Masoneilan (21000, 41005, Camflex II), Flowserve (Valtek Mark One, MaxFlo 4), IMI CCI / Bopp & Reuther, WZI, and Azbil.
+- Parallel split-range dual-valve sizing engine for wide turndown services ($R_{Cv} > 50:1$).
+- GitHub Actions CI/CD release matrix building both Desktop (Tkinter) and Web (FastAPI/Three.js) packages.
+
+### Changed
+- Steam sizing directly adopts IEC 60534-2-1 Eq. 6a with coefficient $N_6 = 27.3$.
+- Pipeline reducer fitting factor $\Delta P_{max}$ correction aligned with IEC standards.
+- High-recovery rotary valve cavitation scaling verified for pressure recovery factor $F_L$.
+
 ## [3.3.4]
 
 ### Added

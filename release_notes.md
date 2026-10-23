@@ -1,53 +1,60 @@
-# Control Valve Sizing v3.3.4
+# Control Valve Sizing v3.4.0
 
 IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
-> Geçmiş sürümlerin what's new ve release notları: [CHANGELOG.md](CHANGELOG.md)
+> Geçmiş sürümlerin what's new ve release notları: [CHANGELOG.md](CHANGELOG.md) veya [docs/releases/](docs/releases/index.md)
 
 ## Bu sürümde yeni
 
-### Kurulum paketleri
+### Web Sürümü Bağımsız Paketleme (macOS Apple Silicon & Windows)
 
-- **Windows kurulum sihirbazı**: `ControlValveSizing_Setup_<version>.exe` (Inno Setup). Kullanıcı dizinine kurulur, yönetici izni gerektirmez; Başlat menüsü ve masaüstü kısayolu oluşturur.
-- **Taşınabilir Windows zip**: `ControlValveSizing_windows_x86_64_<version>.zip`.
-- **macOS DMG**: `ControlValveSizing_macos_arm64_<version>.dmg`; içinde `.app` ve `/Applications` kısayolu bulunur.
-- **Web Docker imajı**: `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` ve `latest`; non-root kullanıcı ve `/api/health` healthcheck.
-- Tüm çıktı dosyalarının adı sürüm numarasını içerir. Release iş akışı `vX.Y.Z` etiketini `valve_sizing.__version__` ile karşılaştırır.
+- **macOS (Apple Silicon M1+) Web UI Disk İmajı**: `ControlValveSizing_Web_macos_arm64_<version>.dmg`
+  - `.app` ve `/Applications` kısayolu içerir.
+  - Açıldığında FastAPI/Uvicorn motorunu arka planda başlatır ve varsayılan tarayıcıda Web UI'ı otomatik açar.
+- **Windows Web UI Kurulum Sihirbazı**: `ControlValveSizing_Web_Setup_<version>.exe` (Inno Setup, yönetici izni gerektirmez).
+- **Windows Web UI Taşınabilir Paket**: `ControlValveSizing_Web_windows_x86_64_<version>.zip`.
+- **Otomatik Port Tespiti**: 8501 portu meşgulse çakışmayı önlemek için müsait ilk port dinamik olarak seçilir.
+- **Minimalist Durum Penceresi**: Arka plan sunucusunu izleme, tarayıcıyı yeniden açma ve tek tıkla kapatma imkanı.
 
-### Arayüz
+### Küresel Vana Üretici Veritabanı Genişletmesi
 
-- **Hizmet sekmeleri**: Masaüstünde Notebook, web'de segmented butonlar; sekme ve açıklık slider'ı birbiriyle senkron.
-- **Birim dönüştürücü**: Masaüstünde dialog, web'de sidebar; `units.py` içindeki merkezi birim haritalarını kullanır.
-- **Testler**: Sürüm/meta veri tutarlılığı ve sürüm numaralı release çıktıları için testler eklendi.
+- **Masoneilan (ABD)**: 21000 single-port globe, 41005 balanced cage globe, Camflex II rotary plug.
+- **Flowserve (ABD)**: Valtek Mark One globe, MaxFlo 4 eccentric plug rotary.
+- **IMI CCI / Bopp & Reuther (Avrupa)**: Ağır hizmet proses kontrol vanaları serisi.
+- **WZI (Wuzhong Instrument - Çin)**: Enerji ve kimya sektörü yüksek performanslı kontrol vanaları serisi.
+- **Azbil (Japonya)**: ACTIVAL ve yüksek hassasiyetli cage/globe serisi kontrol vanaları.
 
-## Windows — Kurulum ve SmartScreen
+### Paralel Split-Range Vana Boyutlandırma Motoru ($R_{Cv} > 50:1$)
 
-- `ControlValveSizing_Setup_<version>.exe` dosyasını çalıştırın ve kurulum sihirbazını izleyin.
-- Alternatif olarak `ControlValveSizing_windows_x86_64_<version>.zip` dosyasını indirip açabilir, `ControlValveSizing.exe`'yi doğrudan çalıştırabilirsiniz.
-- Dağıtım imzasız olduğundan **SmartScreen "More info → Run anyway"** isteyebilir. Bu normaldir; uygulama
-  antivirüs/antimalware alarmını azaltmak için tek dosyalık değil klasör tabanlı (one-dir) ve UPX'siz derlenmiştir.
-- Kurulum sihirbazı varsayılan olarak kullanıcı dizinine kurar; yönetici izni gerekmez.
+- $Q_{max} / Q_{min} > 50$ aşırı turndown koşullarında tek vana kısıtını çözen otomatik paralel çift vana boyutlandırması.
+- Hassas düşük debi mikro trim vanası ve ana kontrol vanası optimizasyonu; geçiş debisi ve histerezis bandı önerileri.
 
-## macOS — Kurulum ve Gatekeeper
+### IEC 60534-2-1 ve Termodinamik Düzeltmeleri
 
-1. DMG'i açın, `ControlValveSizing.app`'i `/Applications`'a taşıyın.
-2. Uygulama noter onaylı (notarized) olmadığından ilk açılışta Gatekeeper uyarısı çıkar. Şu adımlardan birini kullanın:
-   - **Sağ tık → Aç** → "Aç" deyin, veya
-   - Terminalden karantina bayrağını kaldırın:
-     ```bash
-     xattr -dr com.apple.quarantine "/Applications/ControlValveSizing.app"
-     ```
+- IEC 60534-2-1 Denklem 6a ($N_6 = 27.3$) ile doğrudan buhar kütlesel debi hesabı.
+- Boru reducer/expander montajında $\Delta P_{max}$ ve $F_L$ kavitasyon katsayılarının standart revizyonu.
 
-## Web — Docker
+---
 
-```bash
-docker run --rm -p 8501:8501 ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>
-```
+## İndirilen Paketler ve Kurulum
 
-Tarayıcıda `http://localhost:8501` adresini açın. İmaj hem sürüm hem `latest` etiketiyle yayınlanır.
+| Sürüm / Paket | Platform | Dosya |
+|---|---|---|
+| **Web UI Disk İmajı** | macOS (Apple Silicon M1+) | `ControlValveSizing_Web_macos_arm64_<version>.dmg` |
+| **Web UI Kurulum Sihirbazı** | Windows (x86_64) | `ControlValveSizing_Web_Setup_<version>.exe` |
+| **Web UI Taşınabilir** | Windows (x86_64) | `ControlValveSizing_Web_windows_x86_64_<version>.zip` |
+| **Masaüstü (Tkinter) Disk İmajı** | macOS (Apple Silicon M1+) | `ControlValveSizing_macos_arm64_<version>.dmg` |
+| **Masaüstü (Tkinter) Kurulum** | Windows (x86_64) | `ControlValveSizing_Setup_<version>.exe` |
+| **Masaüstü (Tkinter) Taşınabilir** | Windows (x86_64) | `ControlValveSizing_windows_x86_64_<version>.zip` |
+| **Web Konteyner (Docker)** | Linux / Container | `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` |
 
-## Sistem Gereksinimleri
+### Windows Notları
+- `.exe` kurulum dosyasını çalıştırın ve kurulum sihirbazını izleyin.
+- İmzasız açık kaynak paket olduğu için **SmartScreen "More info → Run anyway"** uyarısı verebilir.
 
-- Windows 10 / 11 (64-bit)
-- macOS 12+ (Apple Silicon / M1-M4)
-- Web: Docker 24+ (veya `docker compose up --build`)
+### macOS Notları
+- DMG imajını açıp uygulamayı `/Applications` klasörüne sürükleyin.
+- Noter onayı (notarization) bulunmadığından ilk açılışta **Sağ tık → Aç** yapın veya terminalde karantinayı kaldırın:
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/ControlValveSizing_Web.app"
+  ```

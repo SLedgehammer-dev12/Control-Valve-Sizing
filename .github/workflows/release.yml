@@ -103,13 +103,44 @@ jobs:
         run: |
           Compress-Archive -Path "dist/ControlValveSizing" -DestinationPath "dist/ControlValveSizing_windows_x86_64_$env:CVS_VERSION.zip" -Force
 
+      - name: Build Web App with PyInstaller (one-dir, no UPX)
+        run: pyinstaller app_web.spec
+
+      - name: Smoke test frozen Web exe
+        shell: pwsh
+        run: |
+          $exe = "dist/ControlValveSizing_Web/ControlValveSizing_Web.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -PassThru
+          try {
+            $p | Wait-Process -Timeout 180 -ErrorAction Stop
+          } catch {
+            $p.Kill()
+            throw "Web self-test timed out"
+          }
+          if ($p.ExitCode -ne 0) { throw "Web self-test failed with exit code $($p.ExitCode)" }
+          Write-Host "Web self-test passed"
+
+      - name: Build Windows Web installer (versioned name)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=$env:CVS_VERSION" "installer_web.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          $setup = "dist/ControlValveSizing_Web_Setup_$env:CVS_VERSION.exe"
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+
+      - name: Package portable Web zip (versioned name)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/ControlValveSizing_Web" -DestinationPath "dist/ControlValveSizing_Web_windows_x86_64_$env:CVS_VERSION.zip" -Force
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ControlValveSizing-windows-x86_64
           path: |
-            dist/ControlValveSizing_Setup_*.exe
-            dist/ControlValveSizing_windows_x86_64_*.zip
+            dist/ControlValveSizing*Setup_*.exe
+            dist/ControlValveSizing*windows_x86_64_*.zip
           retention-days: 7
 
   build-macos:
@@ -169,11 +200,45 @@ jobs:
             "dist/ControlValveSizing_macos_arm64_${VERSION}.dmg"
           ls -la dist/*.dmg
 
+      - name: Build Web .app with PyInstaller (one-dir, no UPX)
+        run: ./build-venv/bin/pyinstaller app_web.spec
+
+      - name: Verify Web arm64 architecture
+        run: |
+          BIN=dist/ControlValveSizing_Web.app/Contents/MacOS/ControlValveSizing_Web
+          file "$BIN"
+          ARCHS="$(lipo -archs "$BIN")"
+          echo "Web Architectures: $ARCHS"
+          case "$ARCHS" in
+            *arm64*) echo "arm64 confirmed" ;;
+            *) echo "ERROR: not arm64"; exit 1 ;;
+          esac
+
+      - name: Ad-hoc codesign Web .app
+        run: codesign --force --deep --sign - dist/ControlValveSizing_Web.app
+
+      - name: Verify Web signature
+        run: codesign --verify --deep --strict dist/ControlValveSizing_Web.app
+
+      - name: Package versioned Web DMG (with Applications shortcut)
+        run: |
+          VERSION="${CVS_VERSION}"
+          STAGE="dist/dmg-stage-web"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          ditto dist/ControlValveSizing_Web.app "$STAGE/ControlValveSizing_Web.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Control Valve Sizing Web ${VERSION}" \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO \
+            "dist/ControlValveSizing_Web_macos_arm64_${VERSION}.dmg"
+          ls -la dist/*.dmg
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ControlValveSizing-macos-arm64
-          path: dist/ControlValveSizing_macos_arm64_*.dmg
+          path: dist/ControlValveSizing*.dmg
           retention-days: 7
 
   build-web:
@@ -241,12 +306,15 @@ jobs:
             echo
             echo "## İndirmeler"
             echo
-            echo "| Platform | Dosya |"
-            echo "|---|---|"
-            echo "| Windows (x86_64) | \`ControlValveSizing_Setup_${VERSION}.exe\` |"
-            echo "| Windows (taşınabilir) | \`ControlValveSizing_windows_x86_64_${VERSION}.zip\` |"
-            echo "| macOS (Apple Silicon) | \`ControlValveSizing_macos_arm64_${VERSION}.dmg\` |"
-            echo "| Web (Docker) | \`${IMAGE}:${VERSION}\` |"
+            echo "| Platform / Sürüm | Paket Tipi | Dosya / İmaj |"
+            echo "|---|---|---|"
+            echo "| Windows (x86_64) | Masaüstü Kurulum (Inno Setup) | \`ControlValveSizing_Setup_${VERSION}.exe\` |"
+            echo "| Windows (x86_64) | Masaüstü Taşınabilir (.zip) | \`ControlValveSizing_windows_x86_64_${VERSION}.zip\` |"
+            echo "| Windows (x86_64) | Web UI Kurulum (Inno Setup) | \`ControlValveSizing_Web_Setup_${VERSION}.exe\` |"
+            echo "| Windows (x86_64) | Web UI Taşınabilir (.zip) | \`ControlValveSizing_Web_windows_x86_64_${VERSION}.zip\` |"
+            echo "| macOS (Apple Silicon M1+) | Masaüstü Disk İmajı (.dmg) | \`ControlValveSizing_macos_arm64_${VERSION}.dmg\` |"
+            echo "| macOS (Apple Silicon M1+) | Web UI Disk İmajı (.dmg) | \`ControlValveSizing_Web_macos_arm64_${VERSION}.dmg\` |"
+            echo "| Web (Docker) | Container Image | \`${IMAGE}:${VERSION}\` |"
             echo
             tail -n +2 release_notes.md
           } > release_body.generated.md

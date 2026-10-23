@@ -709,9 +709,14 @@ def test_release_installers_include_version():
     iss = (APP_DIR / "installer.iss").read_text(encoding="utf-8")
     assert "OutputBaseFilename=ControlValveSizing_Setup_{#MyAppVersion}" in iss
 
+    iss_web = (APP_DIR / "installer_web.iss").read_text(encoding="utf-8")
+    assert "OutputBaseFilename=ControlValveSizing_Web_Setup_{#MyAppVersion}" in iss_web
+
     workflow = (APP_DIR / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "ControlValveSizing_macos_arm64_${VERSION}.dmg" in workflow
+    assert "ControlValveSizing_Web_macos_arm64_${VERSION}.dmg" in workflow
     assert "installer.iss" in workflow
+    assert "installer_web.iss" in workflow
     assert "build-web" in workflow
     assert "pattern: ControlValveSizing-*" in workflow
 

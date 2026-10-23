@@ -8,7 +8,7 @@ size_steam_valve), plus unit conversions (cv_to_kv, kv_to_cv).
 
 from __future__ import annotations
 
-__version__ = "3.3.4"
+__version__ = "3.4.0"
 
 import logging
 import math
