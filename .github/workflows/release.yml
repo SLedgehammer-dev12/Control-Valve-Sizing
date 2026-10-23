@@ -59,50 +59,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-build.txt pyinstaller
 
-      - name: Build with PyInstaller (one-dir, no UPX)
-        run: pyinstaller app_desktop.spec
-
-      - name: Verify bundled CoolProp DLL dependencies
-        shell: pwsh
-        run: |
-          $pyd = "dist/ControlValveSizing/_internal/CoolProp/CoolProp.pyd"
-          if (-not (Test-Path $pyd)) { throw "Missing $pyd" }
-          $libs = Get-ChildItem -Path "dist/ControlValveSizing/_internal" -Filter "coolprop.libs" -Directory
-          if (-not $libs) { throw "Missing coolprop.libs directory" }
-          if (-not (Get-ChildItem -Path $libs.FullName -Filter "*.dll")) { throw "coolprop.libs contains no DLLs" }
-
-      - name: Smoke test frozen exe
-        shell: pwsh
-        run: |
-          $exe = "dist/ControlValveSizing/ControlValveSizing.exe"
-          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -PassThru
-          try {
-            $p | Wait-Process -Timeout 180 -ErrorAction Stop
-          } catch {
-            $p.Kill()
-            throw "Self-test timed out"
-          }
-          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
-          Write-Host "Self-test passed"
-
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-
-      - name: Build Windows installer (versioned name)
-        shell: pwsh
-        run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
-          & $iscc "/DMyAppVersion=$env:CVS_VERSION" "installer.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
-          $setup = "dist/ControlValveSizing_Setup_$env:CVS_VERSION.exe"
-          if (-not (Test-Path $setup)) { throw "Missing $setup" }
-
-      - name: Package portable zip (versioned name)
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "dist/ControlValveSizing" -DestinationPath "dist/ControlValveSizing_windows_x86_64_$env:CVS_VERSION.zip" -Force
-
       - name: Build Web App with PyInstaller (one-dir, no UPX)
         run: pyinstaller app_web.spec
 
@@ -120,10 +76,14 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Web self-test failed with exit code $($p.ExitCode)" }
           Write-Host "Web self-test passed"
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
       - name: Build Windows Web installer (versioned name)
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
           & $iscc "/DMyAppVersion=$env:CVS_VERSION" "installer_web.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
           $setup = "dist/ControlValveSizing_Web_Setup_$env:CVS_VERSION.exe"
@@ -139,8 +99,8 @@ jobs:
         with:
           name: ControlValveSizing-windows-x86_64
           path: |
-            dist/ControlValveSizing*Setup_*.exe
-            dist/ControlValveSizing*windows_x86_64_*.zip
+            dist/ControlValveSizing_Web*Setup_*.exe
+            dist/ControlValveSizing_Web*windows_x86_64_*.zip
           retention-days: 7
 
   build-macos:
@@ -162,43 +122,6 @@ jobs:
           /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -m venv build-venv
           ./build-venv/bin/python -m pip install --upgrade pip
           ./build-venv/bin/python -m pip install -r requirements-build.txt pyinstaller
-
-      - name: Verify Tkinter is available
-        run: ./build-venv/bin/python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
-
-      - name: Build .app with PyInstaller (one-dir, no UPX)
-        run: ./build-venv/bin/pyinstaller app_desktop.spec
-
-      - name: Verify arm64 architecture
-        run: |
-          BIN=dist/ControlValveSizing.app/Contents/MacOS/ControlValveSizing
-          file "$BIN"
-          ARCHS="$(lipo -archs "$BIN")"
-          echo "Architectures: $ARCHS"
-          case "$ARCHS" in
-            *arm64*) echo "arm64 confirmed" ;;
-            *) echo "ERROR: not arm64"; exit 1 ;;
-          esac
-
-      - name: Ad-hoc codesign (required for Apple Silicon execution)
-        run: codesign --force --deep --sign - dist/ControlValveSizing.app
-
-      - name: Verify signature
-        run: codesign --verify --deep --strict dist/ControlValveSizing.app
-
-      - name: Package versioned DMG (with Applications shortcut)
-        run: |
-          VERSION="${CVS_VERSION}"
-          STAGE="dist/dmg-stage"
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE"
-          ditto dist/ControlValveSizing.app "$STAGE/ControlValveSizing.app"
-          ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "Control Valve Sizing ${VERSION}" \
-            -srcfolder "$STAGE" \
-            -ov -format UDZO \
-            "dist/ControlValveSizing_macos_arm64_${VERSION}.dmg"
-          ls -la dist/*.dmg
 
       - name: Build Web .app with PyInstaller (one-dir, no UPX)
         run: ./build-venv/bin/pyinstaller app_web.spec
@@ -238,7 +161,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ControlValveSizing-macos-arm64
-          path: dist/ControlValveSizing*.dmg
+          path: dist/ControlValveSizing_Web*.dmg
           retention-days: 7
 
   build-web:
@@ -306,14 +229,11 @@ jobs:
             echo
             echo "## İndirmeler"
             echo
-            echo "| Platform / Sürüm | Paket Tipi | Dosya / İmaj |"
+            echo "| Platform / Mimari | Paket Tipi | Dosya / İmaj |"
             echo "|---|---|---|"
-            echo "| Windows (x86_64) | Masaüstü Kurulum (Inno Setup) | \`ControlValveSizing_Setup_${VERSION}.exe\` |"
-            echo "| Windows (x86_64) | Masaüstü Taşınabilir (.zip) | \`ControlValveSizing_windows_x86_64_${VERSION}.zip\` |"
-            echo "| Windows (x86_64) | Web UI Kurulum (Inno Setup) | \`ControlValveSizing_Web_Setup_${VERSION}.exe\` |"
-            echo "| Windows (x86_64) | Web UI Taşınabilir (.zip) | \`ControlValveSizing_Web_windows_x86_64_${VERSION}.zip\` |"
-            echo "| macOS (Apple Silicon M1+) | Masaüstü Disk İmajı (.dmg) | \`ControlValveSizing_macos_arm64_${VERSION}.dmg\` |"
             echo "| macOS (Apple Silicon M1+) | Web UI Disk İmajı (.dmg) | \`ControlValveSizing_Web_macos_arm64_${VERSION}.dmg\` |"
+            echo "| Windows (x86_64) | Web UI Kurulum Sihirbazı (Inno Setup) | \`ControlValveSizing_Web_Setup_${VERSION}.exe\` |"
+            echo "| Windows (x86_64) | Web UI Taşınabilir (.zip) | \`ControlValveSizing_Web_windows_x86_64_${VERSION}.zip\` |"
             echo "| Web (Docker) | Container Image | \`${IMAGE}:${VERSION}\` |"
             echo
             tail -n +2 release_notes.md

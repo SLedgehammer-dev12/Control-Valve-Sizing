@@ -43,9 +43,6 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 | **Web UI Disk İmajı** | macOS (Apple Silicon M1+) | `ControlValveSizing_Web_macos_arm64_<version>.dmg` |
 | **Web UI Kurulum Sihirbazı** | Windows (x86_64) | `ControlValveSizing_Web_Setup_<version>.exe` |
 | **Web UI Taşınabilir** | Windows (x86_64) | `ControlValveSizing_Web_windows_x86_64_<version>.zip` |
-| **Masaüstü (Tkinter) Disk İmajı** | macOS (Apple Silicon M1+) | `ControlValveSizing_macos_arm64_<version>.dmg` |
-| **Masaüstü (Tkinter) Kurulum** | Windows (x86_64) | `ControlValveSizing_Setup_<version>.exe` |
-| **Masaüstü (Tkinter) Taşınabilir** | Windows (x86_64) | `ControlValveSizing_windows_x86_64_<version>.zip` |
 | **Web Konteyner (Docker)** | Linux / Container | `ghcr.io/sledgehammer-dev12/control-valve-sizing:<version>` |
 
 ### Windows Notları
