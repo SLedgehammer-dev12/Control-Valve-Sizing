@@ -9,6 +9,7 @@ Evaluates valve candidate series across simultaneous operating regimes to verify
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,6 +70,24 @@ class MultiCaseCandidate:
 
 
 @dataclass(frozen=True)
+class SplitRangeSolution:
+    """Parallel dual-valve split-range system configuration."""
+
+    small_valve: ValveSize
+    large_valve: ValveSize
+    small_valve_cv_rated: float
+    large_valve_cv_rated: float
+    total_cv_rated: float
+    small_valve_opening_at_min_pct: float
+    large_valve_opening_at_max_pct: float
+    signal_range_small: str
+    signal_range_large: str
+    overlap_range: str
+    combined_rangeability: float
+    recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class MultiCaseAnalysis:
     """Comprehensive multi-case sizing analysis result."""
 
@@ -80,6 +99,7 @@ class MultiCaseAnalysis:
     overall_summary: str
     warnings: list[str]
     cv_turndown_ratio: float = 1.0
+    split_range: SplitRangeSolution | None = None
 
     def to_isa20_process_cases(self, candidate: MultiCaseCandidate | None = None) -> list[dict[str, Any]]:
         """Convert operating case results into ISA Form 20 process condition rows."""
@@ -194,6 +214,80 @@ def _evaluate_single_case(
         valve_series=[valve],
         flow_characteristic=flow_characteristic,
         rangeability=rangeability,
+    )
+
+
+def design_split_range_valves(
+    service: str,
+    cases: list[OperatingCase],
+    base_fluid_data: dict[str, Any],
+    valve_series: list[ValveSize] | None = None,
+    flow_characteristic: str = "equal_percentage",
+    rangeability: float = DEFAULT_RANGEABILITY,
+    pipe_inlet_mm: float | None = None,
+    pipe_outlet_mm: float | None = None,
+) -> SplitRangeSolution | None:
+    """Design a parallel dual-valve split-range system for wide turndown regimes."""
+    if not cases:
+        return None
+    series = valve_series if valve_series is not None else DEFAULT_VALVE_SERIES
+    if len(series) < 2:
+        return None
+
+    min_case = min(cases, key=lambda c: c.flow)
+    max_case = max(cases, key=lambda c: c.flow)
+
+    inp_min = _build_case_input(service, min_case, base_fluid_data, pipe_inlet_mm, pipe_outlet_mm)
+    res_min = _evaluate_single_case(service, inp_min, series[-1], flow_characteristic, rangeability)
+    cv_min_req = float(res_min.required_cv)
+
+    inp_max = _build_case_input(service, max_case, base_fluid_data, pipe_inlet_mm, pipe_outlet_mm)
+    res_max = _evaluate_single_case(service, inp_max, series[-1], flow_characteristic, rangeability)
+    cv_max_req = float(res_max.required_cv)
+
+    if cv_min_req <= 0 or cv_max_req <= 0:
+        return None
+
+    small_valves = [v for v in series if v.cv_rated >= cv_min_req * 1.3]
+    small_valve = small_valves[0] if small_valves else series[0]
+
+    ratio_min = min(cv_min_req / small_valve.cv_rated, 1.0)
+    open_min = (1.0 + math.log(max(ratio_min, 1e-4)) / math.log(rangeability)) * 100.0
+    open_min = max(open_min, 12.0)
+
+    large_needed = max(cv_max_req - small_valve.cv_rated, cv_max_req * 0.70)
+    large_valves = [v for v in series if v.cv_rated >= large_needed * 1.15 and v.dn_mm >= small_valve.dn_mm]
+    large_valve = large_valves[0] if large_valves else series[-1]
+
+    total_cv = small_valve.cv_rated + large_valve.cv_rated
+    ratio_max = min(cv_max_req / total_cv, 1.0)
+    open_max = (1.0 + math.log(max(ratio_max, 1e-4)) / math.log(rangeability)) * 100.0
+    open_max = max(open_max, 50.0)
+
+    r_combined = rangeability * (1.0 + large_valve.cv_rated / max(small_valve.cv_rated, 0.01))
+
+    recs = [
+        f"Vana A (Küçük Debi): DN{small_valve.dn_mm} ({small_valve.inch}), Rated Cv: {small_valve.cv_rated:.1f}. "
+        f"DCS Sinyali: %0 - %50 (4 - 12 mA). Minimum debide tahmini açıklık: %{open_min:.1f}.",
+        f"Vana B (Büyük Debi): DN{large_valve.dn_mm} ({large_valve.inch}), Rated Cv: {large_valve.cv_rated:.1f}. "
+        f"DCS Sinyali: %50 - %100 (12 - 20 mA). Maksimum tepe debide tahmini açıklık: %{open_max:.1f}.",
+        "DCS Geçiş Örtüşmesi (Overlap): %48 - %52 aralığında yumuşak geçiş tanımlanarak hat basınç dalgalanması önlenmelidir.",
+        f"Kombine Efektif Rangeability: ~{r_combined:.0f}:1 (Tek vananın {rangeability:.0f}:1 sınırına göre çok daha geniş kontrol aralığı).",
+    ]
+
+    return SplitRangeSolution(
+        small_valve=small_valve,
+        large_valve=large_valve,
+        small_valve_cv_rated=small_valve.cv_rated,
+        large_valve_cv_rated=large_valve.cv_rated,
+        total_cv_rated=total_cv,
+        small_valve_opening_at_min_pct=open_min,
+        large_valve_opening_at_max_pct=open_max,
+        signal_range_small="4 - 12 mA (%0 - %50 DCS)",
+        signal_range_large="12 - 20 mA (%50 - %100 DCS)",
+        overlap_range="%48 - %52 (%4.8 - %5.2 DCS / 11.7 - 12.3 mA)",
+        combined_rangeability=r_combined,
+        recommendations=recs,
     )
 
 
@@ -340,6 +434,17 @@ def size_multicase(
             f"Gereken Cv turndown orani ({cv_turndown:.1f}:1) vana kontrol araligini ({rangeability:.0f}:1) asiyor!"
         )
 
+    split_sol: SplitRangeSolution | None = None
+    if cv_turndown > 35.0 or turndown > 35.0 or not rec_final:
+        split_sol = design_split_range_valves(
+            service, cases, base_fluid_data, series, flow_characteristic, rangeability, pipe_inlet_mm, pipe_outlet_mm
+        )
+        if split_sol:
+            global_warnings.append(
+                f"Genis turndown ({cv_turndown:.1f}:1): Paralel split-range Vana A (DN{split_sol.small_valve.dn_mm}) "
+                f"ve Vana B (DN{split_sol.large_valve.dn_mm}) konfigurasyonu onerildi."
+            )
+
     if rec_final:
         summary = (
             f"Onerilen Vana: DN{rec_final.valve.dn_mm} ({rec_final.valve.inch}), Rated Cv: {rec_final.valve.cv_rated}. "
@@ -360,4 +465,5 @@ def size_multicase(
         overall_summary=summary,
         warnings=global_warnings,
         cv_turndown_ratio=cv_turndown,
+        split_range=split_sol,
     )

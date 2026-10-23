@@ -51,6 +51,33 @@ def test_multicase_cv_turndown():
     assert analysis.cv_turndown_ratio > analysis.turndown_ratio  # Cv turndown is larger due to delta P
 
 
+def test_split_range_design_and_reporting():
+    from multi_case import OperatingCase, size_multicase
+    from reporting import build_multicase_report
+
+    # Extreme turndown: 2 m3/h at deltaP=8 bar to 200 m3/h at deltaP=2 bar (Turndown > 100:1)
+    cases = [
+        OperatingCase("Min", flow=2.0, p1_bar_a=10.0, p2_bar_a=2.0, temperature_c=25.0),
+        OperatingCase("Normal", flow=40.0, p1_bar_a=8.0, p2_bar_a=4.0, temperature_c=25.0),
+        OperatingCase("Max", flow=200.0, p1_bar_a=6.0, p2_bar_a=4.0, temperature_c=25.0),
+    ]
+    fluid_data = {
+        "density_kg_m3": 1000.0,
+        "viscosity_pa_s": 0.001,
+        "vapor_pressure_bar_a": 0.023,
+        "critical_pressure_bar_a": 220.64,
+    }
+    analysis = size_multicase("liquid", cases, fluid_data)
+    assert analysis.split_range is not None
+    assert analysis.split_range.small_valve.dn_mm < analysis.split_range.large_valve.dn_mm
+    assert analysis.split_range.combined_rangeability > 50.0
+
+    report = build_multicase_report(analysis)
+    assert "Paralel Split-Range Vana" in report
+    assert "Vana A (Küçük Debi)" in report
+
+
+
 def test_packing_emissions_temperature_advisories():
     from packing_emissions import recommend_packing_system
 

@@ -229,6 +229,22 @@ def build_multicase_report(analysis: Any) -> str:
             f"-> {cand.status_label}{flag}"
         )
 
+    if getattr(analysis, "split_range", None):
+        sr = analysis.split_range
+        lines.extend([
+            "",
+            "## Paralel Split-Range Vana Çözümü (Dual-Valve Configuration)",
+            f"- Vana A (Küçük Debi): DN{sr.small_valve.dn_mm} ({sr.small_valve.inch}), Rated Cv: {sr.small_valve_cv_rated:.1f}",
+            f"- Vana B (Büyük Debi): DN{sr.large_valve.dn_mm} ({sr.large_valve.inch}), Rated Cv: {sr.large_valve_cv_rated:.1f}",
+            f"- Toplam Nominal Kapasite: {sr.total_cv_rated:.1f} Cv",
+            f"- Kombine Efektif Rangeability: ~{sr.combined_rangeability:.0f}:1",
+            f"- Sinyal Dağılımı Vana A: {sr.signal_range_small}",
+            f"- Sinyal Dağılımı Vana B: {sr.signal_range_large}",
+            f"- DCS Geçiş Örtüşmesi: {sr.overlap_range}",
+        ])
+        for r in sr.recommendations:
+            lines.append(f"- Mühendislik Notu: {r}")
+
     return "\n".join(lines) + "\n"
 
 
