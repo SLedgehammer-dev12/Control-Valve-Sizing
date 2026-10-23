@@ -131,8 +131,10 @@ def calc_wide_open_relief_capacity(
     if srv == "liquid":
         sg = max(float(data.get("specific_gravity", 1.0)), 0.01)
         pv = max(float(data.get("vapor_pressure_bar_a", 0.023)), 0.0)
+        pc = float(data.get("critical_pressure_bar_a", 0.0))
         fl = max(float(data.get("fl", 0.90)), 0.1)
-        dp_max = (fl ** 2) * (p1 - 0.96 * pv)
+        ff = (0.96 - 0.28 * math.sqrt(max(pv / pc, 0.0))) if pc > 0 else 0.96
+        dp_max = (fl ** 2) * (p1 - ff * pv)
         if dp > dp_max > 0:
             effective_dp = dp_max
             is_choked = True

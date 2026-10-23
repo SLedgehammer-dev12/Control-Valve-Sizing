@@ -79,6 +79,7 @@ class MultiCaseAnalysis:
     candidates: list[MultiCaseCandidate]
     overall_summary: str
     warnings: list[str]
+    cv_turndown_ratio: float = 1.0
 
     def to_isa20_process_cases(self, candidate: MultiCaseCandidate | None = None) -> list[dict[str, Any]]:
         """Convert operating case results into ISA Form 20 process condition rows."""
@@ -330,12 +331,22 @@ def size_multicase(
 
     rec_final = next((c for c in final_candidates if c.is_recommended), None)
 
+    target_cand = rec_final or (final_candidates[0] if final_candidates else None)
+    req_cvs = [d.required_cv for d in target_cand.case_details.values() if d.required_cv > 0] if target_cand else []
+    cv_turndown = (max(req_cvs) / min(req_cvs)) if (req_cvs and min(req_cvs) > 0) else turndown
+
+    if cv_turndown > rangeability and cv_turndown > turndown:
+        global_warnings.append(
+            f"Gereken Cv turndown orani ({cv_turndown:.1f}:1) vana kontrol araligini ({rangeability:.0f}:1) asiyor!"
+        )
+
     if rec_final:
         summary = (
             f"Onerilen Vana: DN{rec_final.valve.dn_mm} ({rec_final.valve.inch}), Rated Cv: {rec_final.valve.cv_rated}. "
             f"Acikliklar: Min %{rec_final.opening_min_pct:.1f}, "
             f"Normal %{rec_final.opening_norm_pct:.1f}, "
-            f"Max %{rec_final.opening_max_pct:.1f}."
+            f"Max %{rec_final.opening_max_pct:.1f}. "
+            f"Cv Turndown: {cv_turndown:.1f}:1."
         )
     else:
         summary = "Mevcut vana serisinde tum calisma durumlarini ayni anda karsilayan uygun bir vana bulunamadi."
@@ -348,4 +359,5 @@ def size_multicase(
         candidates=final_candidates,
         overall_summary=summary,
         warnings=global_warnings,
+        cv_turndown_ratio=cv_turndown,
     )

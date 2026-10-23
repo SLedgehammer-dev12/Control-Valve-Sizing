@@ -9,6 +9,7 @@ the ValveSize dataclass.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from valve_sizing import ValveSize
 
@@ -608,6 +609,17 @@ class CatalogValveMatch:
     leakage_class: str
     fl: float
     xt: float
+
+    def __getitem__(self, key: str) -> Any:
+        aliases = {
+            "manufacturer": "vendor_name",
+            "model_name": "family",
+            "valve_type": "style",
+            "inch": "dn_inch",
+            "cv_rated": "rated_cv",
+            "opening_percent": "opening_pct",
+        }
+        return getattr(self, aliases.get(key, key))
 
 
 def find_catalog_matches(

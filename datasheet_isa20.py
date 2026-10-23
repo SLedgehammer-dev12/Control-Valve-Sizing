@@ -157,6 +157,19 @@ def build_isa20_datasheet(
         "Basınç-sıcaklık (P-T) de-rating dayanımı ASME B16.34 standardına uygundur.",
         "Sit kaçak sınıfı ANSI FCI 70-2 / IEC 60534-4 uyarınca test edilecektir.",
     ]
+    try:
+        from vendor_catalog import find_catalog_matches
+
+        req_cv = float(sizing_result.get("required_cv", 0.0))
+        if req_cv > 0:
+            top_m = find_catalog_matches(req_cv)
+            if top_m:
+                v_names = ", ".join(
+                    f"{m['manufacturer']} {m['model_name']} (DN{m['dn_mm']}, %{m['opening_percent']:.0f})" for m in top_m[:3]
+                )
+                notes.append(f"Uyumlu Global Modeller: {v_names}.")
+    except Exception:
+        pass
     if packing_guidance and packing_guidance.nace_mr0175_compliant:
         notes.append("Ekşi gaz servisi için tüm ıslak parçalar NACE MR0175 / ISO 15156 standardına uygun olmalıdır.")
 

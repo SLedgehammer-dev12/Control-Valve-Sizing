@@ -1081,3 +1081,23 @@ def test_api_catalog_matches() -> None:
     assert res_asia.status_code == 200
     asia_data = res_asia.json()
     assert all("Asia" in m["region"] for m in asia_data)
+
+
+def test_api_size_steam_contains_direct_mass() -> None:
+    payload = {
+        "flow_value": 1500.0,
+        "flow_unit": "kgh",
+        "p1_value": 10.0,
+        "p2_value": 6.0,
+        "pressure_unit": "bar_a",
+        "temperature_value": 220.0,
+        "temperature_unit": "C",
+        "vendor": "fisher_globe_eqpct",
+    }
+    response = client.post("/api/size/steam", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert "cv_iec_direct_mass" in data
+    assert data["cv_iec_direct_mass"] > 0
+    assert "kv_iec_direct_mass" in data
+

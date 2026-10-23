@@ -682,10 +682,10 @@ def get_pure_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float
             "viscosity_pa_s": mu,
             "cp_j_kgk": cp,
             "cv_j_kgk": cv,
-            "z": z,
+            "z": z if (z is not None and math.isfinite(z) and z > 0.01) else 1.0,
             "molecular_weight": mw,
             "critical_pressure_bar_a": pc,
-            "specific_heat_ratio": cp / cv if cv > 0 else 1.4,
+            "specific_heat_ratio": (cp / cv) if (cv and cv > 0 and math.isfinite(cp / cv) and 1.0 <= cp / cv <= 3.0) else 1.4,
         }
     except Exception:
         pass

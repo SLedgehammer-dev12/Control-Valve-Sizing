@@ -83,7 +83,9 @@ def test_gas_noise_receives_fl_then_fd(monkeypatch):
 
     captured = []
 
-    def fake_noise(service, _flow, _p1, _p2, _t_k, _density, _k, _mw, _kv, _valve_d, _pipe_d, fl, fd, _vapor_pressure_bar=None):
+    def fake_noise(
+        service, _flow, _p1, _p2, _t_k, _density, _k, _mw, _kv, _valve_d, _pipe_d, fl, fd, _vapor_pressure_bar=None, **_kwargs
+    ):
         captured.append((service, fl, fd))
         return 80.0
 

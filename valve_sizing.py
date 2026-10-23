@@ -352,6 +352,8 @@ def _predict_valve_noise(
     fl: float,
     fd: float,
     vapor_pressure_bar: float | None = None,
+    flp: float | None = None,
+    fp: float | None = None,
 ) -> float | None:
     """Estimate valve noise level [dB(A)] via IEC 60534-8 wrapper. Returns None on failure."""
     try:
@@ -370,7 +372,7 @@ def _predict_valve_noise(
             inlet_temperature_k=t_k, density_kg_m3=density_kg_m3,
             specific_heat_ratio=specific_heat_ratio, molecular_weight=mw,
             kv=kv, valve_diameter_m=valve_diameter_m, pipe_diameter_m=pipe_diameter_m,
-            fd=fd, fl=fl,
+            fd=fd, fl=fl, flp=flp, fp=fp,
         )
     except Exception:
         return None
@@ -920,7 +922,7 @@ def size_gas_valve(
         "gas", flow_kg_s_gas, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, gas_density_kg_m3, k, mw, required_kv,
         valve.dn_mm / 1000.0, (data.pipe_outlet_diameter_mm or data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
-        fl=fl, fd=fd,
+        fl=fl, fd=fd, fp=fp,
     )
 
     c_out = speed_of_sound_m_s(k, t_k, mw)
@@ -1182,7 +1184,7 @@ def size_steam_valve(
         "steam", flow_kg_h / 3600.0, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a,
         t_k, density, k, mw, required_kv,
         valve.dn_mm / 1000.0, (data.pipe_outlet_diameter_mm or data.pipe_inlet_diameter_mm or valve.dn_mm) / 1000.0,
-        fl=fl, fd=fd,
+        fl=fl, fd=fd, fp=fp_val,
     )
 
     act_thrust = _predict_actuator_thrust(valve.dn_mm, data.inlet_pressure_bar_a, data.outlet_pressure_bar_a)

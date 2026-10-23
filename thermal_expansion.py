@@ -123,6 +123,7 @@ def expansion_loop_length(length_m: float, delta_t_c: float, material: str, allo
     d_outer = 0.1
     s_pa = allowable_stress_mpa * 1e6
     e_pa = e_mod * 1e9
-    if s_pa <= 0:
+    if s_pa <= 0 or length_m <= 0:
         return 0.0
-    return ((3.0 * e_pa * d_outer * delta_l) / s_pa) ** 0.5
+    delta_l_abs = abs(delta_l)
+    return ((3.0 * e_pa * d_outer * delta_l_abs) / s_pa) ** 0.5

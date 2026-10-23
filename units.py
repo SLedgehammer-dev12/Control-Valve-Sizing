@@ -177,6 +177,38 @@ def pressure_from_bar_a(value_bar_a: float, unit: str) -> float:
     raise ValueError(f"Bilinmeyen basinc birimi: {unit}")
 
 
+def delta_pressure_to_bar(value: float, unit: str) -> float:
+    """Convert a differential pressure (delta P) to bar (no atmospheric offset)."""
+    base = unit.removesuffix("_a").removesuffix("_g")
+    if base == "bar":
+        return float(value)
+    if base == "psi":
+        return float(value) / BAR_TO_PSI
+    if base == "kPa":
+        return float(value) / 100.0
+    if base == "MPa":
+        return float(value) * 10.0
+    if base == "atm":
+        return float(value) * ATMOSPHERIC_BAR
+    raise ValueError(f"Bilinmeyen basinc farki birimi: {unit}")
+
+
+def delta_pressure_from_bar(value_bar: float, unit: str) -> float:
+    """Convert a differential pressure in bar to the requested unit."""
+    base = unit.removesuffix("_a").removesuffix("_g")
+    if base == "bar":
+        return float(value_bar)
+    if base == "psi":
+        return float(value_bar) * BAR_TO_PSI
+    if base == "kPa":
+        return float(value_bar) * 100.0
+    if base == "MPa":
+        return float(value_bar) / 10.0
+    if base == "atm":
+        return float(value_bar) / ATMOSPHERIC_BAR
+    raise ValueError(f"Bilinmeyen basinc farki birimi: {unit}")
+
+
 def liquid_flow_to_m3h(value: float, unit: str, density_kg_m3: float | None = None) -> float:
     """Convert a liquid volumetric/mass flow to m3/h."""
     if unit == "m3h":

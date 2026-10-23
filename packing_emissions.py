@@ -89,6 +89,17 @@ def recommend_packing_system(
             "sert karbon/metal halkalar (anti-extrusion rings) kullan\u0131lmal\u0131d\u0131r."
         )
 
+    if temperature_c < -40.0 and not is_toxic:
+        recs.append(
+            f"Kriyojenik servis ({temperature_c:.1f} \u00b0C): Salmastray\u0131 donma b\u00f6lgesinden uzak tutmak i\u00e7in "
+            "uzat\u0131lm\u0131\u015f boyun (extended cryogenic bonnet) ve kriyojenik salmastra sistemi zorunludur."
+        )
+    elif temperature_c > 450.0:
+        recs.append(
+            f"A\u015f\u0131r\u0131 y\u00fcksek s\u0131cakl\u0131k ({temperature_c:.1f} \u00b0C): Grafit oksidasyonunu \u00f6nlemek i\u00e7in "
+            "radyasyon kanatl\u0131 boyun ve kal\u0131planm\u0131\u015f y\u00fcksek safl\u0131kta grafit se\u00e7ilmelidir."
+        )
+
     return PackingGuidance(
         packing_type=packing_type,
         emission_class=emission_class,
