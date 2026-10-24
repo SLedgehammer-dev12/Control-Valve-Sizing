@@ -153,6 +153,9 @@ jobs:
       - name: Verify Web signature
         run: codesign --verify --deep --strict dist/ControlValveSizing_Web.app
 
+      - name: Smoke test Web .app
+        run: ./dist/ControlValveSizing_Web.app/Contents/MacOS/ControlValveSizing_Web --self-test
+
       - name: Package versioned Web DMG (with Applications shortcut)
         run: |
           VERSION="${CVS_VERSION}"

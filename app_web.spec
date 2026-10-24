@@ -163,6 +163,7 @@ a = Analysis(
         "reporting",
         "units",
         # Engine modules
+        "valve_3d",
         "valve_curve",
         "valve_noise",
         "actuator_sizing",
@@ -196,6 +197,9 @@ a = Analysis(
         "scipy.interpolate",
         "numpy",
         "numpy.core.multiarray",
+        # Visualization
+        "plotly",
+        "plotly.graph_objects",
     ],
     hookspath=["."],
     hooksconfig={},
