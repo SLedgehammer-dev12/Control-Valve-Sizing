@@ -142,3 +142,53 @@ def test_multicase_endpoint():
     assert "Min" in res["recommended"]["case_details"]
     assert "Norm" in res["recommended"]["case_details"]
     assert "Max" in res["recommended"]["case_details"]
+
+
+def test_flow_simulation_2d_endpoint():
+    resp = client.post(
+        "/api/flow-simulation-2d",
+        json={
+            "d1_mm": 50.0,
+            "d2_mm": 50.0,
+            "dn_mm": 50.0,
+            "p1_bar": 8.0,
+            "p2_bar": 5.0,
+            "pv_bar": 0.023,
+            "density_kg_m3": 998.0,
+            "flow_rate_m3_h": 25.0,
+            "opening_pct": 70.0,
+            "fl": 0.90,
+            "is_choked": False,
+            "fluid_type": "liquid",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "summary" in data
+    assert "geometry" in data
+    assert "grid" in data
+    assert data["summary"]["inlet_velocity_m_s"] > 0
+    assert data["summary"]["valve_type"] == "globe"
+    assert len(data["grid"]["u"]) == 50
+    assert len(data["grid"]["u"][0]) == 140
+
+    # Test butterfly valve type via endpoint
+    resp_bfly = client.post(
+        "/api/flow-simulation-2d",
+        json={
+            "d1_mm": 80.0,
+            "d2_mm": 80.0,
+            "dn_mm": 80.0,
+            "p1_bar": 6.0,
+            "p2_bar": 4.5,
+            "pv_bar": 0.023,
+            "density_kg_m3": 998.0,
+            "flow_rate_m3_h": 50.0,
+            "opening_pct": 60.0,
+            "valve_type": "butterfly",
+        },
+    )
+    assert resp_bfly.status_code == 200
+    bfly_data = resp_bfly.json()
+    assert bfly_data["summary"]["valve_type"] == "butterfly"
+    assert len(bfly_data["geometry"]["plug"]) == 4

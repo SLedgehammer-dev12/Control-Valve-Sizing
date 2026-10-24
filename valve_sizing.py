@@ -415,9 +415,23 @@ def _size_iteration(
     pipe_outlet_mm: float | None,
     compute: Callable[[float, float, float], dict],
     design_margin_pct: float = 0.0,
+    target_dn_mm: float | None = None,
 ) -> tuple[ValveSize, dict, bool]:
     """Common candidate-valve iteration used by liquid/gas/steam sizing."""
     margin_factor = 1.0 + max(float(design_margin_pct), 0.0) / 100.0
+
+    if target_dn_mm is not None and target_dn_mm > 0:
+        matched = [v for v in valve_series if abs(v.dn_mm - target_dn_mm) < 1.0]
+        if matched:
+            target_valve = matched[0]
+            d1 = _diameter_mm_to_m(pipe_inlet_mm, target_valve.dn_mm)
+            d2 = _diameter_mm_to_m(pipe_outlet_mm, target_valve.dn_mm)
+            d = target_valve.dn_mm / 1000.0
+            details = compute(d1, d2, d)
+            req_cv = kv_to_cv(details["Kv"])
+            is_overflow = target_valve.cv_rated < req_cv
+            return target_valve, details, is_overflow
+
     candidates: list[tuple[ValveSize, dict]] = []
     selected: tuple[ValveSize, dict] | None = None
     for valve in valve_series:
@@ -465,6 +479,7 @@ def size_liquid_valve(
     design_margin_pct: float = 0.0,
     flow_characteristic: str = "equal_percentage",
     rangeability: float = DEFAULT_RANGEABILITY,
+    target_dn_mm: float | None = None,
 ) -> SizingResult:
     """Size a control valve for liquid service.
 
@@ -507,6 +522,7 @@ def size_liquid_valve(
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
         design_margin_pct=design_margin_pct,
+        target_dn_mm=target_dn_mm,
     )
 
     required_kv = details["Kv"]
@@ -544,7 +560,23 @@ def size_liquid_valve(
             f"({pv:.3f} bar) esit veya altinda; akiskan vanaya kaynayan/iki-fazli giriyor. "
             "Tek fazli IEC sivi boyutlandirmasi yetersiz kalabilir; iki-fazli analiz gereklidir."
         )
-    if overflow:
+    if target_dn_mm is not None and target_dn_mm > 0:
+        if overflow:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana kapasitesi yetersiz (Gereken Cv: {required_cv:.2f}, Rated Cv: {valve.cv_rated:.2f}). "
+                "Vana tam acik olsa bile istenen debi gecemez."
+            )
+        elif opening_metrics["opening_percent"] < 20.0:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana asiri buyuk (Aciklik: %{opening_metrics['opening_percent']:.1f}). "
+                "Dusuk strokta avlanma (hunting) ve sit asinmasi (wire-drawing) riski."
+            )
+        elif opening_metrics["opening_percent"] > 85.0:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana acikligi %{opening_metrics['opening_percent']:.1f}; "
+                "onerilen %85 sinirinin uzerinde."
+            )
+    elif overflow:
         warnings.append("Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir.")
     elif not opening_metrics["rangeability_ok"]:
         warnings.append(
@@ -844,6 +876,7 @@ def size_gas_valve(
     design_margin_pct: float = 0.0,
     flow_characteristic: str = "equal_percentage",
     rangeability: float = DEFAULT_RANGEABILITY,
+    target_dn_mm: float | None = None,
 ) -> SizingResult:
     """Size a control valve for gas service.
 
@@ -885,6 +918,7 @@ def size_gas_valve(
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
         design_margin_pct=design_margin_pct,
+        target_dn_mm=target_dn_mm,
     )
 
     required_kv = details["Kv"]
@@ -902,7 +936,23 @@ def size_gas_valve(
     is_choked = x >= x_choked_effective
 
     warnings: list[str] = ["Gaz sizing IEC/ISA'ya yaklastirildi; yine de final secim vendor yazilimi ile dogrulanmali."]
-    if overflow:
+    if target_dn_mm is not None and target_dn_mm > 0:
+        if overflow:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana kapasitesi yetersiz (Gereken Cv: {required_cv:.2f}, Rated Cv: {valve.cv_rated:.2f}). "
+                "Vana tam acik olsa bile istenen debi gecemez."
+            )
+        elif opening_metrics["opening_percent"] < 20.0:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana asiri buyuk (Aciklik: %{opening_metrics['opening_percent']:.1f}). "
+                "Dusuk strokta avlanma (hunting) ve sit asinmasi (wire-drawing) riski."
+            )
+        elif opening_metrics["opening_percent"] > 85.0:
+            warnings.append(
+                f"Secilen DN{int(valve.dn_mm)} vana acikligi %{opening_metrics['opening_percent']:.1f}; "
+                "onerilen %85 sinirinin uzerinde."
+            )
+    elif overflow:
         warnings = ["Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."]
     elif not opening_metrics["rangeability_ok"]:
         warnings = [
@@ -1051,6 +1101,7 @@ def size_steam_valve(
     design_margin_pct: float = 0.0,
     flow_characteristic: str = "equal_percentage",
     rangeability: float = DEFAULT_RANGEABILITY,
+    target_dn_mm: float | None = None,
 ) -> SizingResult:
     """Size a control valve for steam service.
 
@@ -1121,6 +1172,7 @@ def size_steam_valve(
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
         design_margin_pct=design_margin_pct,
+        target_dn_mm=target_dn_mm,
     )
 
     required_kv = details["Kv"]
@@ -1149,7 +1201,23 @@ def size_steam_valve(
     warning = "Steam sizing IEC/ISA'ya yaklastirilmistir; yine de final secim vendor yazilimi ile dogrulanmali."
     if not iapws_ok and not coolprop_ok:
         warning += " Uyari: CoolProp devre disi, ideal gaz yaklasimi kullanildi (30 bar(a) uzerinde hata >%10)."
-    if overflow:
+    if target_dn_mm is not None and target_dn_mm > 0:
+        if overflow:
+            warning += (
+                f" Secilen DN{int(valve.dn_mm)} vana kapasitesi yetersiz (Gereken Cv: {required_cv:.2f}, Rated Cv: {valve.cv_rated:.2f}). "
+                "Vana tam acik olsa bile istenen debi gecemez."
+            )
+        elif opening_metrics["opening_percent"] < 20.0:
+            warning += (
+                f" Secilen DN{int(valve.dn_mm)} vana asiri buyuk (Aciklik: %{opening_metrics['opening_percent']:.1f}). "
+                "Dusuk strokta avlanma (hunting) ve sit asinmasi (wire-drawing) riski."
+            )
+        elif opening_metrics["opening_percent"] > 85.0:
+            warning += (
+                f" Secilen DN{int(valve.dn_mm)} vana acikligi %{opening_metrics['opening_percent']:.1f}; "
+                "onerilen %85 sinirinin uzerinde."
+            )
+    elif overflow:
         warning += " Gereken Cv secilebilir vana serisinin ustunde; en buyuk boyut secildi. Vendor dogrulamasi gereklidir."
     elif not opening_metrics["rangeability_ok"]:
         warning += (

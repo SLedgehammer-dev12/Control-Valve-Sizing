@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from config import GAS_PRESETS
 from datasheet_isa20 import build_isa20_datasheet, generate_isa20_html, generate_isa20_markdown
+from flow_2d_model import simulate_flow_2d
 from fluid_properties import (
     GAS_COMPONENT_ALIASES,
     LIQUID_PRESETS,
@@ -182,6 +183,7 @@ class LiquidRequest(BaseModel):
     pipe_inlet_diameter_mm: float | None = None
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
+    target_dn_mm: float | None = None
 
 
 class GasComponent(BaseModel):
@@ -215,6 +217,7 @@ class GasRequest(BaseModel):
     pipe_inlet_diameter_mm: float | None = None
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
+    target_dn_mm: float | None = None
 
 
 class SteamRequest(BaseModel):
@@ -233,6 +236,7 @@ class SteamRequest(BaseModel):
     pipe_inlet_diameter_mm: float | None = None
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
+    target_dn_mm: float | None = None
 
 
 class GasPropertiesRequest(BaseModel):
@@ -861,6 +865,7 @@ def size_liquid(request: LiquidRequest) -> dict[str, Any]:
         valve_meta=vendor_meta,
         design_margin_pct=margin,
         flow_characteristic=characteristic,
+        target_dn_mm=request.target_dn_mm,
     )
     fluid = {
         "service": "liquid",
@@ -932,6 +937,7 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
         valve_meta=vendor_meta,
         design_margin_pct=margin,
         flow_characteristic=characteristic,
+        target_dn_mm=request.target_dn_mm,
     )
     fluid.update({"service": "gas", "flow_nm3h": flow_nm3h, "p1_bar_a": p1_bar, "p2_bar_a": p2_bar})
     return _response(result, fluid, vendor_meta, characteristic, authority)
@@ -992,6 +998,7 @@ def size_steam(request: SteamRequest) -> dict[str, Any]:
         valve_meta=vendor_meta,
         design_margin_pct=margin,
         flow_characteristic=characteristic,
+        target_dn_mm=request.target_dn_mm,
     )
     fluid = {
         "service": "steam",
@@ -1137,6 +1144,53 @@ def size_multicase_endpoint(req: MultiCaseRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class Flow2DRequest(BaseModel):
+    d1_mm: float = 50.0
+    d2_mm: float = 50.0
+    dn_mm: float = 50.0
+    p1_bar: float = 8.0
+    p2_bar: float = 5.0
+    pv_bar: float = 0.023
+    density_kg_m3: float = 998.0
+    flow_rate_m3_h: float = 25.0
+    opening_pct: float = 70.0
+    fl: float = 0.90
+    is_choked: bool = False
+    fluid_type: str = "liquid"
+    viscosity_pa_s: float = 0.001
+    sonic_velocity_m_s: float = 1480.0
+    nx: int = 140
+    ny: int = 50
+    valve_type: str = "globe"
+
+
+@app.post("/api/flow-simulation-2d")
+def get_flow_simulation_2d(req: Flow2DRequest) -> dict[str, Any]:
+    try:
+        sim = simulate_flow_2d(
+            d1_mm=req.d1_mm,
+            d2_mm=req.d2_mm,
+            dn_mm=req.dn_mm,
+            p1_bar=req.p1_bar,
+            p2_bar=req.p2_bar,
+            pv_bar=req.pv_bar,
+            density_kg_m3=req.density_kg_m3,
+            flow_rate_m3_h=req.flow_rate_m3_h,
+            opening_pct=req.opening_pct,
+            fl=req.fl,
+            is_choked=req.is_choked,
+            fluid_type=req.fluid_type,
+            viscosity_pa_s=req.viscosity_pa_s,
+            sonic_velocity_m_s=req.sonic_velocity_m_s,
+            nx=req.nx,
+            ny=req.ny,
+            valve_type=req.valve_type,
+        )
+        return _json_safe(asdict(sim))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/", include_in_schema=False)
 def _serve_index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -1150,6 +1204,11 @@ def _serve_index_html() -> FileResponse:
 @app.get("/app.js", include_in_schema=False)
 def _serve_app_js() -> FileResponse:
     return FileResponse(WEB_DIR / "app.js", media_type="text/javascript")
+
+
+@app.get("/flow_2d_viewer.js", include_in_schema=False)
+def _serve_flow_2d_viewer_js() -> FileResponse:
+    return FileResponse(WEB_DIR / "flow_2d_viewer.js", media_type="text/javascript")
 
 
 @app.get("/styles.css", include_in_schema=False)

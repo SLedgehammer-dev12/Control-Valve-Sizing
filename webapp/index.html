@@ -48,6 +48,12 @@
         </label>
         <p class="vendor-info" id="vendor-info">Vendor bilgisi yükleniyor…</p>
         <label class="field">
+          <span>Vana Boyutu (DN)</span>
+          <select id="target-dn">
+            <option value="">Otomatik (Önerilen)</option>
+          </select>
+        </label>
+        <label class="field">
           <span>Tasarım marjı <b id="margin-value">%15</b></span>
           <input id="margin" type="range" min="0" max="100" step="5" value="15">
         </label>
@@ -362,6 +368,47 @@
               <span><i class="swatch flow-high"></i>Yüksek debi</span>
               <span class="hint" id="surface-operating"></span>
             </div>
+          </div>
+        </div>
+
+        <div class="card" id="card-flow-2d">
+          <div class="card-head">
+            <div>
+              <h3>2D Eksenel Akış Kesiti (CFD Simülasyonu)</h3>
+              <span class="hint">Giriş borusu, klape açıklığı, vena contracta ve çıkış borusu eksenel hız/basınç dağılımı</span>
+            </div>
+            <div class="flow2d-toolbar">
+              <label class="flow2d-opt"><span>Vana Tipi:</span>
+                <select id="flow2d-type">
+                  <option value="globe">Glop Vana (Linear Plug)</option>
+                  <option value="butterfly">Kelebek Vana (Döner Disk)</option>
+                  <option value="ball">Segment / V-Port Küresel</option>
+                  <option value="angle_cage">Kafesli Anti-Kavitasyon Trim</option>
+                </select>
+              </label>
+              <label class="flow2d-opt"><span>Katman:</span>
+                <select id="flow2d-layer">
+                  <option value="velocity">Hız Büyüklüğü (|V|)</option>
+                  <option value="pressure">Statik Basınç (P)</option>
+                  <option value="mach">Mach / Kavitasyon</option>
+                </select>
+              </label>
+              <label class="flow2d-opt check-opt">
+                <input type="checkbox" id="flow2d-particles" checked> Parçacıklar
+              </label>
+            </div>
+          </div>
+          <div class="flow2d-canvas-wrap">
+            <canvas id="flow2d-canvas" width="960" height="340" role="img" aria-label="2D Eksenel Akış Simülasyonu"></canvas>
+            <div id="flow2d-hud" class="flow2d-hud" hidden></div>
+          </div>
+          <div class="flow2d-metrics" id="flow2d-metrics">
+            <span class="f2d-tag">Giriş Hızı V₁: <b id="f2d-v1">-</b></span>
+            <span class="f2d-tag">Boğaz Hızı V_throat: <b id="f2d-vt">-</b></span>
+            <span class="f2d-tag">Vena Contracta V_vc: <b id="f2d-vvc">-</b></span>
+            <span class="f2d-tag">Çıkış Hızı V₂: <b id="f2d-v2">-</b></span>
+            <span class="f2d-tag">Vena Contracta P_vc: <b id="f2d-pvc">-</b></span>
+            <span class="f2d-tag" id="f2d-cav-badge">Durum: <b id="f2d-cav">-</b></span>
           </div>
         </div>
 

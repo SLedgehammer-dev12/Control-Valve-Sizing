@@ -1,3 +1,5 @@
+import { createFlow2DViewer } from "./flow_2d_viewer.js";
+
 const $ = (id) => document.getElementById(id);
 const SERVICE_LABELS = { liquid: "Sıvı", gas: "Gaz", steam: "Buhar" };
 const SERVICE_UNIT = {
@@ -29,6 +31,8 @@ const state = {
   three: null,
   valveViewer: null,
   surfaceViewer: null,
+  flow2DViewer: null,
+  flow2dType: "globe",
   pendingResult: null,
   revision: 0,
   pendingRecalc: false,
@@ -77,6 +81,16 @@ function formatInput(value) {
   if (abs >= 1000) return number.toFixed(1).replace(/\.0$/, "");
   if (abs >= 1) return number.toFixed(4).replace(/\.?0+$/, "");
   return number.toPrecision(5).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function display(value, digits = 3) {
@@ -269,6 +283,33 @@ function updateVendorInfo() {
   }
   const coefficients = [`FL ${vendor.fl ?? "—"}`, `xT ${vendor.xt ?? "—"}`, `Fd ${vendor.fd ?? "—"}`];
   $("vendor-info").textContent = `${vendor.family} · ${vendor.style} · ${coefficients.join(" · ")}`;
+  updateVendorSizes();
+}
+
+function updateVendorSizes() {
+  const select = $("target-dn");
+  if (!select) return;
+  const currentVal = select.value;
+  const vendor = findVendor($("vendor").value);
+  select.replaceChildren();
+  const autoOpt = document.createElement("option");
+  autoOpt.value = "";
+  autoOpt.textContent = "Otomatik (Önerilen)";
+  select.appendChild(autoOpt);
+
+  if (vendor && Array.isArray(vendor.sizes)) {
+    for (const size of vendor.sizes) {
+      const opt = document.createElement("option");
+      opt.value = String(size.dn_mm);
+      opt.textContent = `DN${size.dn_mm} (${size.inch}) · Rated Cv: ${size.cv_rated}`;
+      select.appendChild(opt);
+    }
+  }
+  if (currentVal && Array.from(select.options).some((o) => o.value === currentVal)) {
+    select.value = currentVal;
+  } else {
+    select.value = "";
+  }
 }
 
 function setRangeLabels() {
@@ -582,6 +623,7 @@ function servicePayload(service) {
     authority_pr: Number($("authority").value),
     pipe_inlet_diameter_mm: optionalNumber(`${service}-pipe-in`),
     pipe_outlet_diameter_mm: optionalNumber(`${service}-pipe-out`),
+    target_dn_mm: Number($("target-dn")?.value) || null,
   };
   if (service === "liquid") {
     Object.assign(payload, {
@@ -778,31 +820,48 @@ function renderResult(data) {
   $("results").hidden = false;
   markResultsStale(false);
   $("result-title").textContent = `${SERVICE_LABELS[data.service] || data.service} · DN${data.valve_dn_mm} / ${data.valve_inch}`;
+  const requiredCv = Number(data.required_cv) || 0;
+  const ratedCv = Number(data.rated_cv) || 0;
+  const actualMargin = requiredCv > 0 ? (ratedCv / requiredCv - 1) * 100 : 0;
+  const opening = Number(data.opening_percent) || 0;
+  const isTargetDn = Boolean($("target-dn")?.value);
+
   const badge = $("result-badge");
   let badgeText = "Kontrol edilebilir";
   let badgeClass = "ok";
-  if (data.is_choked) {
+  if (opening > 100 || actualMargin < 0) {
+    badgeText = "Kapasite yetersiz";
+    badgeClass = "bad";
+  } else if (data.is_choked) {
     badgeText = "Choked akış";
     badgeClass = "warn";
   } else if (data.rangeability_ok === false) {
     badgeText = "Rangeability dışı";
     badgeClass = "warn";
-  } else if (Number(data.opening_percent) > 85 || Number(data.opening_percent) < 20) {
-    badgeText = "Açıklık sınırı";
+  } else if (opening < 20) {
+    badgeText = isTargetDn ? "Aşırı büyük (Oversized)" : "Açıklık sınırı (<%20)";
+    badgeClass = "warn";
+  } else if (opening > 85) {
+    badgeText = "Açıklık sınırı (>%85)";
     badgeClass = "warn";
   }
   badge.textContent = badgeText;
   badge.className = `badge ${badgeClass}`;
 
-  const requiredCv = Number(data.required_cv) || 0;
-  const ratedCv = Number(data.rated_cv) || 0;
-  const actualMargin = requiredCv > 0 ? (ratedCv / requiredCv - 1) * 100 : 0;
-  const opening = Number(data.opening_percent) || 0;
   let verdict = `Gerekli Cv ${display(requiredCv, 2)}; seçilen vana ${display(ratedCv, 2)} Cv ile %${display(actualMargin, 0)} marj sağlıyor.`;
-  if (data.is_choked) verdict += " Akış choked; daha büyük vana veya özel trim değerlendirin.";
-  else if (opening > 85) verdict += " Açıklık %85 üzerinde; bir üst gövde boyutunu değerlendirin.";
-  else if (opening < 20) verdict += " Açıklık %20 altında; daha küçük trim düşünün.";
-  else verdict += " Açıklık kontrol aralığında.";
+  if (opening > 100 || actualMargin < 0) {
+    verdict += " 🔴 Kapasite yetersiz! Vana tam açıkken dahi istenen debi geçemez; daha büyük DN seçin.";
+  } else if (data.is_choked) {
+    verdict += " Akış choked; daha büyük vana veya özel trim değerlendirin.";
+  } else if (opening < 20) {
+    verdict += isTargetDn
+      ? " 🟡 Seçilen DN aşırı büyük (%20 altında açıklık); düşük strokta avlanma (hunting) ve sit aşınması (wire-drawing) riski."
+      : " Açıklık %20 altında; daha küçük trim düşünün.";
+  } else if (opening > 85) {
+    verdict += " Açıklık %85 üzerinde; bir üst gövde boyutunu değerlendirin.";
+  } else {
+    verdict += isTargetDn ? " 🟢 Açıklık kontrol aralığında (%20-%85 ideal çalışma)." : " Açıklık kontrol aralığında.";
+  }
   $("result-verdict").textContent = verdict;
 
   const metrics = $("metrics");
@@ -1416,10 +1475,40 @@ function renderSurface(surface) {
 
 function renderVisuals(data) {
   if (data.visuals?.curve) renderCurve(data.visuals.curve);
+  updateFlow2D(data);
   if (!state.three) return;
   const openingPct = data.visuals?.surface?.operating?.opening_pct ?? data.opening_percent ?? 0;
   loadValveMesh(data.valve_dn_mm, openingPct);
   if (data.visuals?.surface) renderSurface(data.visuals.surface);
+}
+
+async function updateFlow2D(data) {
+  if (!state.flow2DViewer) return;
+  try {
+    const payload = {
+      d1_mm: Number(data.pipe_inlet_diameter_mm) || Number(data.valve_dn_mm) || 50.0,
+      d2_mm: Number(data.pipe_outlet_diameter_mm) || Number(data.valve_dn_mm) || 50.0,
+      dn_mm: Number(data.valve_dn_mm) || 50.0,
+      p1_bar: Number(data.p1_bar_a) || 8.0,
+      p2_bar: Number(data.p2_bar_a) || 5.0,
+      pv_bar: Number(data.vapor_pressure_bar_a ?? data.fluid?.vapor_pressure) || 0.023,
+      density_kg_m3: Number(data.density_kg_m3 ?? data.fluid?.density) || 998.0,
+      flow_rate_m3_h: Number(data.flow_rate_m3_h ?? data.volumetric_flow_m3_h) || 25.0,
+      opening_pct: Number(data.opening_percent) || 70.0,
+      fl: Number(data.fl) || 0.90,
+      is_choked: Boolean(data.is_choked),
+      fluid_type: data.service || "liquid",
+      viscosity_pa_s: Number(data.viscosity_pa_s ?? data.fluid?.viscosity) || 0.001,
+      sonic_velocity_m_s: Number(data.fluid?.speed_of_sound) || (data.service === "gas" ? 340.0 : 1480.0),
+      nx: 140,
+      ny: 50,
+      valve_type: state.flow2dType || $("flow2d-type")?.value || "globe",
+    };
+    const simResult = await postJson("/api/flow-simulation-2d", payload);
+    state.flow2DViewer.update(simResult);
+  } catch (err) {
+    console.error("2D Flow simulation update error:", err);
+  }
 }
 
 async function loadValveMesh(dn, openingPct = 0) {
@@ -1671,9 +1760,22 @@ function setupEvents() {
     event.target.removeAttribute("aria-invalid");
   });
   $("vendor").addEventListener("change", () => {
+    const vKey = $("vendor").value || "";
+    if (vKey.includes("bfly") || vKey.includes("triple_offset")) {
+      state.flow2dType = "butterfly";
+    } else if (vKey.includes("vnotch") || vKey.includes("vport") || vKey.includes("camflex") || vKey.includes("rotary")) {
+      state.flow2dType = "ball";
+    } else if (vKey.includes("drag_disk") || vKey.includes("severe")) {
+      state.flow2dType = "angle_cage";
+    } else {
+      state.flow2dType = "globe";
+    }
+    const typeSel = $("flow2d-type");
+    if (typeSel) typeSel.value = state.flow2dType;
     updateVendorInfo();
     scheduleRecalc();
   });
+  $("target-dn")?.addEventListener("change", scheduleRecalc);
   $("margin").addEventListener("input", () => {
     setRangeLabels();
     scheduleRecalc();
@@ -2209,6 +2311,7 @@ async function init() {
     $("api-status").textContent = "API çevrimiçi";
     $("api-status").className = "status-dot ok";
     fillSelect($("vendor"), meta.vendors, "key", "label");
+    updateVendorSizes();
     fillSelect($("characteristic"), meta.characteristics, "key", "label");
     fillSelect($("liquid-preset"), meta.liquid_presets, "key", "label");
     fillSelect($("gas-preset"), meta.gas_presets.map((item) => item.name), (name) => name, (name) => name);
@@ -2220,6 +2323,11 @@ async function init() {
     setDefaults();
     await applyLiquidPreset();
     init3d();
+    state.flow2DViewer = createFlow2DViewer();
+    $("flow2d-type")?.addEventListener("change", (e) => {
+      state.flow2dType = e.target.value;
+      if (state.pendingResult) updateFlow2D(state.pendingResult);
+    });
     await calculate(true);
   } catch (error) {
     $("api-status").textContent = "API bağlantı hatası";
