@@ -189,16 +189,20 @@ class CompositionSummary:
     model_used: str = "unknown"
 
 
-def _phase_name(phase: int) -> str:
-    return {
-        CP.iphase_liquid: "liquid",
-        CP.iphase_supercritical: "supercritical",
-        CP.iphase_supercritical_gas: "supercritical_gas",
-        CP.iphase_supercritical_liquid: "supercritical_liquid",
-        CP.iphase_gas: "gas",
-        CP.iphase_twophase: "two_phase",
-        CP.iphase_critical_point: "critical_point",
-    }.get(int(phase), "unknown")
+def _phase_name(phase: Any) -> str:
+    phase_map: dict[Any, str] = {
+        getattr(CP, "iphase_liquid", 0): "liquid",
+        getattr(CP, "iphase_supercritical", 1): "supercritical",
+        getattr(CP, "iphase_supercritical_gas", 2): "supercritical_gas",
+        getattr(CP, "iphase_supercritical_liquid", 3): "supercritical_liquid",
+        getattr(CP, "iphase_gas", 4): "gas",
+        getattr(CP, "iphase_twophase", 5): "two_phase",
+        getattr(CP, "iphase_critical_point", 6): "critical_point",
+    }
+    try:
+        return phase_map.get(int(phase), "unknown")
+    except (ValueError, TypeError):
+        return phase_map.get(phase, "unknown")
 
 
 @lru_cache(maxsize=1)
@@ -666,9 +670,9 @@ def get_pure_fluid_state(fluid: str, pressure_bar_a: float, temperature_c: float
 
     try:
         try:
-            vp = CP.PropsSI("P", "T", t_k, "Q", 0, fluid) / 1e5
+            vp = float(CP.PropsSI("P", "T", t_k, "Q", 0, fluid) / 1e5)
         except Exception:
-            vp = None
+            vp = 0.0
         d = CP.PropsSI("D", "P", p_pa, "T", t_k, fluid)
         mu = CP.PropsSI("V", "P", p_pa, "T", t_k, fluid)
         cp = CP.PropsSI("C", "P", p_pa, "T", t_k, fluid)

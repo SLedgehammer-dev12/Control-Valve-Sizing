@@ -6,6 +6,7 @@ import logging
 import math
 import numbers
 import os
+import sys
 from dataclasses import asdict, is_dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -68,7 +69,23 @@ logger = logging.getLogger(__name__)
 
 _CSP_IMPORTMAP_HASH = "sha256-xf3sU1w0Wr567uJ/u9YBdQqa41lxIgMCRWfThIuPGZw="
 
-WEB_DIR = Path(__file__).resolve().parent / "webapp"
+def _resolve_web_dir() -> Path:
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(Path(meipass) / "webapp")
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "webapp")
+        candidates.append(exe_dir / "_internal" / "webapp")
+    candidates.append(Path(__file__).resolve().parent / "webapp")
+    for cand in candidates:
+        if cand.is_dir():
+            return cand
+    return candidates[0]
+
+
+WEB_DIR = _resolve_web_dir()
 CHARACTERISTICS = [
     {"key": "equal_percentage", "label": "Eşit Yüzde"},
     {"key": "linear", "label": "Doğrusal"},
@@ -1006,4 +1023,6 @@ def _serve_styles() -> FileResponse:
     return FileResponse(WEB_DIR / "styles.css", media_type="text/css")
 
 
-app.mount("/vendor", StaticFiles(directory=str(WEB_DIR / "vendor")), name="vendor")
+vendor_dir = WEB_DIR / "vendor"
+if vendor_dir.is_dir():
+    app.mount("/vendor", StaticFiles(directory=str(vendor_dir)), name="vendor")

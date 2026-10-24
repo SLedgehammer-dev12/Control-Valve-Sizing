@@ -113,6 +113,43 @@ def _run_mini_gui(url: str, stop_server_fn) -> None:
         logger.info("GUI initialization skipped (%s); running in console mode.", exc)
 
 
+def _self_test() -> int:
+    """Headless self-test for CI verification of frozen executable."""
+    try:
+        import uvicorn
+
+        from api import app
+        from fluid_properties import get_pure_fluid_state
+        from valve_sizing import LiquidSizingInput, size_liquid_valve
+
+        assert app is not None
+        assert uvicorn is not None
+
+        state = get_pure_fluid_state("Water", 5.0, 25.0)
+        res = size_liquid_valve(
+            LiquidSizingInput(
+                flow_m3h=10.0,
+                inlet_pressure_bar_a=5.0,
+                outlet_pressure_bar_a=3.0,
+                density_kg_m3=state["density_kg_m3"],
+                vapor_pressure_bar_a=state["vapor_pressure_bar_a"],
+                critical_pressure_bar_a=state["critical_pressure_bar_a"],
+                viscosity_pa_s=state["viscosity_pa_s"],
+                fl=0.9,
+            )
+        )
+        assert res.required_cv > 0
+        if sys.stdout is not None:
+            sys.stdout.write("Control Valve Sizing Web self-test passed.\n")
+            sys.stdout.flush()
+        return 0
+    except Exception as exc:
+        if sys.stderr is not None:
+            sys.stderr.write(f"Self-test failed: {exc}\n")
+            sys.stderr.flush()
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Control Valve Sizing Web Application Launcher")
     parser.add_argument("--port", type=int, default=8501, help="Preferred port (default: 8501)")
@@ -122,14 +159,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.self_test:
-        import uvicorn
-
-        from api import app
-
-        assert app is not None
-        assert uvicorn is not None
-        print("Control Valve Sizing Web self-test passed.")
-        return 0
+        return _self_test()
 
     import uvicorn
 
@@ -183,4 +213,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(_self_test())
     sys.exit(main())
