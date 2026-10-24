@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from config import GAS_PRESETS
+from datasheet_isa20 import build_isa20_datasheet, generate_isa20_html, generate_isa20_markdown
 from fluid_properties import (
     GAS_COMPONENT_ALIASES,
     LIQUID_PRESETS,
@@ -31,6 +32,9 @@ from fluid_properties import (
     get_steam_properties_iapws,
     prepare_composition_rows,
 )
+from multi_case import OperatingCase, size_multicase
+from project_io import build_project_payload, validate_project_payload
+from reporting import build_report
 from units import (
     DEFAULT_UNITS,
     GAS_FLOW_UNITS,
@@ -59,6 +63,7 @@ from valve_sizing import (
     SizingResult,
     SteamSizingInput,
     __version__,
+    _pack_result,
     size_gas_valve,
     size_liquid_valve,
     size_steam_valve,
@@ -1003,6 +1008,135 @@ def size_steam(request: SteamRequest) -> dict[str, Any]:
     return _response(result, fluid, vendor_meta, characteristic, authority)
 
 
+class ProjectExportRequest(BaseModel):
+    service: str
+    data: dict[str, Any]
+
+
+@app.post("/api/project/export")
+def export_project(req: ProjectExportRequest) -> JSONResponse:
+    try:
+        service = req.service.lower()
+        payload = build_project_payload(service, req.data)
+        validate_project_payload(payload)
+        return JSONResponse(content=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/project/import")
+def import_project(payload: dict[str, Any]) -> JSONResponse:
+    try:
+        validate_project_payload(payload)
+        return JSONResponse(content=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class ISA20ReportRequest(BaseModel):
+    tag_number: str = "CV-101"
+    service_description: str = "Proses Kontrol Vanası"
+    line_number: str = '3"-P-101-CS'
+    pid_number: str = "PID-010"
+    service_type: str = "Liquid"
+    fluid_name: str = "Water"
+    sizing_result: dict[str, Any]
+    vendor_key: str = "fisher_globe_eqpct"
+    body_material: str = "WCB"
+    bonnet_type: str = "Standard"
+    end_connections: str = "Flanged ASME B16.5 RF"
+
+
+@app.post("/api/report/isa20")
+def generate_isa20(req: ISA20ReportRequest) -> dict[str, Any]:
+    try:
+        sheet = build_isa20_datasheet(
+            tag_number=req.tag_number,
+            service_description=req.service_description,
+            line_number=req.line_number,
+            pid_number=req.pid_number,
+            service_type=req.service_type,
+            fluid_name=req.fluid_name,
+            sizing_result=req.sizing_result,
+            vendor_key=req.vendor_key,
+            body_material=req.body_material,
+            bonnet_type=req.bonnet_type,
+            end_connections=req.end_connections,
+        )
+        return {
+            "markdown": generate_isa20_markdown(sheet),
+            "html": generate_isa20_html(sheet),
+            "datasheet": _json_safe(asdict(sheet)),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class MarkdownReportRequest(BaseModel):
+    service: str
+    fluid_summary: dict[str, Any] | None = None
+    sizing_result: dict[str, Any]
+
+
+@app.post("/api/report/markdown")
+def generate_markdown_report(req: MarkdownReportRequest) -> dict[str, str]:
+    try:
+        sizing_obj = _pack_result(req.sizing_result)
+        report_md = build_report(req.service, req.fluid_summary, sizing_obj)
+        return {"report_markdown": report_md}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class MultiCaseInputItem(BaseModel):
+    name: str
+    flow: float
+    p1_bar_a: float
+    p2_bar_a: float
+    temperature_c: float
+    extra_props: dict[str, Any] = Field(default_factory=dict)
+
+
+class MultiCaseRequest(BaseModel):
+    service: str = "liquid"
+    cases: list[MultiCaseInputItem]
+    base_fluid_data: dict[str, Any]
+    vendor: str = "fisher_globe_eqpct"
+    flow_characteristic: str = "equal_percentage"
+    pipe_inlet_diameter_mm: float | None = None
+    pipe_outlet_diameter_mm: float | None = None
+
+
+@app.post("/api/size/multi-case")
+def size_multicase_endpoint(req: MultiCaseRequest) -> dict[str, Any]:
+    try:
+        service = req.service.lower()
+        definition, _ = _vendor(req.vendor)
+        cases = [
+            OperatingCase(
+                name=c.name,
+                flow=c.flow,
+                p1_bar_a=c.p1_bar_a,
+                p2_bar_a=c.p2_bar_a,
+                temperature_c=c.temperature_c,
+                extra_props=c.extra_props,
+            )
+            for c in req.cases
+        ]
+        analysis = size_multicase(
+            service=service,
+            cases=cases,
+            base_fluid_data=req.base_fluid_data,
+            valve_series=definition.sizes,
+            flow_characteristic=req.flow_characteristic,
+            pipe_inlet_mm=req.pipe_inlet_diameter_mm,
+            pipe_outlet_mm=req.pipe_outlet_diameter_mm,
+        )
+        return _json_safe(asdict(analysis))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/", include_in_schema=False)
 def _serve_index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -1021,6 +1155,16 @@ def _serve_app_js() -> FileResponse:
 @app.get("/styles.css", include_in_schema=False)
 def _serve_styles() -> FileResponse:
     return FileResponse(WEB_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/manifest.json", include_in_schema=False)
+def _serve_manifest() -> FileResponse:
+    return FileResponse(WEB_DIR / "manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def _serve_sw() -> FileResponse:
+    return FileResponse(WEB_DIR / "sw.js", media_type="text/javascript")
 
 
 vendor_dir = WEB_DIR / "vendor"

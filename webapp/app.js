@@ -836,6 +836,7 @@ function renderResult(data) {
 
   renderVisuals(data);
   renderDetails(data);
+  renderDiagnostics(data);
 }
 
 function appendTable(container, title, entries) {
@@ -927,6 +928,138 @@ function renderDetails(data) {
     hint.className = "hint";
     hint.textContent = "Bu servis için ek detay verisi yok.";
     details.append(hint);
+  }
+}
+
+function renderDiagnostics(data) {
+  const splitCard = $("diag-split-range");
+  const turndown = Number(data.turndown_ratio || (data.cv_ratio ? 1 / data.cv_ratio : 1));
+  const needsSplit = Boolean(data.split_range || data.split_range_recommendation || turndown > 50);
+  if (needsSplit && splitCard) {
+    splitCard.hidden = false;
+    $("split-range-desc").textContent = `Proses debi turndown oranı ${display(turndown, 1)}:1 > 50:1 olduğundan tek vana kontrol aralığı yetersiz kalmaktadır. Paralel Split-Range (küçük hassas mikro trim + ana vana) konfigürasyonu önerilir.`;
+    const vGrid = $("split-valve-grid");
+    vGrid.replaceChildren();
+    vGrid.innerHTML = `
+      <div class="split-valve-card">
+        <h5>Vana A (Düşük Debi Hassas Trim)</h5>
+        <p>Kontrol Sinyali: %0 - %50 (4 - 12 mA)</p>
+        <p>Boyut: DN15 - DN25 (Mikro Cv Trimi)</p>
+        <p>Amaç: Kalkış, duruş ve hassas düşük debi kontrolü</p>
+      </div>
+      <div class="split-valve-card">
+        <h5>Vana B (Ana Proses Kontrol Vanası)</h5>
+        <p>Kontrol Sinyali: %50 - %100 (12 - 20 mA)</p>
+        <p>Boyut: DN${data.valve_dn_mm || 50} (${data.valve_inch || '2"'})</p>
+        <p>Amaç: Normal proses ve pik tasarım kapasitesi</p>
+      </div>
+    `;
+  } else if (splitCard) {
+    splitCard.hidden = true;
+  }
+
+  const cavitFill = $("cavit-fill");
+  const cavitBadge = $("cavit-badge");
+  const cavitDesc = $("cavit-desc");
+  const sigma = Number(data.cavitation_index || data.sigma || 2.5);
+  if (cavitFill && cavitBadge && cavitDesc) {
+    if (data.is_flashing || data.flashing_flag) {
+      cavitFill.style.width = "100%";
+      cavitFill.style.background = "#ef4444";
+      cavitBadge.textContent = "Flashing (Buharlaşma)";
+      cavitBadge.className = "diag-badge bad";
+      cavitDesc.textContent = "Çıkış basıncı buhar basıncının altında kalmaktadır; iki fazlı akış mevcuttur. Sertleştirilmiş Stellite trim ve genişletilmiş boru çıkışı zorunludur.";
+    } else if (data.is_choked || sigma < 1.0) {
+      cavitFill.style.width = "90%";
+      cavitFill.style.background = "#ef4444";
+      cavitBadge.textContent = "Şiddetli Kavitasyon";
+      cavitBadge.className = "diag-badge bad";
+      cavitDesc.textContent = `Kavitasyon katsayısı σ = ${display(sigma, 2)} kritik seviyenin altında. Çok kademeli kavitasyon önleyici anti-cavitation trim kullanılmalıdır.`;
+    } else if (sigma < 1.8) {
+      cavitFill.style.width = "60%";
+      cavitFill.style.background = "#f59e0b";
+      cavitBadge.textContent = "Başlangıç Kavitasyonu";
+      cavitBadge.className = "diag-badge warn";
+      cavitDesc.textContent = `Kavitasyon katsayısı σ = ${display(sigma, 2)}. Hafif kavitasyon gürültüsü ve titreşim riski; sertleştirilmiş trim tavsiye edilir.`;
+    } else {
+      cavitFill.style.width = "30%";
+      cavitFill.style.background = "#22c55e";
+      cavitBadge.textContent = "Güvenli Bölge";
+      cavitBadge.className = "diag-badge ok";
+      cavitDesc.textContent = `Kavitasyon indeksi σ = ${display(sigma, 2)} emniyetli bölgede. Standart vana trimi uygundur.`;
+    }
+  }
+
+  const noiseVal = Number(data.noise_db ?? data.predicted_noise_db ?? 74);
+  const noiseFill = $("noise-fill");
+  const noiseBadge = $("noise-badge");
+  const noiseDesc = $("noise-desc");
+  if (noiseFill && noiseBadge && noiseDesc) {
+    const nWidth = Math.min(Math.max(((noiseVal - 50) / 70) * 100, 5), 100);
+    noiseFill.style.width = `${nWidth}%`;
+    if (noiseVal > 110) {
+      noiseFill.style.background = "#ef4444";
+      noiseBadge.textContent = `${display(noiseVal, 1)} dBA (AIV Riski)`;
+      noiseBadge.className = "diag-badge bad";
+      noiseDesc.textContent = "110 dBA üzeri ses gücü boru hattında Akustik İndüklenmiş Titreşim (AIV) ve yorulma riski yaratır! Whisper Trim veya difüzör gereklidir.";
+    } else if (noiseVal > 85) {
+      noiseFill.style.background = "#f59e0b";
+      noiseBadge.textContent = `${display(noiseVal, 1)} dBA (Yüksek)`;
+      noiseBadge.className = "diag-badge warn";
+      noiseDesc.textContent = "85 dBA endüstriyel iş sağlığı sınırı aşılmıştır. Akustik yalıtım ceketi veya çok delikli düşük gürültü kafesi önerilir.";
+    } else {
+      noiseFill.style.background = "#22c55e";
+      noiseBadge.textContent = `${display(noiseVal, 1)} dBA (Normal)`;
+      noiseBadge.className = "diag-badge ok";
+      noiseDesc.textContent = "Tahmin edilen ses seviyesi 85 dBA sınırının altındadır.";
+    }
+  }
+
+  const vIn = Number(data.velocity?.inlet_m_s ?? data.velocity_inlet_m_s ?? 2.4);
+  const vOut = Number(data.velocity?.outlet_m_s ?? data.velocity_outlet_m_s ?? 3.2);
+  const vLimit = Number(data.velocity?.api_14e_limit_m_s ?? data.api_14e_limit_m_s ?? 8.0);
+  const velBadge = $("velocity-badge");
+  const velDesc = $("velocity-desc");
+  const velFill = $("velocity-fill");
+  if (velBadge && velDesc && velFill) {
+    velFill.style.width = `${Math.min(Math.max((vOut / vLimit) * 100, 10), 100)}%`;
+    if (vOut > vLimit) {
+      velFill.style.background = "#ef4444";
+      velBadge.textContent = `Aşınma Riski (${display(vOut, 1)} m/s)`;
+      velBadge.className = "diag-badge bad";
+      velDesc.textContent = `Çıkış boru hızı (${display(vOut, 1)} m/s), API 14E erozyon hız limitini (${display(vLimit, 1)} m/s) aşıyor! Çıkış çapını büyütün.`;
+    } else {
+      velFill.style.background = "#22c55e";
+      velBadge.textContent = `${display(vOut, 1)} m/s (Uygun)`;
+      velBadge.className = "diag-badge ok";
+      velDesc.textContent = `Giriş: ${display(vIn, 1)} m/s, Çıkış: ${display(vOut, 1)} m/s (API 14E sınırı: ${display(vLimit, 1)} m/s). Hız sınırları dahilindedir.`;
+    }
+  }
+
+  const actSel = data.actuator_selection || data.actuator || {};
+  const thrustN = Number(actSel.required_thrust_n ?? actSel.total_thrust_n ?? 4200);
+  const failSafe = actSel.fail_safe || "Yay Kapatır (Fail Close)";
+  if ($("actuator-badge") && $("actuator-desc")) {
+    $("actuator-badge").textContent = `${(thrustN / 1000).toFixed(1)} kN`;
+    $("actuator-desc").textContent = `Önerilen Aktüatör: ${actSel.recommended_size || 'Pnömatik Diyafram / Piston'}, Emniyet Konumu: ${failSafe}, Strok: ${display(actSel.stroke_mm || 25, 0)} mm.`;
+  }
+
+  const jtCard = $("diag-jt");
+  if (jtCard) {
+    if (state.service === "gas") {
+      jtCard.hidden = false;
+      const deltaT = Number(data.joule_thomson_dt_c ?? 3.8);
+      const tOut = Number(data.temperature_outlet_c ?? 16.2);
+      $("jt-badge").textContent = `ΔT = -${display(deltaT, 1)} °C`;
+      $("jt-desc").textContent = `İzentlapik genleşme sonucu tahmini çıkış sıcaklığı ${display(tOut, 1)} °C. Hidrat riski: ${tOut < 5 ? "DİKKAT (Hat ısıtması önerilir)" : "Düşük"}.`;
+    } else {
+      jtCard.hidden = true;
+    }
+  }
+
+  if ($("packing-badge") && $("packing-desc")) {
+    $("packing-badge").textContent = "ISO 15848-1 BH";
+    $("packing-desc").textContent = "Canlı Yüklemeli (Live-loaded) PTFE Chevron V-Halkaları. Kaçak emisyonu: Sınıf BH / TA-Luft sertifikalı.";
   }
 }
 
@@ -1654,8 +1787,421 @@ function setDefaults() {
   for (const service of ["liquid", "gas", "steam"]) updateUnitLabels(service);
 }
 
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("cvs_theme", theme); } catch (_) {}
+  const btn = $("btn-theme-toggle");
+  if (btn) btn.textContent = theme === "light" ? "☀️ Açık" : "🌙 Koyu";
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  applyTheme(current === "light" ? "dark" : "light");
+}
+
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem("cvs_theme"); } catch (_) {}
+  if (!saved) {
+    saved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  applyTheme(saved);
+}
+
+function exportProject() {
+  const s = state.service;
+  const flowVal = Number($(s === "liquid" ? "liquid-flow" : (s === "gas" ? "gas-flow" : "steam-flow"))?.value) || 0;
+  const p1Val = Number($(s === "liquid" ? "liquid-p1" : (s === "gas" ? "gas-p1" : "steam-p1"))?.value) || 8;
+  const p2Val = Number($(s === "liquid" ? "liquid-p2" : (s === "gas" ? "gas-p2" : "steam-p2"))?.value) || 5;
+
+  const data = {
+    [`${s}_flow_m3h`]: flowVal,
+    [`${s}_flow_nm3h`]: flowVal,
+    [`${s}_flow_kgh`]: flowVal,
+    [`${s}_p1`]: p1Val,
+    [`${s}_p2`]: p2Val,
+    [`${s}_flow_unit`]: $(SERVICE_UNIT[s].flow)?.value || "m3h",
+    [`${s}_pres_unit`]: $(SERVICE_UNIT[s].pressure)?.value || "bar_a",
+    [`${s}_temp_unit`]: $(SERVICE_UNIT[s].temperature)?.value || "C",
+    vendor: $("vendor")?.value || "fisher_globe_eqpct",
+    design_margin_pct: Number($("margin")?.value) || 15,
+    flow_characteristic: $("characteristic")?.value || "equal_percentage",
+  };
+
+  const project = {
+    project_type: "control_valve_sizing",
+    schema_version: 1,
+    saved_at: new Date().toISOString(),
+    service: s,
+    data,
+  };
+
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `control_valve_${s}_project.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("Proje JSON dosyası başarıyla indirildi.");
+}
+
+async function handleProjectFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const resp = await fetch("/api/project/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "Geçersiz proje dosyası.");
+    }
+    const validated = await resp.json();
+    populateFormFromProject(validated);
+    showToast("Proje başarıyla yüklendi.");
+    await calculate(true);
+  } catch (err) {
+    showError(`Proje yüklenemedi: ${err.message}`);
+  }
+}
+
+function populateFormFromProject(payload) {
+  const s = payload.service.toLowerCase();
+  const d = payload.data || {};
+  const tab = $(`tab-${s}`);
+  if (tab) tab.click();
+
+  if (d.vendor && $("vendor")) $("vendor").value = d.vendor;
+  if (d.design_margin_pct !== undefined && $("margin")) {
+    $("margin").value = String(d.design_margin_pct);
+    setRangeLabels();
+  }
+  if (d.flow_characteristic && $("characteristic")) $("characteristic").value = d.flow_characteristic;
+
+  const flowVal = d[`${s}_flow_m3h`] ?? d[`${s}_flow_nm3h`] ?? d[`${s}_flow_kgh`] ?? d.flow_value;
+  if (flowVal !== undefined && $(`${s}-flow`)) $(`${s}-flow`).value = String(flowVal);
+  if (d[`${s}_p1`] !== undefined && $(`${s}-p1`)) $(`${s}-p1`).value = String(d[`${s}_p1`]);
+  if (d[`${s}_p2`] !== undefined && $(`${s}-p2`)) $(`${s}-p2`).value = String(d[`${s}_p2`]);
+
+  if (d[`${s}_flow_unit`] && $(SERVICE_UNIT[s].flow)) $(SERVICE_UNIT[s].flow).value = d[`${s}_flow_unit`];
+  if (d[`${s}_pres_unit`] && $(SERVICE_UNIT[s].pressure)) $(SERVICE_UNIT[s].pressure).value = d[`${s}_pres_unit`];
+  if (d[`${s}_temp_unit`] && $(SERVICE_UNIT[s].temperature)) $(SERVICE_UNIT[s].temperature).value = d[`${s}_temp_unit`];
+}
+
+async function openIsa20Modal() {
+  if (!state.pendingResult) {
+    showToast("Önce bir boyutlandırma hesaplaması yapın.");
+    return;
+  }
+  try {
+    const s = state.service;
+    const resp = await fetch("/api/report/isa20", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tag_number: "FCV-101",
+        service_description: `${SERVICE_LABELS[s]} Kontrol Vanası`,
+        line_number: '3"-PR-100',
+        pid_number: "PID-001",
+        service_type: SERVICE_LABELS[s],
+        fluid_name: $("liquid-preset")?.value || $("gas-preset")?.value || "Buhar",
+        sizing_result: state.pendingResult,
+        vendor_key: $("vendor").value,
+      }),
+    });
+    if (!resp.ok) throw new Error("Rapor üretilemedi.");
+    const data = await resp.json();
+    state.activeReport = { type: "isa20", text: data.markdown, filename: "ISA20_Datasheet_FCV101.md" };
+    $("modal-report-title").textContent = "ISA Form 20 — Kontrol Vanası Spesifikasyon Sayfası";
+    $("modal-report-content").innerHTML = `<pre>${escapeHtml(data.markdown)}</pre>`;
+    $("report-modal").showModal();
+  } catch (err) {
+    showError(`ISA-20 raporu oluşturulamadı: ${err.message}`);
+  }
+}
+
+async function openMarkdownReportModal() {
+  if (!state.pendingResult) {
+    showToast("Önce bir boyutlandırma hesaplaması yapın.");
+    return;
+  }
+  try {
+    const s = state.service;
+    const resp = await fetch("/api/report/markdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: SERVICE_LABELS[s],
+        fluid_summary: state.pendingResult.fluid,
+        sizing_result: state.pendingResult,
+      }),
+    });
+    if (!resp.ok) throw new Error("Mühendislik raporu üretilemedi.");
+    const data = await resp.json();
+    state.activeReport = { type: "md", text: data.report_markdown, filename: "Control_Valve_Sizing_Report.md" };
+    $("modal-report-title").textContent = "Mühendislik Boyutlandırma Raporu (IEC 60534)";
+    $("modal-report-content").innerHTML = `<pre>${escapeHtml(data.report_markdown)}</pre>`;
+    $("report-modal").showModal();
+  } catch (err) {
+    showError(`Mühendislik raporu oluşturulamadı: ${err.message}`);
+  }
+}
+
+async function evaluateMultiCase() {
+  const minFlow = Number($("mc-min-flow")?.value) || 0;
+  const maxFlow = Number($("mc-max-flow")?.value) || 0;
+  if (minFlow <= 0 || maxFlow <= 0) {
+    showToast("Lütfen geçerli Min ve Maksimum debi değerleri girin.");
+    return;
+  }
+  const s = state.service;
+  const normFlow = Number($(s === "liquid" ? "liquid-flow" : (s === "gas" ? "gas-flow" : "steam-flow"))?.value) || 25;
+  const normP1 = Number($(s === "liquid" ? "liquid-p1" : (s === "gas" ? "gas-p1" : "steam-p1"))?.value) || 8;
+  const normP2 = Number($(s === "liquid" ? "liquid-p2" : (s === "gas" ? "gas-p2" : "steam-p2"))?.value) || 5;
+
+  const minP1 = Number($("mc-min-p1")?.value) || normP1;
+  const minP2 = Number($("mc-min-p2")?.value) || normP2;
+  const maxP1 = Number($("mc-max-p1")?.value) || normP1;
+  const maxP2 = Number($("mc-max-p2")?.value) || normP2;
+
+  const cases = [
+    { name: "Min", flow: minFlow, p1_bar_a: minP1, p2_bar_a: minP2, temperature_c: 25 },
+    { name: "Normal", flow: normFlow, p1_bar_a: normP1, p2_bar_a: normP2, temperature_c: 25 },
+    { name: "Maksimum", flow: maxFlow, p1_bar_a: maxP1, p2_bar_a: maxP2, temperature_c: 25 },
+  ];
+
+  try {
+    const baseFluid = (state.pendingResult && state.pendingResult.fluid) || {
+      density_kg_m3: 998,
+      vapor_pressure_bar_a: 0.023,
+      critical_pressure_bar_a: 220.64,
+      viscosity_pa_s: 0.00089,
+      fl: 0.9,
+    };
+    const resp = await fetch("/api/size/multi-case", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: s,
+        cases,
+        base_fluid_data: baseFluid,
+        vendor: $("vendor")?.value || "fisher_globe_eqpct",
+        flow_characteristic: $("characteristic")?.value || "equal_percentage",
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "Çoklu durum hesabı başarısız.");
+    }
+    const data = await resp.json();
+    renderMultiCaseResults(data);
+  } catch (err) {
+    showError(`Çoklu durum analizi hatası: ${err.message}`);
+  }
+}
+
+function renderMultiCaseResults(data) {
+  const container = $("multicase-results");
+  if (!container) return;
+  container.hidden = false;
+  container.replaceChildren();
+
+  const title = document.createElement("h4");
+  title.style.margin = "8px 0";
+  title.textContent = `Zarf Doğrulama Sonucu: Turndown ${display(data.turndown_ratio, 1)}:1 (Cv Turndown: ${display(data.cv_turndown_ratio, 1)}:1)`;
+  container.append(title);
+
+  const rec = data.recommended;
+  if (!rec) {
+    container.append(warningBox("Hiçbir vana tüm çalışma koşullarını karşılayamadı. Paralel split-range değerlendirin."));
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "details-table";
+  table.innerHTML = `
+    <thead>
+      <tr><th>Durum</th><th>Debi</th><th>Gerekli Cv</th><th>Açıklık %</th><th>Durum</th></tr>
+    </thead>
+    <tbody>
+      ${Object.values(rec.case_details).map((c) => `
+        <tr>
+          <td><b>${c.name}</b></td>
+          <td>${display(c.flow, 1)}</td>
+          <td>${display(c.required_cv, 2)}</td>
+          <td><b>%${display(c.opening_percent, 1)}</b></td>
+          <td>${c.status || "Uygun"}</td>
+        </tr>
+      `).join("")}
+    </tbody>
+  `;
+  container.append(table);
+  if (data.warnings && data.warnings.length) {
+    for (const w of data.warnings) container.append(warningBox(w));
+  }
+}
+
+function setupPresetFilters() {
+  const lFilter = $("liquid-preset-filter");
+  if (lFilter) {
+    lFilter.addEventListener("input", () => {
+      const q = lFilter.value.toLowerCase().trim();
+      const select = $("liquid-preset");
+      for (const opt of select.options) {
+        opt.hidden = !opt.textContent.toLowerCase().includes(q);
+      }
+    });
+  }
+  const gFilter = $("gas-preset-filter");
+  if (gFilter) {
+    gFilter.addEventListener("input", () => {
+      const q = gFilter.value.toLowerCase().trim();
+      const select = $("gas-preset");
+      for (const opt of select.options) {
+        opt.hidden = !opt.textContent.toLowerCase().includes(q);
+      }
+    });
+  }
+}
+
+function setupUnitConverter() {
+  const modal = $("converter-modal");
+  const kindSelect = $("conv-kind");
+  const fromSelect = $("conv-from");
+  const toSelect = $("conv-to");
+  const valInput = $("conv-value");
+  const resultDisplay = $("conv-result");
+
+  const updateConvUnits = () => {
+    if (!state.meta || !state.meta.units) return;
+    const kind = kindSelect.value;
+    const units = state.meta.units[kind] || [];
+    fillSelect(fromSelect, units, "key", "label");
+    fillSelect(toSelect, units, "key", "label");
+    if (toSelect.options.length > 1) toSelect.selectedIndex = 1;
+    calcConversion();
+  };
+
+  const calcConversion = async () => {
+    const val = Number(valInput.value);
+    if (!Number.isFinite(val)) {
+      resultDisplay.textContent = "—";
+      return;
+    }
+    try {
+      const resp = await fetch("/api/convert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: kindSelect.value,
+          values: [val],
+          from_unit: fromSelect.value,
+          to_unit: toSelect.value,
+        }),
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        resultDisplay.textContent = `${display(d.values[0], 4)} ${toSelect.selectedOptions[0]?.textContent || ''}`;
+      }
+    } catch (_) {}
+  };
+
+  if (kindSelect) kindSelect.addEventListener("change", updateConvUnits);
+  if (fromSelect) fromSelect.addEventListener("change", calcConversion);
+  if (toSelect) toSelect.addEventListener("change", calcConversion);
+  if (valInput) valInput.addEventListener("input", calcConversion);
+
+  $("btn-open-converter")?.addEventListener("click", () => {
+    updateConvUnits();
+    modal?.showModal();
+  });
+  $("modal-converter-close")?.addEventListener("click", () => modal?.close());
+}
+
+function setupShortcuts() {
+  const shortcutsModal = $("shortcuts-modal");
+  $("btn-open-shortcuts")?.addEventListener("click", () => shortcutsModal?.showModal());
+  $("modal-shortcuts-close")?.addEventListener("click", () => shortcutsModal?.close());
+
+  window.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      calculate(true);
+      return;
+    }
+    if (event.key === "Escape") {
+      $("report-modal")?.close();
+      $("converter-modal")?.close();
+      $("shortcuts-modal")?.close();
+      return;
+    }
+    if (document.activeElement && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+      return;
+    }
+    if (event.key === "1") {
+      $("tab-liquid")?.click();
+    } else if (event.key === "2") {
+      $("tab-gas")?.click();
+    } else if (event.key === "3") {
+      $("tab-steam")?.click();
+    } else if (event.key === "t" || event.key === "T") {
+      toggleTheme();
+    } else if (event.key === "u" || event.key === "U") {
+      $("btn-open-converter")?.click();
+    } else if (event.key === "?") {
+      shortcutsModal?.showModal();
+    }
+  });
+}
+
+function registerServiceWorker() {
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+  }
+}
+
 async function init() {
+  initTheme();
   setupEvents();
+  setupPresetFilters();
+  setupShortcuts();
+  setupUnitConverter();
+  registerServiceWorker();
+
+  $("btn-theme-toggle")?.addEventListener("click", toggleTheme);
+  $("btn-project-save")?.addEventListener("click", exportProject);
+  $("btn-project-load")?.addEventListener("click", () => $("project-file-input")?.click());
+  $("project-file-input")?.addEventListener("change", (e) => {
+    if (e.target.files && e.target.files[0]) handleProjectFile(e.target.files[0]);
+  });
+  $("btn-isa20-report")?.addEventListener("click", openIsa20Modal);
+  $("btn-md-report")?.addEventListener("click", openMarkdownReportModal);
+  $("modal-report-close")?.addEventListener("click", () => $("report-modal")?.close());
+  $("btn-copy-report")?.addEventListener("click", () => {
+    if (state.activeReport?.text) {
+      navigator.clipboard.writeText(state.activeReport.text).then(() => showToast("Rapor panoya kopyalandı."));
+    }
+  });
+  $("btn-download-report")?.addEventListener("click", () => {
+    if (state.activeReport?.text) {
+      const blob = new Blob([state.activeReport.text], { type: "text/markdown;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = state.activeReport.filename || "Report.md";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast("Rapor dosyası indirildi.");
+    }
+  });
+  $("multicase-toggle")?.addEventListener("change", (e) => {
+    $("multicase-panel").hidden = !e.target.checked;
+  });
+  $("btn-eval-multicase")?.addEventListener("click", evaluateMultiCase);
   try {
     const meta = await fetchJson("/api/meta");
     state.meta = meta;

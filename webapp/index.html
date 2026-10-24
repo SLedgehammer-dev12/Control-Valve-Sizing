@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Control Valve Sizing</title>
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/styles.css">
   <script type="importmap">
     {
@@ -21,9 +22,19 @@
       <h1>Control Valve Sizing</h1>
       <p class="subtitle">Sıvı, gaz ve buhar servisleri için vana seçimi, karakteristik analizi ve 3D görselleştirme.</p>
     </div>
-    <div class="topbar-meta">
-      <span class="status-dot" id="api-status" aria-live="polite">API bağlanıyor</span>
-      <span class="version" id="version-badge">v—</span>
+    <div class="topbar-right">
+      <div class="topbar-actions">
+        <button class="tool-btn" id="btn-theme-toggle" type="button" title="Koyu / Açık Tema (T tuşu)">🌙 Tema</button>
+        <button class="tool-btn" id="btn-project-save" type="button" title="Projeyi JSON olarak indir">💾 Kaydet</button>
+        <button class="tool-btn" id="btn-project-load" type="button" title="JSON Proje dosyası aç">📂 Aç</button>
+        <input type="file" id="project-file-input" accept=".json" hidden>
+        <button class="tool-btn" id="btn-open-converter" type="button" title="Birim Dönüştürücü (U tuşu)">🔄 Birimler</button>
+        <button class="tool-btn" id="btn-open-shortcuts" type="button" title="Klavye Kısayolları (? tuşu)">⌨️ Kısayol</button>
+      </div>
+      <div class="topbar-meta">
+        <span class="status-dot" id="api-status" aria-live="polite">API bağlanıyor</span>
+        <span class="version" id="version-badge">v—</span>
+      </div>
     </div>
   </header>
 
@@ -72,9 +83,9 @@
 
     <section class="content">
       <div class="tabs" role="tablist" aria-label="Servis seçimi">
-        <button class="tab active" id="tab-liquid" type="button" data-service="liquid" role="tab" aria-selected="true" aria-controls="panel-liquid" tabindex="0">Sıvı</button>
-        <button class="tab" id="tab-gas" type="button" data-service="gas" role="tab" aria-selected="false" aria-controls="panel-gas" tabindex="-1">Gaz</button>
-        <button class="tab" id="tab-steam" type="button" data-service="steam" role="tab" aria-selected="false" aria-controls="panel-steam" tabindex="-1">Buhar</button>
+        <button class="tab active" id="tab-liquid" type="button" data-service="liquid" role="tab" aria-selected="true" aria-controls="panel-liquid" tabindex="0">Sıvı (1)</button>
+        <button class="tab" id="tab-gas" type="button" data-service="gas" role="tab" aria-selected="false" aria-controls="panel-gas" tabindex="-1">Gaz (2)</button>
+        <button class="tab" id="tab-steam" type="button" data-service="steam" role="tab" aria-selected="false" aria-controls="panel-steam" tabindex="-1">Buhar (3)</button>
       </div>
 
       <form id="sizing-form" class="card form-card" autocomplete="off" aria-busy="false">
@@ -91,7 +102,13 @@
             </div>
           </div>
           <div class="grid">
-            <label class="field"><span>Akışkan preset</span><select id="liquid-preset" aria-describedby="liquid-preset-note"></select></label>
+            <div class="field span-2">
+              <span>Akışkan Preset Arama / Seçim</span>
+              <div class="preset-search-box">
+                <input type="text" id="liquid-preset-filter" placeholder="🔍 Preset filtrele (örn. su, amonyak, propan)..." class="filter-input">
+                <select id="liquid-preset" aria-describedby="liquid-preset-note"></select>
+              </div>
+            </div>
             <label class="field"><span>Debi</span><input id="liquid-flow" type="number" step="any" value="25"></label>
             <label class="field"><span>Sıcaklık</span><input id="liquid-temperature" type="number" step="any" value="25"></label>
             <label class="field"><span>Giriş basıncı P1</span><input id="liquid-p1" type="number" step="any" value="8"></label>
@@ -119,7 +136,13 @@
             </div>
           </div>
           <div class="grid">
-            <label class="field"><span>Gaz preset</span><select id="gas-preset"></select></label>
+            <div class="field span-2">
+              <span>Gaz Preset Arama / Seçim</span>
+              <div class="preset-search-box">
+                <input type="text" id="gas-preset-filter" placeholder="🔍 Gaz filtrele (örn. metan, argon, hava)..." class="filter-input">
+                <select id="gas-preset"></select>
+              </div>
+            </div>
             <label class="field"><span>Gaz modeli</span>
               <select id="gas-model">
                 <option value="real">Gerçek gaz (HEOS)</option>
@@ -149,9 +172,10 @@
               <button class="secondary" type="button" id="gas-composition-add">+ Bileşen</button>
               <button class="secondary" type="button" id="gas-composition-clear">Temizle</button>
               <button class="secondary" type="button" id="gas-composition-normalize">100'e normalize et</button>
+              <button class="secondary" type="button" id="gas-composition-save">Karışımı Sakla</button>
               <span class="composition-total" id="gas-composition-total" role="status" aria-live="polite">Toplam: %0</span>
             </div>
-            <p class="hint" id="gas-composition-note">Toplam %100 değilse API pozitif toplamı 100'e normalize eder; normalize düğmesi taslağı da ölçekler. Aynı bileşen yalnızca bir satırda kullanılabilir.</p>
+            <p class="hint" id="gas-composition-note">Toplam %100 değilse API pozitif toplamı 100'e normalize eder; normalize düğmesi taslağı da ölçekler.</p>
           </div>
           <div class="gas-props" id="gas-properties" role="status" aria-live="polite" aria-atomic="false">Gaz özellikleri seçim sonrası hesaplanır.</div>
           <label class="check-line"><input id="gas-manual-toggle" type="checkbox" aria-controls="gas-manual-fields"> Gaz özelliklerini manuel gir</label>
@@ -185,10 +209,40 @@
           </div>
         </section>
 
+        <!-- Multi-Case Envelope Section -->
+        <div class="multicase-section">
+          <label class="check-line font-bold">
+            <input id="multicase-toggle" type="checkbox" aria-controls="multicase-panel">
+            <span>Çoklu Çalışma Zarfı Analizi (Min / Normal / Maksimum Debiler)</span>
+          </label>
+          <div id="multicase-panel" hidden class="mt-2">
+            <div class="multicase-grid">
+              <div class="multicase-box">
+                <h4>Minimum Çalışma Noktası</h4>
+                <label class="field"><span>Min Debi</span><input id="mc-min-flow" type="number" step="any" placeholder="Örn. 5"></label>
+                <label class="field"><span>Min P1</span><input id="mc-min-p1" type="number" step="any" placeholder="Örn. 8.5"></label>
+                <label class="field"><span>Min P2</span><input id="mc-min-p2" type="number" step="any" placeholder="Örn. 5.0"></label>
+              </div>
+              <div class="multicase-box active-box">
+                <h4>Normal Çalışma Noktası</h4>
+                <p class="hint">Normal çalışma parametreleri ana formdan otomatik alınır.</p>
+              </div>
+              <div class="multicase-box">
+                <h4>Maksimum Çalışma Noktası</h4>
+                <label class="field"><span>Maks Debi</span><input id="mc-max-flow" type="number" step="any" placeholder="Örn. 45"></label>
+                <label class="field"><span>Maks P1</span><input id="mc-max-p1" type="number" step="any" placeholder="Örn. 7.5"></label>
+                <label class="field"><span>Maks P2</span><input id="mc-max-p2" type="number" step="any" placeholder="Örn. 5.0"></label>
+              </div>
+            </div>
+            <button class="secondary mt-2" type="button" id="btn-eval-multicase">Zarfı Doğrula (Turndown)</button>
+            <div id="multicase-results" hidden class="mt-2"></div>
+          </div>
+        </div>
+
         <div class="actions">
-          <button id="calculate" class="primary" type="button">Hesapla</button>
+          <button id="calculate" class="primary" type="button">Hesapla (Ctrl+Enter)</button>
           <span class="status" id="calc-status" aria-live="polite"></span>
-          <span class="hint">Birim değiştirdiğinizde girilen değerler otomatik dönüştürülür.</span>
+          <span class="hint">Birim değiştirdiğinizde değerler otomatik dönüştürülür.</span>
         </div>
       </form>
 
@@ -201,22 +255,98 @@
               <p class="eyebrow">Hesaplama Sonucu</p>
               <h2 id="result-title" aria-live="polite">Vana Seçimi</h2>
             </div>
-            <div class="result-badges">
-              <span class="badge" id="result-badge"></span>
-              <span class="badge stale" id="result-stale" hidden>Son geçerli sonuç</span>
+            <div class="result-head-right">
+              <div class="result-badges">
+                <span class="badge" id="result-badge"></span>
+                <span class="badge stale" id="result-stale" hidden>Son geçerli sonuç</span>
+              </div>
+              <div class="result-action-btns">
+                <button class="action-btn" id="btn-isa20-report" type="button">📋 ISA-20 Formu</button>
+                <button class="action-btn" id="btn-md-report" type="button">📄 Mühendislik Raporu</button>
+              </div>
             </div>
           </div>
           <p class="result-verdict" id="result-verdict"></p>
           <div class="metrics" id="metrics"></div>
           <div class="result-summary" id="result-summary"></div>
           <div id="warnings"></div>
+
+          <!-- Comprehensive Engineering Diagnostics Grid -->
+          <div class="diagnostics-grid" id="diagnostics-grid">
+            <!-- Parallel Split-Range Advisory Card -->
+            <div class="diag-card span-all" id="diag-split-range" hidden>
+              <div class="diag-head">
+                <span class="diag-badge warn">Paralel Split-Range Önerisi</span>
+                <h4>Geniş Turndown Çözümü (R &gt; 50:1)</h4>
+              </div>
+              <p class="diag-desc" id="split-range-desc"></p>
+              <div class="split-valve-grid" id="split-valve-grid"></div>
+            </div>
+
+            <!-- Cavitation & Flashing Meter -->
+            <div class="diag-card" id="diag-cavitation">
+              <div class="diag-head">
+                <span class="diag-badge" id="cavit-badge">Kavitasyon</span>
+                <h4>Kavitasyon & Flashing</h4>
+              </div>
+              <div class="meter-bar"><div class="meter-fill" id="cavit-fill"></div></div>
+              <p class="diag-desc" id="cavit-desc"></p>
+            </div>
+
+            <!-- Noise & AIV Meter -->
+            <div class="diag-card" id="diag-noise">
+              <div class="diag-head">
+                <span class="diag-badge" id="noise-badge">Gürültü Seviyesi</span>
+                <h4>Akustik Güç & Titreşim (AIV)</h4>
+              </div>
+              <div class="meter-bar"><div class="meter-fill" id="noise-fill"></div></div>
+              <p class="diag-desc" id="noise-desc"></p>
+            </div>
+
+            <!-- Pipe Velocity & API 14E Erosion -->
+            <div class="diag-card" id="diag-velocity">
+              <div class="diag-head">
+                <span class="diag-badge" id="velocity-badge">Boru Hızı</span>
+                <h4>Akış Hızı & API 14E Limiti</h4>
+              </div>
+              <div class="meter-bar"><div class="meter-fill" id="velocity-fill"></div></div>
+              <p class="diag-desc" id="velocity-desc"></p>
+            </div>
+
+            <!-- Actuator Sizing & Thrust Guidance -->
+            <div class="diag-card" id="diag-actuator">
+              <div class="diag-head">
+                <span class="diag-badge ok" id="actuator-badge">Aktüatör</span>
+                <h4>İtme Kuvveti & Emniyet Konumu</h4>
+              </div>
+              <p class="diag-desc" id="actuator-desc"></p>
+            </div>
+
+            <!-- Gas Joule-Thomson & Hydrate Risk (Gas only) -->
+            <div class="diag-card" id="diag-jt" hidden>
+              <div class="diag-head">
+                <span class="diag-badge" id="jt-badge">Joule-Thomson</span>
+                <h4>Genleşme Soğuması & Hidrat</h4>
+              </div>
+              <p class="diag-desc" id="jt-desc"></p>
+            </div>
+
+            <!-- Stem Packing & Fugitive Emissions -->
+            <div class="diag-card" id="diag-packing">
+              <div class="diag-head">
+                <span class="diag-badge" id="packing-badge">ISO 15848-1</span>
+                <h4>Salmastra Kaçak Emisyonu</h4>
+              </div>
+              <p class="diag-desc" id="packing-desc"></p>
+            </div>
+          </div>
         </div>
 
         <div class="visual-grid">
           <div class="card">
             <div class="card-head">
               <h3>3D Vana Modeli</h3>
-              <span class="hint">Sürükle / iki parmak: döndür · Tekerlek / pinch: yakınlaştır · Ok tuşları: döndür</span>
+              <span class="hint">Sürükle: döndür · Tekerlek: yakınlaştır · Ok tuşları: döndür</span>
             </div>
             <div class="viewport" id="valve-view"></div>
             <div class="part-legend" id="valve-legend"></div>
@@ -253,6 +383,71 @@
       </section>
     </section>
   </main>
+
+  <!-- Report Modal Dialog -->
+  <dialog id="report-modal" class="app-modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="modal-report-title">Rapor Görüntüleyici</h3>
+        <button type="button" class="close-btn" id="modal-report-close" aria-label="Kapat">✕</button>
+      </div>
+      <div class="modal-body" id="modal-report-content"></div>
+      <div class="modal-foot">
+        <button class="secondary" type="button" id="btn-copy-report">Kopyala</button>
+        <button class="primary" type="button" id="btn-download-report">Dosya Olarak İndir</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Unit Converter Modal -->
+  <dialog id="converter-modal" class="app-modal">
+    <div class="modal-card converter-card">
+      <div class="modal-head">
+        <h3>Hızlı Birim Dönüştürücü</h3>
+        <button type="button" class="close-btn" id="modal-converter-close" aria-label="Kapat">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid">
+          <label class="field"><span>Birim Türü</span>
+            <select id="conv-kind">
+              <option value="pressure">Basınç</option>
+              <option value="temperature">Sıcaklık</option>
+              <option value="liquid_flow">Sıvı Debisi</option>
+              <option value="gas_flow">Gaz Debisi</option>
+              <option value="steam_flow">Buhar Debisi</option>
+            </select>
+          </label>
+          <label class="field"><span>Değer</span><input id="conv-value" type="number" step="any" value="10"></label>
+          <label class="field"><span>Kaynak Birim</span><select id="conv-from"></select></label>
+          <label class="field"><span>Hedef Birim</span><select id="conv-to"></select></label>
+        </div>
+        <div class="conv-result-box mt-2">
+          <span>Sonuç:</span>
+          <b id="conv-result">—</b>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Shortcuts Modal -->
+  <dialog id="shortcuts-modal" class="app-modal">
+    <div class="modal-card shortcuts-card">
+      <div class="modal-head">
+        <h3>Klavye Kısayolları</h3>
+        <button type="button" class="close-btn" id="modal-shortcuts-close" aria-label="Kapat">✕</button>
+      </div>
+      <div class="modal-body">
+        <table class="shortcuts-table">
+          <tr><th><kbd>Ctrl</kbd> + <kbd>Enter</kbd></th><td>Formu hesapla</td></tr>
+          <tr><th><kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd></th><td>Sıvı, Gaz, Buhar sekmeleri arasında geçiş yap</td></tr>
+          <tr><th><kbd>T</kbd></th><td>Koyu / Açık tema değiştir</td></tr>
+          <tr><th><kbd>U</kbd></th><td>Birim dönüştürücüyü aç</td></tr>
+          <tr><th><kbd>?</kbd></th><td>Bu kısayol penceresini aç</td></tr>
+          <tr><th><kbd>Esc</kbd></th><td>Açık modalleri veya menüleri kapat</td></tr>
+        </table>
+      </div>
+    </div>
+  </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="/app.js"></script>
