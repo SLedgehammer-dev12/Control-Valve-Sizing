@@ -2,6 +2,29 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.5.0] - 2026-10-25
+
+### Added
+- Extended valve catalogs up to 40" (DN1000) across general catalog and default series (10", 12", 14", 16", 18", 20", 24", 28", 32", 36", 40").
+- 2D CFD axial flow cross-section with real proportional pipe-to-valve diameter scaling ($D_1$, $DN$, $D_2$) and smooth turbulent gradient transitions for recirculation vortices and diffusers.
+- Labeled axes on Installed Characteristic Surface (X: Vana Açıklığı %, Y: Basınç Düşüş Oranı $\Delta P/P_1$, Z: Bağıl Debi $Q/Q_{max}$).
+- 11 iterative UI/UX usability enhancements across the Web UI:
+  - Live $\Delta P$ badge with reverse pressure warning ($P_1 \le P_2$).
+  - One-click "Boruyu Vanaya Eşitle (DN)" button.
+  - Live pipe-to-valve ratio & velocity multiplier pill ($D_1/DN$, $D_2/DN$).
+  - Fluid preset category chips (Su, Hidrokarbon, Kimyasal, Kriyojenik, Doğal Gaz).
+  - Controllability zone safety band with live needle pin (<20% cavitation risk, 20-80% ideal band, >90% saturation).
+  - Inline smart validation and flashing warnings ($P_2 \le P_v$).
+  - One-click "Özeti Panoya Kopyala" (markdown engineering summary clipboard copy).
+  - Sticky mini results bar on scroll with quick jump navigation anchors.
+  - Color-coded metric cards health styling (ok, warn, danger).
+  - Enhanced 2D CFD interactive inspector HUD with flow zone tags.
+  - Keyboard shortcut hints (`[1]`, `[2]`, `[3]`, `[Ctrl+↵]`) and bumped service worker static cache (`cvs-static-v6`).
+
+### Changed
+- PyInstaller spec `app_web.spec` includes `flow_2d_model` in hiddenimports.
+- Sizing engine iteration loops handle large valves up to DN1000 smoothly.
+
 ## [3.4.0]
 
 ### Added

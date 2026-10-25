@@ -1,4 +1,4 @@
-# Control Valve Sizing v3.4.0
+# Control Valve Sizing v3.5.0
 
 IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
@@ -6,8 +6,37 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
 ## Bu sürümde yeni
 
-### Web Sürümü Bağımsız Paketleme (macOS Apple Silicon & Windows)
+### 40" e (DN1000) Kadar Genişletilmiş Vana Kataloğu
+- Genel katalog ve varsayılan vana serilerine 10", 12", 14", 16", 18", 20", 24", 28", 32", 36" ve 40" vanalar eklendi.
+- Yüksek debili boru hatlarında, ana buhar hatlarında ve büyük enerji santralleri/rafineri girişlerindeki yüksek $Cv/Kv$ gereksinimleri için 40 inç'e kadar otomatik vana seçimi ve boyutlandırması desteklenir.
 
+### 2D CFD Eksenel Akış Kesiti & Dinamik Boru/Vana Ölçeklendirmesi
+- **Gerçekçi Geometrik Ölçekleme**: Giriş boru çapı ($D_1$), vana anma çapı ($DN$) ve çıkış boru çapı ($D_2$) girilen fiziksel ölçülerle birebir orantılı olarak ölçeklendirilir.
+- **Akışkan Çeper ve Gradyan Geçişleri**:
+  - Vana gövdesi ile boru geçişindeki düz hatlar kaldırılarak hidrodinamik redüksiyon/genişletici profili modellendi.
+  - Vena contracta jeti ve resirkülasyon (türbülanslı girdap) sınırları keskin çizgiler yerine yumuşak renk gradyanı ile simüle edildi.
+- **İnteraktif Akış Teşhis HUD**: Kesit üzerinde fare gezdirildiğinde akış bölgesi etiketi (`🟢 Vena Contracta Jeti`, `🟣 Girdap`, `🔵 Giriş/Redüksiyon`, `🟢 Difüzör`, `⚪ Çeper`) ve hız, basınç, Mach sayısı canlı gösterilir.
+
+### Kurulu Karakteristik Yüzeyi Eksen Etiketleri
+- 3B Kurulu Karakteristik Yüzeyi grafiğindeki eksenler fiziksel mühendislik tanımlarıyla netleştirildi:
+  - **X Ekseni**: Vana Açıklığı ($\%$)
+  - **Y Ekseni**: Basınç Düşüş Oranı ($\Delta P / P_1$)
+  - **Z Ekseni**: Bağıl Debi ($Q / Q_{max}$)
+
+### Kullanıcı Deneyimi ve Sezgisel Kullanım (11 Döngüsel UI/UX İyileştirmesi)
+1. **Canlı $\Delta P$ Göstergesi**: $P_1$ ve $P_2$ kutularının hemen yanında fark basıncını anlık gösterir; ters basınçta ($P_1 \le P_2$) kırmızı alarm rozeti verir.
+2. **Tek Tıkla "Boruyu Vanaya Eşitle (DN)" Butonu**: $D_1$ ve $D_2$ boru çaplarını seçilen vana anma çapına tek tıkla senkronize eder.
+3. **Boru/Vana Çap Oranı ve Hız Katı Rozeti**: Daralma/genişleme oranını ($D/DN$) ve tahmini hız katsayısını hesaplama öncesi bildirir.
+4. **Akışkan Kategori Çipleri**: `[Tümü]`, `[💧 Su]`, `[⛽ Hidrokarbon]`, `[🧪 Kimyasal]`, `[❄️ Kriyojenik]`, `[🔥 Doğal Gaz]` butonlarıyla tek tıkla akışkan filtreleme.
+5. **Vana Kontrol Edilebilirlik Emniyet Şeridi**: İdeal %20-%80 kontrol bandını, alt kavitasyon ve üst doyum bölgelerini gösteren ibreli gösterge.
+6. **Satır İçi Akıllı Doğrulama**: Ters basınç veya buharlaşma ($P_2 \le P_v$) durumlarında satır içi bilgilendirme.
+7. **Özeti Panoya Kopyala**: Mühendislik hesap özetini Markdown formatında tek tıkla panoya aktarma.
+8. **Sayfa Kaydırmada Sabit Tepe Çubuğu (Sticky Bar)**: Sayfa kaydırıldığında sonuçları ekranda tutan kompakt bar ve bölümlere hızlı atlama butonları.
+9. **Metrik Kartları Sağlık Durumu**: Açıklık ve fark basıncı metriklerinde yeşil, sarı ve kırmızı dinamik görsel durum stilleri.
+10. **2D CFD Etkileşimli Bölge Sınıflandırması**: Fare ile canlı akış dinamiği analizi.
+11. **Klavye Kısayol İpuçları**: Sekmeler ve hesapla butonu için tuş ipuçları (`[1]`, `[2]`, `[3]`, `[Ctrl+↵]`) ve güncellenmiş statik önbellek (`cvs-static-v6`).
+
+### Web Sürümü Bağımsız Paketleme (macOS Apple Silicon & Windows)
 - **macOS (Apple Silicon M1+) Web UI Disk İmajı**: `ControlValveSizing_Web_macos_arm64_<version>.dmg`
   - `.app` ve `/Applications` kısayolu içerir.
   - Açıldığında FastAPI/Uvicorn motorunu arka planda başlatır ve varsayılan tarayıcıda Web UI'ı otomatik açar.
@@ -15,24 +44,6 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 - **Windows Web UI Taşınabilir Paket**: `ControlValveSizing_Web_windows_x86_64_<version>.zip`.
 - **Otomatik Port Tespiti**: 8501 portu meşgulse çakışmayı önlemek için müsait ilk port dinamik olarak seçilir.
 - **Minimalist Durum Penceresi**: Arka plan sunucusunu izleme, tarayıcıyı yeniden açma ve tek tıkla kapatma imkanı.
-
-### Küresel Vana Üretici Veritabanı Genişletmesi
-
-- **Masoneilan (ABD)**: 21000 single-port globe, 41005 balanced cage globe, Camflex II rotary plug.
-- **Flowserve (ABD)**: Valtek Mark One globe, MaxFlo 4 eccentric plug rotary.
-- **IMI CCI / Bopp & Reuther (Avrupa)**: Ağır hizmet proses kontrol vanaları serisi.
-- **WZI (Wuzhong Instrument - Çin)**: Enerji ve kimya sektörü yüksek performanslı kontrol vanaları serisi.
-- **Azbil (Japonya)**: ACTIVAL ve yüksek hassasiyetli cage/globe serisi kontrol vanaları.
-
-### Paralel Split-Range Vana Boyutlandırma Motoru ($R_{Cv} > 50:1$)
-
-- $Q_{max} / Q_{min} > 50$ aşırı turndown koşullarında tek vana kısıtını çözen otomatik paralel çift vana boyutlandırması.
-- Hassas düşük debi mikro trim vanası ve ana kontrol vanası optimizasyonu; geçiş debisi ve histerezis bandı önerileri.
-
-### IEC 60534-2-1 ve Termodinamik Düzeltmeleri
-
-- IEC 60534-2-1 Denklem 6a ($N_6 = 27.3$) ile doğrudan buhar kütlesel debi hesabı.
-- Boru reducer/expander montajında $\Delta P_{max}$ ve $F_L$ kavitasyon katsayılarının standart revizyonu.
 
 ---
 

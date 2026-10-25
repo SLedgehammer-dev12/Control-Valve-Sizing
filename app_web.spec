@@ -163,6 +163,7 @@ a = Analysis(
         "reporting",
         "units",
         # Engine modules
+        "flow_2d_model",
         "valve_3d",
         "valve_curve",
         "valve_noise",
