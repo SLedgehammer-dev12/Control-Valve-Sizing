@@ -226,8 +226,6 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
         if (cType === 3) {
           offscreenCtx.fillStyle = "rgba(165, 243, 252, 0.92)";
-        } else if (cType === 2 && activeLayer === "velocity") {
-          offscreenCtx.fillStyle = "rgba(99, 102, 241, 0.70)";
         } else {
           offscreenCtx.fillStyle = getColormapColor(val, minVal, maxVal, activeLayer);
         }

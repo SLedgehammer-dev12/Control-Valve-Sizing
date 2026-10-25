@@ -242,6 +242,11 @@ input[type="range"] { accent-color: var(--accent); padding: 0; background: trans
 
 .part-legend, .surface-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 0.73rem; color: var(--muted); align-items: center; }
 .part-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.surface-axis-guide { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 0.72rem; }
+.axis-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.20); }
+.axis-tag.axis-x { color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); }
+.axis-tag.axis-y { color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
+.axis-tag.axis-z { color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
 .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .swatch.flow-low { background: #3b82f6; }
 .swatch.flow-high { background: #ef4444; }

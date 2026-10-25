@@ -1210,9 +1210,32 @@ function disposeNode(node) {
     if (child.geometry) child.geometry.dispose();
     if (child.material) {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) material.dispose();
+      for (const material of materials) {
+        if (material.map) material.map.dispose();
+        material.dispose();
+      }
     }
   });
+}
+
+function makeSurfaceSprite(THREE, text, color = "#cbd5e1", scale = 1.0, isBold = true) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = `${isBold ? "bold " : ""}30px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(2.4 * scale, 0.6 * scale, 1.0);
+  return sprite;
 }
 
 function clearViewer(viewer) {
@@ -1465,6 +1488,62 @@ function renderSurface(surface) {
   );
   frame.position.y = 1.5;
   viewer.group.add(frame);
+
+  // 3D Axis lines along primary base and vertical edges
+  const axisLineMatX = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
+  const axisLineMatZ = new THREE.LineBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.85 });
+  const axisLineMatY = new THREE.LineBasicMaterial({ color: 0x34d399, transparent: true, opacity: 0.85 });
+
+  viewer.group.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-2, 0, 1.5), new THREE.Vector3(2, 0, 1.5)]),
+    axisLineMatX,
+  ));
+  viewer.group.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(2, 0, -1.5), new THREE.Vector3(2, 0, 1.5)]),
+    axisLineMatZ,
+  ));
+  viewer.group.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-2, 0, 1.5), new THREE.Vector3(-2, 3, 1.5)]),
+    axisLineMatY,
+  ));
+
+  // 3D Axis Billboard Labels
+  const labelX = makeSurfaceSprite(THREE, "X: Vana Açıklığı (%0 - %100)", "#38bdf8", 1.05);
+  labelX.position.set(0, -0.42, 1.88);
+  viewer.group.add(labelX);
+
+  const labelZ = makeSurfaceSprite(THREE, "Z: Vana Otoritesi N (0.1 - 1.0)", "#c084fc", 1.05);
+  labelZ.position.set(2.52, -0.42, 0);
+  viewer.group.add(labelZ);
+
+  const labelY = makeSurfaceSprite(THREE, "Y: Bağıl Debi (%0 - %100)", "#34d399", 1.05);
+  labelY.position.set(-2.55, 1.5, 1.78);
+  viewer.group.add(labelY);
+
+  // Ticks
+  const tickX0 = makeSurfaceSprite(THREE, "%0", "#94a3b8", 0.60, false);
+  tickX0.position.set(-2.0, -0.16, 1.72);
+  viewer.group.add(tickX0);
+
+  const tickX100 = makeSurfaceSprite(THREE, "%100", "#94a3b8", 0.60, false);
+  tickX100.position.set(2.0, -0.16, 1.72);
+  viewer.group.add(tickX100);
+
+  const tickZ0 = makeSurfaceSprite(THREE, "0.1", "#94a3b8", 0.60, false);
+  tickZ0.position.set(2.32, -0.16, -1.50);
+  viewer.group.add(tickZ0);
+
+  const tickZ1 = makeSurfaceSprite(THREE, "1.0", "#94a3b8", 0.60, false);
+  tickZ1.position.set(2.32, -0.16, 1.50);
+  viewer.group.add(tickZ1);
+
+  const tickY0 = makeSurfaceSprite(THREE, "%0", "#94a3b8", 0.60, false);
+  tickY0.position.set(-2.28, 0.05, 1.68);
+  viewer.group.add(tickY0);
+
+  const tickY100 = makeSurfaceSprite(THREE, "%100", "#94a3b8", 0.60, false);
+  tickY100.position.set(-2.28, 3.0, 1.68);
+  viewer.group.add(tickY100);
   const operating = surface.operating || {};
   const opX = ((Number(operating.opening_pct) || 0) / 100 - 0.5) * 4;
   const opZ = ((Number(operating.authority_pr) || 0.5) - 0.5) * 3;

@@ -615,29 +615,41 @@ def _point_physics(
 
         if vtype == "butterfly":
             # Twin wake recirculation vortices behind the central tilted disk
-            if abs(y) < (0.35 * r_seat) and x_norm < 0.65:
-                u_axial = -0.26 * u_jet * math.sin(x_norm * math.pi)
-                v_rad = 0.20 * u_jet * math.cos(x_norm * math.pi) * (1.0 if y >= 0 else -1.0)
-                p_local = p_vc + (p2 - p_vc) * 0.5
-                c_type = 2  # Recirculation Eddy
-            else:
-                u_axial = u_jet * max(0.0, 1.0 - (r_rel ** 2))
-                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
-                p_local = p_vc + (p2 - p_vc) * x_norm
-                c_type = 1
+            u_fwd = u_jet * max(0.0, 1.0 - (r_rel ** 2))
+            v_fwd = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
+            p_fwd = p_vc + (p2 - p_vc) * x_norm
+
+            w_x = math.sin(math.pi * min(1.0, x_norm / 0.70)) if x_norm < 0.70 else 0.0
+            w_y = math.exp(-0.5 * ((y / max(0.1, 0.22 * r_seat)) ** 2))
+            w_e = w_x * w_y
+
+            u_vort = -0.28 * u_jet * math.sin(x_norm * math.pi)
+            v_vort = 0.22 * u_jet * math.cos(x_norm * math.pi) * (1.0 if y >= 0 else -1.0)
+            p_vort = p_vc + (p2 - p_vc) * 0.5
+
+            u_axial = (1.0 - w_e) * u_fwd + w_e * u_vort
+            v_rad = (1.0 - w_e) * v_fwd + w_e * v_vort
+            p_local = (1.0 - w_e) * p_fwd + w_e * p_vort
+            c_type = 2 if w_e > 0.30 else 1
 
         elif vtype == "ball":
             # Wide upper recirculation eddy in the dead space behind ball segment
-            if y > (0.10 * r_seat) and x_norm < 0.75:
-                u_axial = -0.38 * u_jet * math.sin(x_norm * math.pi)
-                v_rad = 0.24 * u_jet * math.cos(x_norm * math.pi)
-                p_local = p_vc + (p2 - p_vc) * 0.5
-                c_type = 2
-            else:
-                u_axial = u_jet * max(0.0, 1.0 - ((y + 0.35 * r_seat) / (0.65 * r_seat)) ** 2)
-                v_rad = 0.06 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
-                p_local = p_vc + (p2 - p_vc) * x_norm
-                c_type = 1
+            u_fwd = u_jet * max(0.0, 1.0 - ((y + 0.35 * r_seat) / (0.65 * r_seat)) ** 2)
+            v_fwd = 0.06 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
+            p_fwd = p_vc + (p2 - p_vc) * x_norm
+
+            w_x = math.sin(math.pi * min(1.0, x_norm / 0.75)) if x_norm < 0.75 else 0.0
+            w_y = math.exp(-0.5 * (((y - 0.45 * r_seat) / max(0.1, 0.28 * r_seat)) ** 2)) if y > 0.0 else 0.0
+            w_e = w_x * w_y
+
+            u_vort = -0.38 * u_jet * math.sin(x_norm * math.pi)
+            v_vort = 0.24 * u_jet * math.cos(x_norm * math.pi)
+            p_vort = p_vc + (p2 - p_vc) * 0.5
+
+            u_axial = (1.0 - w_e) * u_fwd + w_e * u_vort
+            v_rad = (1.0 - w_e) * v_fwd + w_e * v_vort
+            p_local = (1.0 - w_e) * p_fwd + w_e * p_vort
+            c_type = 2 if w_e > 0.30 else 1
 
         elif vtype == "angle_cage":
             # Multi-jet rapid mixing with negligible macro-eddy
@@ -648,16 +660,22 @@ def _point_physics(
 
         else:
             # Globe valve: single eddy behind the top plug
-            if y > (r_seat * 0.40) and x_norm < 0.70:
-                u_axial = -0.35 * u_jet * math.sin(x_norm * math.pi)
-                v_rad = 0.25 * u_jet * math.cos(x_norm * math.pi)
-                p_local = p_vc + (p2 - p_vc) * 0.5
-                c_type = 2
-            else:
-                u_axial = u_jet * max(0.0, 1.0 - (r_rel ** 2))
-                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
-                p_local = p_vc + (p2 - p_vc) * x_norm
-                c_type = 1
+            u_fwd = u_jet * max(0.0, 1.0 - (r_rel ** 2))
+            v_fwd = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
+            p_fwd = p_vc + (p2 - p_vc) * x_norm
+
+            w_x = math.sin(math.pi * min(1.0, x_norm / 0.70)) if x_norm < 0.70 else 0.0
+            w_y = math.exp(-0.5 * (((y - 0.55 * r_seat) / max(0.1, 0.26 * r_seat)) ** 2)) if y > 0.0 else 0.0
+            w_e = w_x * w_y
+
+            u_vort = -0.35 * u_jet * math.sin(x_norm * math.pi)
+            v_vort = 0.25 * u_jet * math.cos(x_norm * math.pi)
+            p_vort = p_vc + (p2 - p_vc) * 0.5
+
+            u_axial = (1.0 - w_e) * u_fwd + w_e * u_vort
+            v_rad = (1.0 - w_e) * v_fwd + w_e * v_vort
+            p_local = (1.0 - w_e) * p_fwd + w_e * p_vort
+            c_type = 2 if w_e > 0.30 else 1
 
     vm = math.sqrt(u_axial * u_axial + v_rad * v_rad)
     p_local = max(0.005, min(p1, p_local))
