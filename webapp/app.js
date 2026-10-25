@@ -777,9 +777,9 @@ function scheduleRecalc() {
   state.recalcTimer = setTimeout(() => calculate(true), 500);
 }
 
-function makeMetric(label, value, sub) {
+function makeMetric(label, value, sub, status = "") {
   const div = document.createElement("div");
-  div.className = "metric";
+  div.className = `metric${status ? ` status-${status}` : ""}`;
   const span = document.createElement("span");
   span.textContent = label;
   const b = document.createElement("b");
@@ -891,14 +891,28 @@ function renderResult(data) {
   $("result-verdict").textContent = verdict;
 
   const metrics = $("metrics");
+  const openingPct = Number(data.opening_percent) || 0;
+  let openingStatus = "ok";
+  if (openingPct < 10 || openingPct > 90) openingStatus = "danger";
+  else if (openingPct < 20 || openingPct > 80) openingStatus = "warn";
+
   metrics.replaceChildren(
     makeMetric("Gerekli Cv", display(data.required_cv, 3), "IEC/ISA"),
     makeMetric("Gerekli Kv", display(data.required_kv, 3), "Kv = 0,865 · Cv"),
     makeMetric("Seçilen vana", `DN${data.valve_dn_mm}`, data.valve_inch),
     makeMetric("Rated Cv", display(data.rated_cv, 3), "Vendor catalog"),
-    makeMetric("Açıklık", `%${display(data.opening_percent, 1)}`, `Cv oranı %${display(Number(data.cv_ratio) * 100, 1)}`),
-    makeMetric("ΔP", `${display(data.delta_p_bar, 3)} bar`, data.is_choked ? "Choked sınırında" : "Subkritik"),
+    makeMetric("Açıklık", `%${display(data.opening_percent, 1)}`, `Cv oranı %${display(Number(data.cv_ratio) * 100, 1)}`, openingStatus),
+    makeMetric("ΔP", `${display(data.delta_p_bar, 3)} bar`, data.is_choked ? "Choked sınırında" : "Subkritik", data.is_choked ? "warn" : "ok"),
   );
+
+  const pin = $("band-pin");
+  if (pin) pin.style.left = `${Math.max(0, Math.min(100, openingPct))}%`;
+
+  $("sticky-valve").textContent = `DN${data.valve_dn_mm} (${data.valve_inch || ""})`;
+  $("sticky-cv").textContent = display(data.required_cv, 2);
+  $("sticky-opening").textContent = `%${display(data.opening_percent, 1)}`;
+  $("sticky-noise").textContent = data.noise_db ? `${Math.round(data.noise_db)} dBA` : "—";
+  updatePipeRatioPill();
 
   const summary = $("result-summary");
   summary.replaceChildren(...fluidChips(data), makeChip("Marj", `%${display(data.design_margin_pct, 0)}`));
@@ -1839,6 +1853,8 @@ function setupEvents() {
     }
     updateUnitLabels(state.service);
     if (state.service === "gas") updateGasProperties();
+    updateDeltaPBadges();
+    updatePipeRatioPill();
     scheduleRecalc();
   };
   for (const tab of tabs) {
@@ -1963,7 +1979,13 @@ function setupEvents() {
   $("gas-p1").addEventListener("input", updateGasProperties);
   $("gas-temperature").addEventListener("input", updateGasProperties);
   $("calculate").addEventListener("click", () => calculate(false));
+  $("liquid-pipe-sync")?.addEventListener("click", () => syncPipeToValve("liquid"));
+  $("gas-pipe-sync")?.addEventListener("click", () => syncPipeToValve("gas"));
+  $("steam-pipe-sync")?.addEventListener("click", () => syncPipeToValve("steam"));
+  $("btn-copy-summary")?.addEventListener("click", copySummaryToClipboard);
   $("sizing-form").addEventListener("input", (event) => {
+    updateDeltaPBadges();
+    updatePipeRatioPill();
     if (event.target.matches("select, input[type=range], input[type=checkbox]")) return;
     scheduleRecalc();
   });
@@ -2334,6 +2356,206 @@ function setupUnitConverter() {
   $("modal-converter-close")?.addEventListener("click", () => modal?.close());
 }
 
+const LIQUID_CATEGORIES = {
+  all: () => true,
+  water: (k) => /water|su|glycol|glikol/i.test(k),
+  hc: (k) => /oil|diesel|fuel|yag|yakit|dizel|propane|propan/i.test(k),
+  chem: (k) => /methanol|metanol|ammonia|amonyak|acid|caustic/i.test(k),
+  cryo: (k) => /lng|hydrogen|hidrojen/i.test(k),
+};
+
+const GAS_CATEGORIES = {
+  all: () => true,
+  natgas: (k) => /doğal|dogal|metan|methane|etan|ethane/i.test(k),
+  air_n2: (k) => /hava|air|nitrojen|azot|argon|oksijen|oxygen/i.test(k),
+  h2: (k) => /hidrojen|hydrogen|syngas|sentez/i.test(k),
+  co2_spec: (k) => /co2|karbon|propan|bütan|butane/i.test(k),
+};
+
+function setupCategoryChips() {
+  const lChips = $("liquid-category-chips");
+  if (lChips) {
+    lChips.addEventListener("click", (evt) => {
+      const btn = evt.target.closest(".chip-btn");
+      if (!btn) return;
+      for (const b of lChips.querySelectorAll(".chip-btn")) b.classList.remove("active");
+      btn.classList.add("active");
+      const cat = btn.dataset.cat;
+      const fn = LIQUID_CATEGORIES[cat] || LIQUID_CATEGORIES.all;
+      const select = $("liquid-preset");
+      let firstVisible = null;
+      for (const opt of select.options) {
+        const match = fn(opt.value) || fn(opt.textContent);
+        opt.hidden = !match;
+        if (match && !firstVisible) firstVisible = opt;
+      }
+      if (firstVisible) {
+        select.value = firstVisible.value;
+        applyLiquidPreset();
+      }
+    });
+  }
+
+  const gChips = $("gas-category-chips");
+  if (gChips) {
+    gChips.addEventListener("click", (evt) => {
+      const btn = evt.target.closest(".chip-btn");
+      if (!btn) return;
+      for (const b of gChips.querySelectorAll(".chip-btn")) b.classList.remove("active");
+      btn.classList.add("active");
+      const cat = btn.dataset.cat;
+      const fn = GAS_CATEGORIES[cat] || GAS_CATEGORIES.all;
+      const select = $("gas-preset");
+      let firstVisible = null;
+      for (const opt of select.options) {
+        const match = fn(opt.value) || fn(opt.textContent);
+        opt.hidden = !match;
+        if (match && !firstVisible) firstVisible = opt;
+      }
+      if (firstVisible) {
+        select.value = firstVisible.value;
+        updateGasProperties();
+      }
+    });
+  }
+}
+
+function updateDeltaPBadges() {
+  for (const service of ["liquid", "gas", "steam"]) {
+    const p1El = $(`${service}-p1`);
+    const p2El = $(`${service}-p2`);
+    const badge = $(`${service}-dp-badge`);
+    const warn = $(`${service}-p2-warning`);
+    if (!p1El || !p2El || !badge) continue;
+    const p1 = Number(p1El.value);
+    const p2 = Number(p2El.value);
+    const unitSel = $(`${service}-pressure-unit`);
+    const unitLabel = unitSel?.selectedOptions[0]?.textContent || "bar";
+    if (Number.isFinite(p1) && Number.isFinite(p2)) {
+      const dp = p1 - p2;
+      if (dp <= 0) {
+        badge.textContent = `⚠️ P1 ≤ P2 (ΔP: ${dp.toFixed(2)})`;
+        badge.classList.add("danger");
+        if (warn) {
+          warn.textContent = "Giriş basıncı P1, çıkış basıncı P2'den büyük olmalıdır.";
+          warn.hidden = false;
+        }
+      } else {
+        badge.textContent = `ΔP: ${dp.toFixed(2)} ${unitLabel}`;
+        badge.classList.remove("danger");
+        if (warn) warn.hidden = true;
+      }
+    }
+
+    if (service === "liquid" && warn && warn.hidden) {
+      const pvEl = $("liquid-pv");
+      const pv = Number(pvEl?.value);
+      if (Number.isFinite(pv) && Number.isFinite(p2) && p2 <= pv) {
+        warn.textContent = `⚠️ P2 (${p2.toFixed(2)}) ≤ Pv (${pv.toFixed(2)}): Flashing riski!`;
+        warn.hidden = false;
+      }
+    }
+  }
+}
+
+function updatePipeRatioPill(service = state.service) {
+  const inEl = $(`${service}-pipe-in`);
+  const outEl = $(`${service}-pipe-out`);
+  const pill = $(`${service}-pipe-ratio`);
+  if (!inEl || !outEl || !pill) return;
+  const d1 = Number(inEl.value);
+  const d2 = Number(outEl.value);
+  const targetDn = Number($("target-dn")?.value) || Number(state.pendingResult?.valve_dn_mm) || (service === "liquid" ? 50 : 80);
+
+  if (!Number.isFinite(d1) || !Number.isFinite(d2) || d1 <= 0 || d2 <= 0) {
+    pill.textContent = "Boru çapları geçerli olmalıdır.";
+    return;
+  }
+
+  const parts = [];
+  if (Math.abs(d1 - targetDn) < 1.0 && Math.abs(d2 - targetDn) < 1.0) {
+    parts.push(`Düz Boru (D1 = DN${Math.round(targetDn)} = D2)`);
+  } else {
+    if (Math.abs(d1 - targetDn) >= 1.0) {
+      const r1 = d1 / targetDn;
+      const velRatio = (r1 * r1).toFixed(1);
+      parts.push(d1 > targetDn ? `Giriş Redüksiyonu: ${r1.toFixed(1)}x (Vana Hızı ~${velRatio}x)` : `Giriş Genişletici: ${(1 / r1).toFixed(1)}x`);
+    }
+    if (Math.abs(d2 - targetDn) >= 1.0) {
+      const r2 = d2 / targetDn;
+      parts.push(d2 > targetDn ? `Çıkış Genişletici: ${r2.toFixed(1)}x` : `Çıkış Redüksiyonu: ${(1 / r2).toFixed(1)}x`);
+    }
+  }
+  pill.textContent = parts.join(" · ");
+}
+
+function syncPipeToValve(service = state.service) {
+  const targetDn = Number($("target-dn")?.value) || Number(state.pendingResult?.valve_dn_mm) || (service === "liquid" ? 50 : 80);
+  const inEl = $(`${service}-pipe-in`);
+  const outEl = $(`${service}-pipe-out`);
+  if (inEl) inEl.value = targetDn;
+  if (outEl) outEl.value = targetDn;
+  updatePipeRatioPill(service);
+  showToast(`Boru çapları DN${targetDn} olarak eşitlendi.`);
+  scheduleRecalc();
+}
+
+function copySummaryToClipboard() {
+  const data = state.pendingResult;
+  if (!data) {
+    showToast("Henüz hesaplanmış bir sonuç bulunmuyor.");
+    return;
+  }
+  const serviceLabel = SERVICE_LABELS[data.service] || data.service;
+  const summaryText = [
+    `# Kontrol Vanası Boyutlandırma Özeti (${serviceLabel})`,
+    `• Vana Boyutu: DN${data.valve_dn_mm} (${data.valve_inch || ""})`,
+    `• Gerekli Cv: ${display(data.required_cv, 2)} | Kv: ${display(data.required_kv, 2)}`,
+    `• Rated Cv: ${display(data.rated_cv, 2)}`,
+    `• Vana Açıklığı: %${display(data.opening_percent, 1)}`,
+    `• Basınçlar: P1 = ${display(data.p1, 2)} bar(a), P2 = ${display(data.p2, 2)} bar(a) (ΔP = ${display(data.delta_p_bar, 2)} bar)`,
+    `• Gürültü Seviyesi: ${data.noise_db ? `${Math.round(data.noise_db)} dBA` : "—"}`,
+    `• Durum: ${$("result-verdict")?.textContent || "Normal"}`,
+  ].join("\n");
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(summaryText)
+      .then(() => showToast("✓ Mühendislik özeti panoya kopyalandı!"))
+      .catch(() => showToast("Panoya kopyalama başarısız oldu."));
+  } else {
+    showToast("Tarayıcı panosu desteklenmiyor.");
+  }
+}
+
+function setupStickyResultsBar() {
+  const stickyBar = $("sticky-results-bar");
+  const resultsCard = $("results");
+  if (!stickyBar || !resultsCard) return;
+
+  window.addEventListener("scroll", () => {
+    if (resultsCard.hidden) {
+      stickyBar.classList.remove("visible");
+      return;
+    }
+    const rect = resultsCard.getBoundingClientRect();
+    if (rect.top < -80 && rect.bottom > 150) {
+      stickyBar.classList.add("visible");
+    } else {
+      stickyBar.classList.remove("visible");
+    }
+  }, { passive: true });
+
+  stickyBar.addEventListener("click", (evt) => {
+    const btn = evt.target.closest(".sticky-btn");
+    if (!btn) return;
+    const targetId = btn.dataset.target;
+    const targetEl = $(targetId);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
 function setupShortcuts() {
   const shortcutsModal = $("shortcuts-modal");
   $("btn-open-shortcuts")?.addEventListener("click", () => shortcutsModal?.showModal());
@@ -2437,6 +2659,10 @@ async function init() {
       fillSelect($(SERVICE_UNIT[service].temperature), meta.units.temperature, "key", "label");
     }
     setDefaults();
+    setupCategoryChips();
+    setupStickyResultsBar();
+    updateDeltaPBadges();
+    updatePipeRatioPill();
     await applyLiquidPreset();
     init3d();
     state.flow2DViewer = createFlow2DViewer();

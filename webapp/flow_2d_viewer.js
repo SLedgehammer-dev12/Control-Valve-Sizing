@@ -462,20 +462,38 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
     const { x, y } = toWorld(px, py, w, h);
     const f = sampleField(x, y);
+    const g = simData.geometry;
 
-    let cellName = "Serbest Akış";
-    if (f.cell === 0) cellName = "Cidar / Gövde Metali";
-    else if (f.cell === 2) cellName = "Resirkülasyon Girdabı (Eddy)";
-    else if (f.cell === 3) cellName = "Kavitasyon Buhar Çekirdeği";
+    let cellName = "Serbest Boru Akışı";
+    let zoneColor = "#34d399";
+    if (f.cell === 0) {
+      cellName = "Çeper / Klape Katı Metali";
+      zoneColor = "#94a3b8";
+    } else if (f.cell === 3) {
+      cellName = "Kavitasyon Buhar Çekirdeği (P ≤ Pv)";
+      zoneColor = "#67e8f9";
+    } else if (f.cell === 2) {
+      cellName = "Türbülanslı Sirkülasyon Girdabı (Wake)";
+      zoneColor = "#c084fc";
+    } else if (x < g.x_flange_in) {
+      cellName = "Giriş / Redüksiyon Akışı (D1→DN)";
+      zoneColor = "#38bdf8";
+    } else if (x >= g.x_flange_in && x <= g.x_flange_out) {
+      cellName = "Vana Boğazı / Vena Contracta Jeti";
+      zoneColor = "#fbbf24";
+    } else {
+      cellName = "Difüzör / Çıkış Borusu (DN→D2)";
+      zoneColor = "#34d399";
+    }
 
     hud.hidden = false;
-    hud.style.left = `${Math.min(w - 230, px + 12)}px`;
-    hud.style.top = `${Math.min(h - 96, py + 12)}px`;
+    hud.style.left = `${Math.min(w - 240, Math.max(10, px + 12))}px`;
+    hud.style.top = `${Math.min(h - 100, Math.max(10, py + 12))}px`;
     hud.innerHTML = `
-      <div><b>X:</b> ${x.toFixed(1)} mm | <b>r:</b> ${y.toFixed(1)} mm</div>
-      <div><b>Hız:</b> ${f.vm.toFixed(1)} m/s (u: ${f.u.toFixed(1)}, v: ${f.v.toFixed(1)})</div>
+      <div><b>Konum:</b> X = ${x.toFixed(1)} mm | r = ${Math.abs(y).toFixed(1)} mm</div>
+      <div><b>Hız:</b> ${f.vm.toFixed(1)} m/s (u: ${f.u >= 0 ? "+" : ""}${f.u.toFixed(1)}, v: ${f.v >= 0 ? "+" : ""}${f.v.toFixed(1)})</div>
       <div><b>Basınç:</b> ${f.p.toFixed(3)} bar(a) | <b>Mach:</b> ${f.m.toFixed(2)}</div>
-      <div style="color:#38bdf8;font-size:0.75rem;">${cellName}</div>
+      <div style="color:${zoneColor};font-size:0.75rem;font-weight:600;margin-top:2px;">${cellName}</div>
     `;
   }
 

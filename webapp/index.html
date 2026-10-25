@@ -16,6 +16,24 @@
   </script>
 </head>
 <body>
+  <div class="sticky-results-bar" id="sticky-results-bar" hidden>
+    <div class="sticky-results-inner">
+      <div class="sticky-stats-group">
+        <span class="sticky-stat"><span class="sticky-lbl">Vana:</span> <b id="sticky-valve">-</b></span>
+        <span class="sticky-stat"><span class="sticky-lbl">Cv:</span> <b id="sticky-cv">-</b></span>
+        <span class="sticky-stat"><span class="sticky-lbl">Açıklık:</span> <b id="sticky-opening">-</b></span>
+        <span class="sticky-stat"><span class="sticky-lbl">Gürültü:</span> <b id="sticky-noise">-</b></span>
+      </div>
+      <div class="sticky-nav">
+        <button type="button" class="sticky-btn" data-target="sizing-form">▲ Form</button>
+        <button type="button" class="sticky-btn" data-target="valve-view">3B Model</button>
+        <button type="button" class="sticky-btn" data-target="card-flow-2d">CFD Kesit</button>
+        <button type="button" class="sticky-btn" data-target="diagnostics-grid">Tanılar</button>
+        <button type="button" class="sticky-btn" data-target="curve-chart">Eğri</button>
+      </div>
+    </div>
+  </div>
+
   <header class="topbar">
     <div>
       <p class="eyebrow">IEC 60534 · ISA 75.01</p>
@@ -89,9 +107,9 @@
 
     <section class="content">
       <div class="tabs" role="tablist" aria-label="Servis seçimi">
-        <button class="tab active" id="tab-liquid" type="button" data-service="liquid" role="tab" aria-selected="true" aria-controls="panel-liquid" tabindex="0">Sıvı (1)</button>
-        <button class="tab" id="tab-gas" type="button" data-service="gas" role="tab" aria-selected="false" aria-controls="panel-gas" tabindex="-1">Gaz (2)</button>
-        <button class="tab" id="tab-steam" type="button" data-service="steam" role="tab" aria-selected="false" aria-controls="panel-steam" tabindex="-1">Buhar (3)</button>
+        <button class="tab active" id="tab-liquid" type="button" data-service="liquid" role="tab" aria-selected="true" aria-controls="panel-liquid" tabindex="0">Sıvı <kbd class="key-hint">1</kbd></button>
+        <button class="tab" id="tab-gas" type="button" data-service="gas" role="tab" aria-selected="false" aria-controls="panel-gas" tabindex="-1">Gaz <kbd class="key-hint">2</kbd></button>
+        <button class="tab" id="tab-steam" type="button" data-service="steam" role="tab" aria-selected="false" aria-controls="panel-steam" tabindex="-1">Buhar <kbd class="key-hint">3</kbd></button>
       </div>
 
       <form id="sizing-form" class="card form-card" autocomplete="off" aria-busy="false">
@@ -110,6 +128,13 @@
           <div class="grid">
             <div class="field span-2">
               <span>Akışkan Preset Arama / Seçim</span>
+              <div class="preset-category-chips" id="liquid-category-chips">
+                <button type="button" class="chip-btn active" data-cat="all">Tümü</button>
+                <button type="button" class="chip-btn" data-cat="water">💧 Su & Kondensat</button>
+                <button type="button" class="chip-btn" data-cat="hc">⛽ Hidrokarbonlar</button>
+                <button type="button" class="chip-btn" data-cat="chem">🧪 Asit & Kimyasal</button>
+                <button type="button" class="chip-btn" data-cat="cryo">❄️ Kriyojenik</button>
+              </div>
               <div class="preset-search-box">
                 <input type="text" id="liquid-preset-filter" placeholder="🔍 Preset filtrele (örn. su, amonyak, propan)..." class="filter-input">
                 <select id="liquid-preset" aria-describedby="liquid-preset-note"></select>
@@ -117,14 +142,26 @@
             </div>
             <label class="field"><span>Debi</span><input id="liquid-flow" type="number" step="any" value="25"></label>
             <label class="field"><span>Sıcaklık</span><input id="liquid-temperature" type="number" step="any" value="25"></label>
-            <label class="field"><span>Giriş basıncı P1</span><input id="liquid-p1" type="number" step="any" value="8"></label>
-            <label class="field"><span>Çıkış basıncı P2</span><input id="liquid-p2" type="number" step="any" value="5"></label>
+            <div class="field-with-badge">
+              <label class="field"><span>Giriş basıncı P1</span><input id="liquid-p1" type="number" step="any" value="8"></label>
+              <span class="dp-badge" id="liquid-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 3.00 bar</span>
+            </div>
+            <div class="field-with-badge">
+              <label class="field"><span>Çıkış basıncı P2</span><input id="liquid-p2" type="number" step="any" value="5"></label>
+              <span class="field-validation-msg" id="liquid-p2-warning" hidden></span>
+            </div>
             <label class="field"><span>Buhar basıncı Pv [bar(a)]</span><input id="liquid-pv" type="number" step="any" value="0.023"></label>
             <label class="field"><span>Kritik basınç Pc [bar(a)]</span><input id="liquid-pc" type="number" step="any" value="220.64"></label>
             <label class="field"><span>Yoğunluk [kg/m³]</span><input id="liquid-density" type="number" step="any" value="998"></label>
             <label class="field"><span>Viskozite [Pa·s]</span><input id="liquid-viscosity" type="number" step="any" value="0.00089"></label>
-            <label class="field"><span>Hat giriş çapı [mm]</span><input id="liquid-pipe-in" type="number" step="any" value="50"></label>
-            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="liquid-pipe-out" type="number" step="any" value="50"></label>
+            <div class="field span-2">
+              <div class="pipe-fields-row">
+                <label class="field"><span>Hat giriş çapı [mm]</span><input id="liquid-pipe-in" type="number" step="any" value="50"></label>
+                <button type="button" class="pipe-sync-btn" id="liquid-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="liquid-pipe-out" type="number" step="any" value="50"></label>
+              </div>
+              <div class="pipe-ratio-pill" id="liquid-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
+            </div>
           </div>
           <p class="hint" id="liquid-preset-note" aria-live="polite"></p>
         </section>
@@ -144,6 +181,13 @@
           <div class="grid">
             <div class="field span-2">
               <span>Gaz Preset Arama / Seçim</span>
+              <div class="preset-category-chips" id="gas-category-chips">
+                <button type="button" class="chip-btn active" data-cat="all">Tümü</button>
+                <button type="button" class="chip-btn" data-cat="natgas">🔥 Doğal Gaz</button>
+                <button type="button" class="chip-btn" data-cat="air_n2">💨 Hava & Azot</button>
+                <button type="button" class="chip-btn" data-cat="h2">⚡ Hidrojen</button>
+                <button type="button" class="chip-btn" data-cat="co2_spec">🏭 CO2 & LPG</button>
+              </div>
               <div class="preset-search-box">
                 <input type="text" id="gas-preset-filter" placeholder="🔍 Gaz filtrele (örn. metan, argon, hava)..." class="filter-input">
                 <select id="gas-preset"></select>
@@ -159,10 +203,22 @@
             <label class="check-line"><input id="gas-composition-toggle" type="checkbox" aria-controls="gas-composition-fields"> Gaz kompozisyonunu oluştur</label>
             <label class="field"><span>Debi</span><input id="gas-flow" type="number" step="any" value="800"></label>
             <label class="field"><span>Sıcaklık</span><input id="gas-temperature" type="number" step="any" value="20"></label>
-            <label class="field"><span>Giriş basıncı P1</span><input id="gas-p1" type="number" step="any" value="8"></label>
-            <label class="field"><span>Çıkış basıncı P2</span><input id="gas-p2" type="number" step="any" value="6"></label>
-            <label class="field"><span>Hat giriş çapı [mm]</span><input id="gas-pipe-in" type="number" step="any" value="80"></label>
-            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="gas-pipe-out" type="number" step="any" value="80"></label>
+            <div class="field-with-badge">
+              <label class="field"><span>Giriş basıncı P1</span><input id="gas-p1" type="number" step="any" value="8"></label>
+              <span class="dp-badge" id="gas-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 2.00 bar</span>
+            </div>
+            <div class="field-with-badge">
+              <label class="field"><span>Çıkış basıncı P2</span><input id="gas-p2" type="number" step="any" value="6"></label>
+              <span class="field-validation-msg" id="gas-p2-warning" hidden></span>
+            </div>
+            <div class="field span-2">
+              <div class="pipe-fields-row">
+                <label class="field"><span>Hat giriş çapı [mm]</span><input id="gas-pipe-in" type="number" step="any" value="80"></label>
+                <button type="button" class="pipe-sync-btn" id="gas-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="gas-pipe-out" type="number" step="any" value="80"></label>
+              </div>
+              <div class="pipe-ratio-pill" id="gas-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
+            </div>
           </div>
           <div id="gas-composition-fields" hidden>
             <div class="grid">
@@ -208,10 +264,22 @@
           <div class="grid">
             <label class="field"><span>Debi</span><input id="steam-flow" type="number" step="any" value="2500"></label>
             <label class="field"><span>Sıcaklık</span><input id="steam-temperature" type="number" step="any" value="220"></label>
-            <label class="field"><span>Giriş basıncı P1</span><input id="steam-p1" type="number" step="any" value="12"></label>
-            <label class="field"><span>Çıkış basıncı P2</span><input id="steam-p2" type="number" step="any" value="8"></label>
-            <label class="field"><span>Hat giriş çapı [mm]</span><input id="steam-pipe-in" type="number" step="any" value="80"></label>
-            <label class="field"><span>Hat çıkış çapı [mm]</span><input id="steam-pipe-out" type="number" step="any" value="80"></label>
+            <div class="field-with-badge">
+              <label class="field"><span>Giriş basıncı P1</span><input id="steam-p1" type="number" step="any" value="12"></label>
+              <span class="dp-badge" id="steam-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 4.00 bar</span>
+            </div>
+            <div class="field-with-badge">
+              <label class="field"><span>Çıkış basıncı P2</span><input id="steam-p2" type="number" step="any" value="8"></label>
+              <span class="field-validation-msg" id="steam-p2-warning" hidden></span>
+            </div>
+            <div class="field span-2">
+              <div class="pipe-fields-row">
+                <label class="field"><span>Hat giriş çapı [mm]</span><input id="steam-pipe-in" type="number" step="any" value="80"></label>
+                <button type="button" class="pipe-sync-btn" id="steam-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="steam-pipe-out" type="number" step="any" value="80"></label>
+              </div>
+              <div class="pipe-ratio-pill" id="steam-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
+            </div>
           </div>
         </section>
 
@@ -246,7 +314,7 @@
         </div>
 
         <div class="actions">
-          <button id="calculate" class="primary" type="button">Hesapla (Ctrl+Enter)</button>
+          <button id="calculate" class="primary" type="button">Hesapla <kbd class="key-hint">Ctrl+↵</kbd></button>
           <span class="status" id="calc-status" aria-live="polite"></span>
           <span class="hint">Birim değiştirdiğinizde değerler otomatik dönüştürülür.</span>
         </div>
@@ -267,6 +335,7 @@
                 <span class="badge stale" id="result-stale" hidden>Son geçerli sonuç</span>
               </div>
               <div class="result-action-btns">
+                <button class="action-btn" id="btn-copy-summary" type="button" title="Mühendislik özetini panoya kopyala">📋 Özeti Kopyala</button>
                 <button class="action-btn" id="btn-isa20-report" type="button">📋 ISA-20 Formu</button>
                 <button class="action-btn" id="btn-md-report" type="button">📄 Mühendislik Raporu</button>
               </div>
@@ -274,6 +343,22 @@
           </div>
           <p class="result-verdict" id="result-verdict"></p>
           <div class="metrics" id="metrics"></div>
+          <div class="controllability-band-wrap" id="controllability-band-wrap">
+            <div class="controllability-band">
+              <div class="band-zone zone-low" title="Aşınma & Avlanma Riski (%0-%20)"></div>
+              <div class="band-zone zone-ok" title="İdeal Kontrol Aralığı (%20-%80)"></div>
+              <div class="band-zone zone-warn" title="Kapasite Sınırı (%80-%90)"></div>
+              <div class="band-zone zone-high" title="Doygunluk Riski (%90-%100)"></div>
+              <div class="band-pin" id="band-pin" style="left: 50%;"></div>
+            </div>
+            <div class="band-labels">
+              <span>%0 Sit</span>
+              <span>%20</span>
+              <span class="ideal-text">İdeal Çalışma Bölgesi (%20 - %80)</span>
+              <span>%80</span>
+              <span>%100 Tam Açık</span>
+            </div>
+          </div>
           <div class="result-summary" id="result-summary"></div>
           <div id="warnings"></div>
 
