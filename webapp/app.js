@@ -212,7 +212,7 @@ async function fetchJson(url, options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(url, { ...(options || {}), signal: controller.signal });
+    const response = await fetch(url, { cache: "no-cache", ...(options || {}), signal: controller.signal });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -289,6 +289,21 @@ function updateVendorInfo() {
   updateVendorSizes();
 }
 
+const LARGE_DN_FALLBACK = [
+  { dn_mm: 250, inch: '10"', cv_rated: 1020 },
+  { dn_mm: 300, inch: '12"', cv_rated: 1480 },
+  { dn_mm: 350, inch: '14"', cv_rated: 1950 },
+  { dn_mm: 400, inch: '16"', cv_rated: 2550 },
+  { dn_mm: 450, inch: '18"', cv_rated: 3200 },
+  { dn_mm: 500, inch: '20"', cv_rated: 3950 },
+  { dn_mm: 600, inch: '24"', cv_rated: 5700 },
+  { dn_mm: 700, inch: '28"', cv_rated: 7800 },
+  { dn_mm: 750, inch: '30"', cv_rated: 8900 },
+  { dn_mm: 800, inch: '32"', cv_rated: 10200 },
+  { dn_mm: 900, inch: '36"', cv_rated: 13000 },
+  { dn_mm: 1000, inch: '40"', cv_rated: 16200 },
+];
+
 function updateVendorSizes() {
   const select = $("target-dn");
   if (!select) return;
@@ -300,13 +315,21 @@ function updateVendorSizes() {
   autoOpt.textContent = "Otomatik (Önerilen)";
   select.appendChild(autoOpt);
 
-  if (vendor && Array.isArray(vendor.sizes)) {
-    for (const size of vendor.sizes) {
-      const opt = document.createElement("option");
-      opt.value = String(size.dn_mm);
-      opt.textContent = `DN${size.dn_mm} (${size.inch}) · Rated Cv: ${size.cv_rated}`;
-      select.appendChild(opt);
+  const sizes = vendor && Array.isArray(vendor.sizes) ? [...vendor.sizes] : [];
+  const existingDns = new Set(sizes.map((s) => Number(s.dn_mm)));
+
+  // Ensure all standard large sizes up to 40" (DN1000) are always present in the selector
+  for (const ext of LARGE_DN_FALLBACK) {
+    if (!existingDns.has(ext.dn_mm)) {
+      sizes.push(ext);
     }
+  }
+
+  for (const size of sizes) {
+    const opt = document.createElement("option");
+    opt.value = String(size.dn_mm);
+    opt.textContent = `DN${size.dn_mm} (${size.inch}) · Rated Cv: ${size.cv_rated}`;
+    select.appendChild(opt);
   }
   if (currentVal && Array.from(select.options).some((o) => o.value === currentVal)) {
     select.value = currentVal;
@@ -2315,7 +2338,7 @@ async function init() {
   });
   $("btn-eval-multicase")?.addEventListener("click", evaluateMultiCase);
   try {
-    const meta = await fetchJson("/api/meta");
+    const meta = await fetchJson(`/api/meta?v=${Date.now()}`);
     state.meta = meta;
     $("version-badge").textContent = `v${meta.version}`;
     $("api-status").textContent = "API çevrimiçi";

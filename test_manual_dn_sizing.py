@@ -126,6 +126,15 @@ def test_large_valve_sizes_in_default_series():
     assert max_valve.cv_rated == 15500.0
 
 
+def test_webapp_target_dn_has_40_inch_sizes():
+    from pathlib import Path
+
+    js = (Path(__file__).with_name("webapp") / "app.js").read_text(encoding="utf-8")
+    assert "LARGE_DN_FALLBACK" in js
+    assert 'dn_mm: 1000, inch: \'40"\'' in js
+    assert "updateVendorSizes()" in js
+
+
 def test_large_valve_sizes_in_vendor_catalog():
     import vendor_catalog
 
