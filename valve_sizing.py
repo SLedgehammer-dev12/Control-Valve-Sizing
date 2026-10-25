@@ -196,6 +196,18 @@ DEFAULT_VALVE_SERIES = [
     ValveSize(100, '4"', 180.0),
     ValveSize(150, '6"', 360.0),
     ValveSize(200, '8"', 600.0),
+    ValveSize(250, '10"', 950.0),
+    ValveSize(300, '12"', 1400.0),
+    ValveSize(350, '14"', 1850.0),
+    ValveSize(400, '16"', 2400.0),
+    ValveSize(450, '18"', 3050.0),
+    ValveSize(500, '20"', 3800.0),
+    ValveSize(600, '24"', 5500.0),
+    ValveSize(700, '28"', 7500.0),
+    ValveSize(750, '30"', 8600.0),
+    ValveSize(800, '32"', 9800.0),
+    ValveSize(900, '36"', 12500.0),
+    ValveSize(1000, '40"', 15500.0),
 ]
 
 

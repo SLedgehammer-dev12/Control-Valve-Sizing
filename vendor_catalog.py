@@ -566,6 +566,74 @@ AZBIL_VENDOR_CATALOG: dict[str, VendorValveDefinition] = {
     ),
 }
 
+LARGE_GLOBE_SIZES: tuple[ValveSize, ...] = (
+    ValveSize(250, '10"', 1020.0),
+    ValveSize(300, '12"', 1480.0),
+    ValveSize(350, '14"', 1950.0),
+    ValveSize(400, '16"', 2550.0),
+    ValveSize(450, '18"', 3200.0),
+    ValveSize(500, '20"', 3950.0),
+    ValveSize(600, '24"', 5700.0),
+    ValveSize(700, '28"', 7800.0),
+    ValveSize(750, '30"', 8900.0),
+    ValveSize(800, '32"', 10200.0),
+    ValveSize(900, '36"', 13000.0),
+    ValveSize(1000, '40"', 16200.0),
+)
+
+LARGE_ROTARY_BALL_SIZES: tuple[ValveSize, ...] = (
+    ValveSize(250, '10"', 3000.0),
+    ValveSize(300, '12"', 4500.0),
+    ValveSize(350, '14"', 6200.0),
+    ValveSize(400, '16"', 8200.0),
+    ValveSize(450, '18"', 10500.0),
+    ValveSize(500, '20"', 13000.0),
+    ValveSize(600, '24"', 19000.0),
+    ValveSize(700, '28"', 26000.0),
+    ValveSize(750, '30"', 30000.0),
+    ValveSize(800, '32"', 34000.0),
+    ValveSize(900, '36"', 43000.0),
+    ValveSize(1000, '40"', 54000.0),
+)
+
+LARGE_BUTTERFLY_SIZES: tuple[ValveSize, ...] = (
+    ValveSize(250, '10"', 3600.0),
+    ValveSize(300, '12"', 5400.0),
+    ValveSize(350, '14"', 7500.0),
+    ValveSize(400, '16"', 10200.0),
+    ValveSize(450, '18"', 13200.0),
+    ValveSize(500, '20"', 16500.0),
+    ValveSize(600, '24"', 24500.0),
+    ValveSize(700, '28"', 33500.0),
+    ValveSize(750, '30"', 38500.0),
+    ValveSize(800, '32"', 44000.0),
+    ValveSize(900, '36"', 56000.0),
+    ValveSize(1000, '40"', 70000.0),
+)
+
+
+def _extend_sizes_to_40_inch(def_val: VendorValveDefinition) -> VendorValveDefinition:
+    existing_dns = {s.dn_mm for s in def_val.sizes}
+    vtype = def_val.family.lower()
+    style = def_val.style.lower()
+    key = def_val.key.lower()
+
+    if "butterfly" in style or "triple_offset" in style or "bfly" in key:
+        large_ref = LARGE_BUTTERFLY_SIZES
+    elif "rotary" in vtype or "ball" in style or "vnotch" in key or "vport" in key or "camflex" in key:
+        large_ref = LARGE_ROTARY_BALL_SIZES
+    else:
+        large_ref = LARGE_GLOBE_SIZES
+
+    extension = [s for s in large_ref if s.dn_mm not in existing_dns and s.cv_rated > def_val.sizes[-1].cv_rated]
+    if not extension:
+        return def_val
+
+    import dataclasses
+
+    return dataclasses.replace(def_val, sizes=tuple(list(def_val.sizes) + extension))
+
+
 VENDOR_CATALOG: dict[str, VendorValveDefinition] = {}
 for _cat in (
     FISHER_VENDOR_CATALOG,
@@ -578,7 +646,10 @@ for _cat in (
     WUZHONG_VENDOR_CATALOG,
     AZBIL_VENDOR_CATALOG,
 ):
-    VENDOR_CATALOG.update(_cat)
+    for _k, _v in list(_cat.items()):
+        _ext = _extend_sizes_to_40_inch(_v)
+        _cat[_k] = _ext
+        VENDOR_CATALOG[_k] = _ext
 
 
 def get_vendor_options() -> list[str]:

@@ -101,13 +101,14 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
   function toScreen(x, y, w, h) {
     if (!simData?.geometry) return { px: 0, py: 0 };
     const g = simData.geometry;
-    const padX = 26;
-    const padY = 22;
+    const padX = 28;
+    const padY = 24;
     const plotW = w - padX * 2;
     const plotH = h - padY * 2;
-    const maxR = Math.max(g.d1_mm, g.d2_mm) * 0.65;
+    const maxR = Math.max(g.d1_mm, g.d2_mm, g.dn_mm) * 0.58;
+    const spanX = Math.max(1.0, g.x_outlet_mm - g.x_inlet_mm);
 
-    const px = padX + ((x - g.x_inlet_mm) / (g.x_outlet_mm - g.x_inlet_mm)) * plotW;
+    const px = padX + ((x - g.x_inlet_mm) / spanX) * plotW;
     const py = padY + plotH / 2 - (y / maxR) * (plotH / 2);
     return { px, py };
   }
@@ -115,13 +116,14 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
   function toWorld(px, py, w, h) {
     if (!simData?.geometry) return { x: 0, y: 0 };
     const g = simData.geometry;
-    const padX = 26;
-    const padY = 22;
+    const padX = 28;
+    const padY = 24;
     const plotW = w - padX * 2;
     const plotH = h - padY * 2;
-    const maxR = Math.max(g.d1_mm, g.d2_mm) * 0.65;
+    const maxR = Math.max(g.d1_mm, g.d2_mm, g.dn_mm) * 0.58;
+    const spanX = Math.max(1.0, g.x_outlet_mm - g.x_inlet_mm);
 
-    const x = g.x_inlet_mm + ((px - padX) / plotW) * (g.x_outlet_mm - g.x_inlet_mm);
+    const x = g.x_inlet_mm + ((px - padX) / plotW) * spanX;
     const y = -((py - (padY + plotH / 2)) / (plotH / 2)) * maxR;
     return { x, y };
   }
@@ -274,6 +276,8 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
     strokePoly(g.bottom_wall, "#cbd5e1");
 
     const vType = g.valve_type || "globe";
+    const rSeat = g.dn_mm * 0.425;
+    const yLbl = -(rSeat * 1.15);
 
     if (vType === "butterfly") {
       strokePoly(g.seat_top, "#64748b", "rgba(51, 65, 85, 0.95)");
@@ -291,9 +295,9 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
       ctx.fillStyle = "#38bdf8";
       ctx.font = "11px ui-monospace, monospace";
-      const pLbl = toScreen(g.x_seat_mm, -(g.d1_mm * 0.46), w, h);
+      const pLbl = toScreen(g.x_seat_mm, yLbl, w, h);
       ctx.fillText("Döner Disk", pLbl.px - 28, pLbl.py);
-      const pVcLbl = toScreen(g.x_vc_mm, -(g.d1_mm * 0.46), w, h);
+      const pVcLbl = toScreen(g.x_vc_mm, yLbl, w, h);
       ctx.fillText("Üst & Alt Çift Jet", pVcLbl.px - 36, pVcLbl.py);
 
     } else if (vType === "ball") {
@@ -303,9 +307,9 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
       ctx.fillStyle = "#fbbf24";
       ctx.font = "11px ui-monospace, monospace";
-      const pLbl = toScreen(g.x_seat_mm, -(g.d1_mm * 0.46), w, h);
+      const pLbl = toScreen(g.x_seat_mm, yLbl, w, h);
       ctx.fillText("V-Port Segment", pLbl.px - 36, pLbl.py);
-      const pVcLbl = toScreen(g.x_vc_mm, -(g.d1_mm * 0.46), w, h);
+      const pVcLbl = toScreen(g.x_vc_mm, yLbl, w, h);
       ctx.fillText("Asimetrik Jet", pVcLbl.px - 32, pVcLbl.py);
 
     } else if (vType === "angle_cage") {
@@ -315,9 +319,9 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
       ctx.fillStyle = "#c084fc";
       ctx.font = "11px ui-monospace, monospace";
-      const pLbl = toScreen(g.x_seat_mm, -(g.d1_mm * 0.46), w, h);
+      const pLbl = toScreen(g.x_seat_mm, yLbl, w, h);
       ctx.fillText("Kafes Trim", pLbl.px - 28, pLbl.py);
-      const pVcLbl = toScreen(g.x_vc_mm, -(g.d1_mm * 0.46), w, h);
+      const pVcLbl = toScreen(g.x_vc_mm, yLbl, w, h);
       ctx.fillText("Dağıtık Mikro-Jet", pVcLbl.px - 38, pVcLbl.py);
 
     } else {
@@ -328,11 +332,32 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
 
       ctx.fillStyle = "#94a3b8";
       ctx.font = "11px ui-monospace, monospace";
-      const pSeat = toScreen(g.x_seat_mm, -(g.d1_mm * 0.46), w, h);
+      const pSeat = toScreen(g.x_seat_mm, yLbl, w, h);
       ctx.fillText("Sit Boğazı", pSeat.px - 26, pSeat.py);
-      const pVc = toScreen(g.x_vc_mm, -(g.d1_mm * 0.46), w, h);
+      const pVc = toScreen(g.x_vc_mm, yLbl, w, h);
       ctx.fillText("Vena Contracta", pVc.px - 36, pVc.py);
     }
+
+    // Dimension callouts showing pipe and valve diameters to scale
+    ctx.save();
+    ctx.fillStyle = "rgba(203, 213, 225, 0.75)";
+    ctx.font = "10px ui-monospace, monospace";
+    const pInTop = toScreen(g.x_inlet_mm, g.d1_mm / 2, w, h);
+    ctx.fillText(`D1: ⌀${Math.round(g.d1_mm)}mm`, pInTop.px + 4, Math.max(14, pInTop.py - 6));
+
+    const pValveTop = toScreen(g.x_seat_mm, g.dn_mm / 2, w, h);
+    ctx.fillText(`Vana: DN${Math.round(g.dn_mm)}`, pValveTop.px - 24, Math.max(14, pValveTop.py - 6));
+
+    const pOutTop = toScreen(g.x_outlet_mm, g.d2_mm / 2, w, h);
+    ctx.fillText(`D2: ⌀${Math.round(g.d2_mm)}mm`, pOutTop.px - 62, Math.max(14, pOutTop.py - 6));
+
+    if (Math.abs(g.d1_mm - g.dn_mm) > 1.0) {
+      const redText = g.d1_mm > g.dn_mm ? "Redüksiyon (D1→DN)" : "Genişletici (D1→DN)";
+      const pMidIn = toScreen((g.x_inlet_mm + g.x_seat_mm) * 0.5, (g.d1_mm + g.dn_mm) * 0.26, w, h);
+      ctx.fillStyle = "rgba(148, 163, 184, 0.60)";
+      ctx.fillText(redText, pMidIn.px - 45, Math.max(14, pMidIn.py - 4));
+    }
+    ctx.restore();
   }
 
   function drawParticles(w, h, dt = 0.016) {
@@ -351,9 +376,11 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
         continue;
       }
 
-      // Advection
-      p.x += f.u * dt * 3.8;
-      p.y += f.v * dt * 3.8;
+      // Advection scaled to physical domain span
+      const domainSpan = Math.max(10.0, g.x_outlet_mm - g.x_inlet_mm);
+      const speedScale = (domainSpan / 240.0) * 3.8;
+      p.x += f.u * dt * speedScale;
+      p.y += f.v * dt * speedScale;
       p.life += 1;
 
       if (p.x > g.x_outlet_mm || p.life > p.maxLife) {

@@ -3,7 +3,8 @@
 Calculates geometric cross-sections, streamlines, velocity field (u, v, |V|),
 static pressure field P(x, y), vena contracta contraction, recirculation eddies,
 and cavitation/Mach inception zones per IEC 60534 / ISA-75 principles.
-Supports multiple valve trims: Globe, Butterfly, Segment/Ball, and Anti-Cavitation Cage.
+Supports multiple valve trims: Globe, Butterfly, Segment/Ball, and Anti-Cavitation Cage,
+with fully dynamic geometric scaling from 1/2" (DN15) up to 40" (DN1000).
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ class Flow2DGeometry:
 
 @dataclass(frozen=True)
 class Flow2DGrid:
-    """Sampled 2D flow field on a regular Cartesian grid for heatmap & HUD."""
+    """2D Cartesian grid field values."""
     nx: int
     ny: int
     xs: list[float]
@@ -76,7 +77,7 @@ class Flow2DGrid:
 
 @dataclass(frozen=True)
 class Flow2DSimulationResult:
-    """Complete 2D axial flow simulation package for visualization."""
+    """Complete output payload for 2D axial flow visualization."""
     summary: Flow2DSummary
     geometry: Flow2DGeometry
     grid: Flow2DGrid
@@ -102,7 +103,7 @@ def simulate_flow_2d(
     ny: int = 50,
     valve_type: str = "globe",
 ) -> Flow2DSimulationResult:
-    """Compute 2D axial flow geometry, velocity vectors, and pressure field for selectable valve types."""
+    """Compute 2D axial flow geometry, velocity vectors, and pressure field scaled to actual dimensions."""
     # shortcut: 2D planar axisymmetry used instead of full 3D RANS, upgrade when GPU-WASM solver integrated
     d1 = max(10.0, float(d1_mm))
     d2 = max(10.0, float(d2_mm))
@@ -134,10 +135,21 @@ def simulate_flow_2d(
     r_dn = dn / 2.0
     r_seat = r_dn * 0.85
 
-    x_in = -dn * 2.2
+    # Dynamically scale axial geometry milestones to actual pipe & valve diameters
     x_seat = 0.0
-    x_vc = dn * (0.35 if vtype == "butterfly" else 0.45)
-    x_out = dn * 2.5
+    x_flange_in = -0.45 * dn
+    x_flange_out = 0.55 * dn
+    x_vc = dn * (0.28 if vtype == "butterfly" else 0.42)
+
+    l_red = max(0.40 * dn, 1.25 * abs(r1 - r_dn)) if abs(r1 - r_dn) > 0.5 else 0.20 * dn
+    x_red_start = x_flange_in - l_red
+    l_pipe_in = max(0.80 * d1, 1.0 * dn)
+    x_in = x_red_start - l_pipe_in
+
+    l_exp = max(0.50 * dn, 1.40 * abs(r2 - r_dn)) if abs(r2 - r_dn) > 0.5 else 0.25 * dn
+    x_exp_end = x_flange_out + l_exp
+    l_pipe_out = max(1.0 * d2, 1.3 * dn)
+    x_out = x_exp_end + l_pipe_out
 
     dp = max(0.001, p1 - p2)
     fl_sq = fl_val * fl_val
@@ -166,10 +178,14 @@ def simulate_flow_2d(
 
     re_inlet = (rho * v1 * (d1 / 1000.0)) / mu
 
-    geom = _build_geometry(x_in, x_seat, x_vc, x_out, r1, r2, r_seat, h_gap, dn, op, vtype)
+    geom = _build_geometry(
+        x_in, x_red_start, x_flange_in, x_seat, x_vc, x_flange_out, x_exp_end, x_out,
+        r1, r2, r_dn, r_seat, h_gap, dn, op, vtype
+    )
 
     grid = _compute_grid(
-        nx, ny, x_in, x_out, r1, r2, r_seat, h_gap, dn, op,
+        nx, ny, x_in, x_red_start, x_flange_in, x_vc, x_flange_out, x_exp_end, x_out,
+        r1, r2, r_dn, r_seat, h_gap, dn, op,
         v1, v_vc, v2, p1, p2, p_vc, pv, rho, c_sound, is_cav, vtype,
     )
 
@@ -209,11 +225,16 @@ def simulate_flow_2d(
 
 def _build_geometry(
     x_in: float,
+    x_red_start: float,
+    x_flange_in: float,
     x_seat: float,
     x_vc: float,
+    x_flange_out: float,
+    x_exp_end: float,
     x_out: float,
     r1: float,
     r2: float,
+    r_dn: float,
     r_seat: float,
     h_gap: float,
     dn: float,
@@ -221,35 +242,36 @@ def _build_geometry(
     vtype: str = "globe",
 ) -> Flow2DGeometry:
     """Build upper/lower pipe walls, seat ring, and specific valve trim polygon coordinates."""
-    x_pre = x_seat - dn * 0.4
-    x_post = x_vc + dn * 0.8
-
     top_wall = [
-        [x_in, r1],
-        [x_pre, r1],
-        [x_seat - 5.0, r_seat + 8.0],
-        [x_seat, r_seat],
-        [x_vc, r_seat * 0.95],
-        [x_post, r2],
-        [x_out, r2],
+        [round(x_in, 1), round(r1, 1)],
+        [round(x_red_start, 1), round(r1, 1)],
+        [round(x_flange_in, 1), round(r_dn, 1)],
+        [round(x_seat - dn * 0.12, 1), round(r_dn, 1)],
+        [round(x_seat, 1), round(r_seat, 1)],
+        [round(x_vc, 1), round(r_seat * 0.96, 1)],
+        [round(x_flange_out, 1), round(r_dn, 1)],
+        [round(x_exp_end, 1), round(r2, 1)],
+        [round(x_out, 1), round(r2, 1)],
     ]
 
     bottom_wall = [
-        [x_in, -r1],
-        [x_pre, -r1],
-        [x_seat - 5.0, -(r_seat + 8.0)],
-        [x_seat, -r_seat],
-        [x_vc, -(r_seat * 0.95)],
-        [x_post, -r2],
-        [x_out, -r2],
+        [round(x_in, 1), round(-r1, 1)],
+        [round(x_red_start, 1), round(-r1, 1)],
+        [round(x_flange_in, 1), round(-r_dn, 1)],
+        [round(x_seat - dn * 0.12, 1), round(-r_dn, 1)],
+        [round(x_seat, 1), round(-r_seat, 1)],
+        [round(x_vc, 1), round(-r_seat * 0.96, 1)],
+        [round(x_flange_out, 1), round(-r_dn, 1)],
+        [round(x_exp_end, 1), round(-r2, 1)],
+        [round(x_out, 1), round(-r2, 1)],
     ]
 
     if vtype == "butterfly":
         # Tilted disk rotating around central shaft (0, 0)
         theta_deg = 15.0 + (op / 100.0) * 70.0
         theta_rad = theta_deg * math.pi / 180.0
-        length_disk = r1 * 0.94
-        th = r1 * 0.08
+        length_disk = r_seat * 0.96
+        th = r_seat * 0.10
         dx = length_disk * math.sin(theta_rad)
         dy = length_disk * math.cos(theta_rad)
         nx_val = -math.cos(theta_rad) * th
@@ -261,63 +283,64 @@ def _build_geometry(
             [round(-dx - nx_val, 1), round(-dy - ny_val, 1)],
             [round(-dx + nx_val, 1), round(-dy + ny_val, 1)],
         ]
-        seat_top = [[-4.0, r1], [-4.0, r1 * 0.95], [4.0, r1 * 0.95], [4.0, r1]]
-        seat_bottom = [[-4.0, -r1], [-4.0, -r1 * 0.95], [4.0, -r1 * 0.95], [4.0, -r1]]
+        seat_w = dn * 0.08
+        seat_top = [[-seat_w, r_dn], [-seat_w, r_seat], [seat_w, r_seat], [seat_w, r_dn]]
+        seat_bottom = [[-seat_w, -r_dn], [-seat_w, -r_seat], [seat_w, -r_seat], [seat_w, -r_dn]]
 
     elif vtype == "ball":
         # Segment / V-port ball: rotating circular segment blocking upper bore
         y_notch = -r_seat * 0.85 + (1.7 * r_seat) * (op / 100.0)
         bw = dn * 0.28
         plug = [
-            [-bw, r1 * 1.05],
-            [-bw * 0.85, y_notch],
-            [0.0, y_notch - 2.0],
-            [bw * 0.85, y_notch],
-            [bw, r1 * 1.05],
+            [round(-bw, 1), round(r_dn * 1.05, 1)],
+            [round(-bw * 0.85, 1), round(y_notch, 1)],
+            [0.0, round(y_notch - 0.02 * dn, 1)],
+            [round(bw * 0.85, 1), round(y_notch, 1)],
+            [round(bw, 1), round(r_dn * 1.05, 1)],
         ]
-        seat_top = [[-bw * 0.9, r1], [-bw * 0.9, r_seat], [bw * 0.9, r_seat], [bw * 0.9, r1]]
-        seat_bottom = [[-bw * 0.9, -r1], [-bw * 0.9, -r_seat], [bw * 0.9, -r_seat], [bw * 0.9, -r1]]
+        seat_top = [[-bw * 0.9, r_dn], [-bw * 0.9, r_seat], [bw * 0.9, r_seat], [bw * 0.9, r_dn]]
+        seat_bottom = [[-bw * 0.9, -r_dn], [-bw * 0.9, -r_seat], [bw * 0.9, -r_seat], [bw * 0.9, -r_dn]]
 
     elif vtype == "angle_cage":
         # Perforated anti-cavitation cage sleeve with moving throttling plug
         cw = dn * 0.30
         plug_tip_y = r_seat - h_gap * 0.92
         plug = [
-            [-cw * 0.45, r1 * 1.05],
-            [-cw * 0.4, plug_tip_y],
-            [0.0, plug_tip_y],
-            [cw * 0.4, plug_tip_y],
-            [cw * 0.45, r1 * 1.05],
+            [round(-cw * 0.45, 1), round(r_dn * 1.05, 1)],
+            [round(-cw * 0.4, 1), round(plug_tip_y, 1)],
+            [0.0, round(plug_tip_y, 1)],
+            [round(cw * 0.4, 1), round(plug_tip_y, 1)],
+            [round(cw * 0.45, 1), round(r_dn * 1.05, 1)],
         ]
-        seat_top = [[-cw, r1], [-cw, r_seat], [cw, r_seat], [cw, r1]]
-        seat_bottom = [[-cw, -r1], [-cw, -r_seat], [cw, -r_seat], [cw, -r1]]
+        seat_top = [[-cw, r_dn], [-cw, r_seat], [cw, r_seat], [cw, r_dn]]
+        seat_bottom = [[-cw, -r_dn], [-cw, -r_seat], [cw, -r_seat], [cw, -r_dn]]
 
     else:
         # Globe valve: vertical plug into seat ring
         plug_tip_y = r_seat - h_gap
         plug_width = dn * 0.35
-        plug_top_y = r1 * 1.05
+        plug_top_y = r_dn * 1.08
         plug = [
-            [x_seat - plug_width * 0.4, plug_top_y],
-            [x_seat - plug_width * 0.3, plug_tip_y + h_gap * 0.3],
-            [x_seat, plug_tip_y],
-            [x_seat + plug_width * 0.3, plug_tip_y + h_gap * 0.3],
-            [x_seat + plug_width * 0.4, plug_top_y],
+            [round(x_seat - plug_width * 0.4, 1), round(plug_top_y, 1)],
+            [round(x_seat - plug_width * 0.3, 1), round(plug_tip_y + h_gap * 0.3, 1)],
+            [round(x_seat, 1), round(plug_tip_y, 1)],
+            [round(x_seat + plug_width * 0.3, 1), round(plug_tip_y + h_gap * 0.3, 1)],
+            [round(x_seat + plug_width * 0.4, 1), round(plug_top_y, 1)],
         ]
         seat_top = [
-            [x_seat - dn * 0.15, r1],
-            [x_seat - dn * 0.15, r_seat],
-            [x_seat + dn * 0.15, r_seat],
-            [x_seat + dn * 0.15, r1],
+            [round(x_seat - dn * 0.15, 1), round(r_dn, 1)],
+            [round(x_seat - dn * 0.15, 1), round(r_seat, 1)],
+            [round(x_seat + dn * 0.15, 1), round(r_seat, 1)],
+            [round(x_seat + dn * 0.15, 1), round(r_dn, 1)],
         ]
         seat_bottom = [
-            [x_seat - dn * 0.15, -r1],
-            [x_seat - dn * 0.15, -r_seat],
-            [x_seat + dn * 0.15, -r_seat],
-            [x_seat + dn * 0.15, -r1],
+            [round(x_seat - dn * 0.15, 1), round(-r_dn, 1)],
+            [round(x_seat - dn * 0.15, 1), round(-r_seat, 1)],
+            [round(x_seat + dn * 0.15, 1), round(-r_seat, 1)],
+            [round(x_seat + dn * 0.15, 1), round(-r_dn, 1)],
         ]
 
-    centerline = [[x_in, 0.0], [x_out, 0.0]]
+    centerline = [[round(x_in, 1), 0.0], [round(x_out, 1), 0.0]]
 
     return Flow2DGeometry(
         d1_mm=round(r1 * 2, 1),
@@ -342,9 +365,15 @@ def _compute_grid(
     nx: int,
     ny: int,
     x_in: float,
+    x_red_start: float,
+    x_flange_in: float,
+    x_vc: float,
+    x_flange_out: float,
+    x_exp_end: float,
     x_out: float,
     r1: float,
     r2: float,
+    r_dn: float,
     r_seat: float,
     h_gap: float,
     dn: float,
@@ -363,7 +392,7 @@ def _compute_grid(
 ) -> Flow2DGrid:
     """Generate velocity vectors, pressure, and cell classifications on Cartesian grid."""
     xs = [x_in + (x_out - x_in) * i / max(1, nx - 1) for i in range(nx)]
-    max_r = max(r1, r2) * 1.05
+    max_r = max(r1, r2, r_dn) * 1.08
     ys = [-max_r + (2.0 * max_r) * j / max(1, ny - 1) for j in range(ny)]
 
     u_field: list[list[float]] = []
@@ -374,14 +403,13 @@ def _compute_grid(
     cell_field: list[list[int]] = []
 
     plug_tip_y = r_seat - h_gap
-    plug_w = (r_seat * 0.4)
 
     # Butterfly parameters
     theta_rad = (15.0 + (op / 100.0) * 70.0) * math.pi / 180.0
     cos_th = math.cos(theta_rad)
     sin_th = math.sin(theta_rad)
-    bf_th = r1 * 0.08
-    bf_len = r1 * 0.94
+    bf_th = r_seat * 0.10
+    bf_len = r_seat * 0.96
 
     # Ball notch height
     ball_y_notch = -r_seat * 0.85 + (1.7 * r_seat) * (op / 100.0)
@@ -391,12 +419,12 @@ def _compute_grid(
         v_row: list[float] = []
         vmag_row: list[float] = []
         p_row: list[float] = []
-        m_row: list[float] = []
+        mach_row: list[float] = []
         c_row: list[int] = []
 
         for _i, x in enumerate(xs):
             # 1. Determine local wall radius R(x)
-            r_pipe = _pipe_radius(x, r1, r2, r_seat)
+            r_pipe = _pipe_radius(x, x_red_start, x_flange_in, x_flange_out, x_exp_end, r1, r2, r_dn, r_seat)
 
             # Check solid walls
             if abs(y) >= r_pipe:
@@ -404,7 +432,7 @@ def _compute_grid(
                 v_row.append(0.0)
                 vmag_row.append(0.0)
                 p_row.append(round(p1 if x < 0 else p2, 3))
-                m_row.append(0.0)
+                mach_row.append(0.0)
                 c_row.append(0)
                 continue
 
@@ -412,25 +440,30 @@ def _compute_grid(
             is_solid = False
             if vtype == "butterfly":
                 # Central shaft
-                if (x * x + y * y) <= ((r1 * 0.16) ** 2):
+                if (x * x + y * y) <= ((r_seat * 0.16) ** 2):
                     is_solid = True
                 else:
                     # Rotated disk coords
                     x_rot = x * cos_th - y * sin_th
                     y_rot = x * sin_th + y * cos_th
-                    if abs(x_rot) <= bf_th and abs(y_rot) <= bf_len or abs(x) <= 3.0 and abs(y) >= r1 * 0.94:
+                    if (abs(x_rot) <= bf_th and abs(y_rot) <= bf_len) or (abs(x) <= dn * 0.05 and abs(y) >= r_seat):
                         is_solid = True
 
             elif vtype == "ball":
-                if abs(x) <= dn * 0.28 and y >= ball_y_notch or abs(x) <= dn * 0.28 and abs(y) >= r_seat:
+                if (abs(x) <= dn * 0.28 and y >= ball_y_notch) or (abs(x) <= dn * 0.28 and abs(y) >= r_seat):
                     is_solid = True
 
             elif vtype == "angle_cage":
-                if abs(x) <= dn * 0.15 and y >= plug_tip_y or abs(x) <= dn * 0.26 and abs(y) >= r_seat and (int(abs(x) / 3.0) % 2 == 0):
+                cage_slot_pitch = max(4.0, dn * 0.08)
+                if (abs(x) <= dn * 0.15 and y >= plug_tip_y) or (
+                    abs(x) <= dn * 0.26 and abs(y) >= r_seat and (int(abs(x) / cage_slot_pitch) % 2 == 0)
+                ):
                     is_solid = True
 
-            else:  # globe
-                if abs(x) <= plug_w and y >= plug_tip_y or abs(x) <= plug_w * 0.4 and abs(y) >= r_seat:
+            else:
+                # Globe valve plug & seat
+                plug_w = dn * 0.35
+                if abs(x) <= plug_w * 0.4 and y >= plug_tip_y or abs(x) <= dn * 0.15 and abs(y) >= r_seat:
                     is_solid = True
 
             if is_solid:
@@ -438,28 +471,29 @@ def _compute_grid(
                 v_row.append(0.0)
                 vmag_row.append(0.0)
                 p_row.append(round(p1 if x < 0 else p2, 3))
-                m_row.append(0.0)
+                mach_row.append(0.0)
                 c_row.append(0)
                 continue
 
-            # 2. Physics-based velocity and pressure distribution
-            u, v, vm, p, c_type = _point_physics(
-                x, y, r_pipe, r1, r_seat, v1, v_vc, v2, p1, p2, p_vc, pv, rho, is_cav, vtype
+            # Compute flow aerodynamics/hydrodynamics at this point
+            u_pt, v_pt, vm_pt, p_pt, c_pt = _point_physics(
+                x, y, r_pipe, x_flange_in, x_vc, x_flange_out,
+                r1, r_dn, r_seat, dn, v1, v_vc, v2, p1, p2, p_vc, pv, rho, is_cav, vtype,
             )
 
-            mach = vm / c_sound
-            u_row.append(round(u, 2))
-            v_row.append(round(v, 2))
-            vmag_row.append(round(vm, 2))
-            p_row.append(round(p, 3))
-            m_row.append(round(mach, 3))
-            c_row.append(c_type)
+            mach = vm_pt / c_sound
+            u_row.append(round(u_pt, 2))
+            v_row.append(round(v_pt, 2))
+            vmag_row.append(round(vm_pt, 2))
+            p_row.append(round(p_pt, 3))
+            mach_row.append(round(mach, 3))
+            c_row.append(c_pt)
 
         u_field.append(u_row)
         v_field.append(v_row)
         vmag_field.append(vmag_row)
         p_field.append(p_row)
-        mach_field.append(m_row)
+        mach_field.append(mach_row)
         cell_field.append(c_row)
 
     return Flow2DGrid(
@@ -476,25 +510,46 @@ def _compute_grid(
     )
 
 
-def _pipe_radius(x: float, r1: float, r2: float, r_seat: float) -> float:
-    """Compute local pipe radius smoothly transitioning between inlet, throat, and outlet."""
-    if x <= -20.0:
+def _pipe_radius(
+    x: float,
+    x_red_start: float,
+    x_flange_in: float,
+    x_flange_out: float,
+    x_exp_end: float,
+    r1: float,
+    r2: float,
+    r_dn: float,
+    r_seat: float,
+) -> float:
+    """Compute local pipe radius smoothly transitioning between inlet, reducer, throat, expander, and outlet."""
+    if x <= x_red_start:
         return r1
-    if x >= 40.0:
-        return r2
+    if x < x_flange_in:
+        t = (x - x_red_start) / max(0.1, x_flange_in - x_red_start)
+        return r1 * (1.0 - t) + r_dn * t
     if x < 0.0:
-        t = (x + 20.0) / 20.0
-        return r1 * (1.0 - t) + r_seat * t
-    t = x / 40.0
-    return r_seat * (1.0 - t) + r2 * t
+        t = (x - x_flange_in) / max(0.1, -x_flange_in)
+        return r_dn * (1.0 - t) + r_seat * t
+    if x <= x_flange_out:
+        t = x / max(0.1, x_flange_out)
+        return r_seat * (1.0 - t) + r_dn * t
+    if x < x_exp_end:
+        t = (x - x_flange_out) / max(0.1, x_exp_end - x_flange_out)
+        return r_dn * (1.0 - t) + r2 * t
+    return r2
 
 
 def _point_physics(
     x: float,
     y: float,
     r_pipe: float,
+    x_flange_in: float,
+    x_vc: float,
+    x_flange_out: float,
     r1: float,
+    r_dn: float,
     r_seat: float,
+    dn: float,
     v1: float,
     v_vc: float,
     v2: float,
@@ -506,40 +561,42 @@ def _point_physics(
     is_cav: bool,
     vtype: str = "globe",
 ) -> tuple[float, float, float, float, int]:
-    """Calculate local (u, v, |V|, P, cell_type) according to specific valve trim aerodynamics."""
+    """Calculate local (u, v, |V|, P, cell_type) according to specific valve trim aerodynamics scaled to DN."""
     r_rel = abs(y) / max(0.1, r_pipe)
+    v_body = v1 * ((r1 / max(0.1, r_dn)) ** 2)
 
-    if x < -15.0:
-        # Fully developed inlet pipe
+    if x < x_flange_in:
+        # Fully developed inlet / reducer pipe
         u_axial = v1 * 1.15 * max(0.0, 1.0 - (r_rel ** 6))
-        v_rad = -0.05 * v1 * (y / r_pipe)
-        p_local = p1 - 0.5 * rho * (u_axial * u_axial - v1 * v1) * 1e-5
+        v_rad = -0.05 * v1 * (y / max(0.1, r_pipe))
+        p_local = p1 - 0.5 * rho * max(0.0, u_axial * u_axial - v1 * v1) * 1e-5
         c_type = 1
 
-    elif -15.0 <= x <= 15.0:
-        # Throat & Vena Contracta zone
-        t_vc = math.exp(-((x - 6.0) ** 2) / 60.0)
-        u_peak = v1 + (v_vc - v1) * t_vc
+    elif x_flange_in <= x <= x_flange_out:
+        # Throttle & Vena Contracta zone
+        sigma_vc = max(1.0, 0.28 * dn)
+        t_vc = math.exp(-((x - x_vc) ** 2) / (2.0 * sigma_vc * sigma_vc))
+        u_peak = v_body + (v_vc - v_body) * t_vc
 
         if vtype == "butterfly":
             # Flow divides into two jets: upper stream and lower stream around the disk
-            jet_prof = max(0.0, 1.0 - ((abs(y) - 0.55 * r1) / (0.45 * r1)) ** 2)
+            jet_prof = max(0.0, 1.0 - ((abs(y) - 0.55 * r_seat) / (0.45 * r_seat)) ** 2)
             u_axial = u_peak * jet_prof
-            v_rad = 0.16 * u_peak * math.sin((x / 15.0) * math.pi) * (1.0 if y >= 0 else -1.0)
+            v_rad = 0.16 * u_peak * math.sin((x / max(1.0, x_flange_out)) * math.pi) * (1.0 if y >= 0 else -1.0)
         elif vtype == "ball":
             # Flow shoots strongly through bottom notch aperture
-            jet_prof = max(0.0, 1.0 - ((y + 0.40 * r1) / (0.58 * r1)) ** 2)
+            jet_prof = max(0.0, 1.0 - ((y + 0.40 * r_seat) / (0.58 * r_seat)) ** 2)
             u_axial = u_peak * jet_prof
-            v_rad = -0.18 * u_peak * math.sin((x / 15.0) * math.pi)
+            v_rad = -0.18 * u_peak * math.sin((x / max(1.0, x_flange_out)) * math.pi)
         elif vtype == "angle_cage":
             # Distributed multi-jet flow through cage slits
-            jet_prof = 0.88 * (1.0 - 0.18 * math.cos(6.0 * math.pi * y / r1)) * max(0.0, 1.0 - r_rel ** 2)
+            jet_prof = 0.88 * (1.0 - 0.18 * math.cos(6.0 * math.pi * y / max(0.1, r_seat))) * max(0.0, 1.0 - r_rel ** 2)
             u_axial = u_peak * jet_prof
-            v_rad = 0.06 * u_peak * math.sin((x / 10.0) * math.pi) * (y / r1)
+            v_rad = 0.06 * u_peak * math.sin((x / max(1.0, x_flange_out)) * math.pi) * (y / max(0.1, r_seat))
         else:
             # Globe valve: flow under the plug
-            u_axial = u_peak * max(0.0, 1.0 - ((y + 0.3 * r_seat) / (r_seat * 0.9)) ** 2)
-            v_rad = -0.2 * u_peak * math.sin((x / 15.0) * math.pi) * (y / r_seat)
+            u_axial = u_peak * max(0.0, 1.0 - ((y + 0.30 * r_seat) / (r_seat * 0.90)) ** 2)
+            v_rad = -0.20 * u_peak * math.sin((x / max(1.0, x_flange_out)) * math.pi) * (y / max(0.1, r_seat))
 
         p_drop = (p1 - p_vc) * t_vc
         p_local = p1 - p_drop
@@ -552,52 +609,53 @@ def _point_physics(
 
     else:
         # Downstream expansion & recirculation eddy zone
-        x_norm = min(1.0, (x - 15.0) / 60.0)
+        l_recov = max(1.5 * dn, 1.2 * r_pipe)
+        x_norm = min(1.0, max(0.0, (x - x_flange_out) / l_recov))
         u_jet = v_vc * (1.0 - x_norm) + v2 * x_norm
 
         if vtype == "butterfly":
             # Twin wake recirculation vortices behind the central tilted disk
-            if abs(y) < (0.35 * r1) and x_norm < 0.65:
+            if abs(y) < (0.35 * r_seat) and x_norm < 0.65:
                 u_axial = -0.26 * u_jet * math.sin(x_norm * math.pi)
                 v_rad = 0.20 * u_jet * math.cos(x_norm * math.pi) * (1.0 if y >= 0 else -1.0)
                 p_local = p_vc + (p2 - p_vc) * 0.5
                 c_type = 2  # Recirculation Eddy
             else:
                 u_axial = u_jet * max(0.0, 1.0 - (r_rel ** 2))
-                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / r_pipe)
+                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
                 p_local = p_vc + (p2 - p_vc) * x_norm
                 c_type = 1
 
         elif vtype == "ball":
             # Wide upper recirculation eddy in the dead space behind ball segment
-            if y > (0.10 * r1) and x_norm < 0.75:
+            if y > (0.10 * r_seat) and x_norm < 0.75:
                 u_axial = -0.38 * u_jet * math.sin(x_norm * math.pi)
                 v_rad = 0.24 * u_jet * math.cos(x_norm * math.pi)
                 p_local = p_vc + (p2 - p_vc) * 0.5
                 c_type = 2
             else:
-                u_axial = u_jet * max(0.0, 1.0 - ((y + 0.35 * r1) / (0.65 * r1)) ** 2)
-                v_rad = 0.06 * u_jet * (1.0 - x_norm) * (y / r_pipe)
+                u_axial = u_jet * max(0.0, 1.0 - ((y + 0.35 * r_seat) / (0.65 * r_seat)) ** 2)
+                v_rad = 0.06 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
                 p_local = p_vc + (p2 - p_vc) * x_norm
                 c_type = 1
 
         elif vtype == "angle_cage":
             # Multi-jet rapid mixing with negligible macro-eddy
             u_axial = u_jet * max(0.0, 1.0 - (r_rel ** 2))
-            v_rad = 0.05 * u_jet * (1.0 - x_norm) * (y / r_pipe)
+            v_rad = 0.05 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
             p_local = p_vc + (p2 - p_vc) * x_norm
             c_type = 1
 
         else:
             # Globe valve: single eddy behind the top plug
-            if y > (r_seat * 0.4) and x_norm < 0.7:
+            if y > (r_seat * 0.40) and x_norm < 0.70:
                 u_axial = -0.35 * u_jet * math.sin(x_norm * math.pi)
                 v_rad = 0.25 * u_jet * math.cos(x_norm * math.pi)
                 p_local = p_vc + (p2 - p_vc) * 0.5
                 c_type = 2
             else:
                 u_axial = u_jet * max(0.0, 1.0 - (r_rel ** 2))
-                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / r_pipe)
+                v_rad = 0.08 * u_jet * (1.0 - x_norm) * (y / max(0.1, r_pipe))
                 p_local = p_vc + (p2 - p_vc) * x_norm
                 c_type = 1
 

@@ -385,7 +385,7 @@ def test_steam_overflow_selects_largest():
     vendor = get_vendor_definition("fisher_globe_eqpct")
     result = size_steam_valve(
         SteamSizingInput(
-            flow_kg_h=999999.0,
+            flow_kg_h=25_000_000.0,
             inlet_pressure_bar_a=50.0,
             outlet_pressure_bar_a=49.9,
             temperature_c=300.0,
