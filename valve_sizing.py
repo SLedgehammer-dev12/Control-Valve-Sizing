@@ -672,6 +672,8 @@ def size_liquid_valve(
             "noise_db": noise_db,
             "actuator_thrust_n": act_thrust,
             "actuator_selection": act_selection,
+            "pipe_inlet_diameter_mm": data.pipe_inlet_diameter_mm,
+            "pipe_outlet_diameter_mm": data.pipe_outlet_diameter_mm,
             "valve_spec": build_valve_spec(
                 "liquid", data.inlet_pressure_bar_a, is_choked, regime,
                 vendor_pressure_class="", vendor_leakage_class="",
@@ -1051,6 +1053,8 @@ def size_gas_valve(
             "noise_db": noise_db,
             "actuator_thrust_n": act_thrust,
             "actuator_selection": act_selection,
+            "pipe_inlet_diameter_mm": data.pipe_inlet_diameter_mm,
+            "pipe_outlet_diameter_mm": data.pipe_outlet_diameter_mm,
             "valve_spec": build_valve_spec(
                 "gas", data.inlet_pressure_bar_a, is_choked,
                 vendor_pressure_class="", vendor_leakage_class="",
@@ -1312,6 +1316,8 @@ def size_steam_valve(
             "noise_db": noise_db,
             "actuator_thrust_n": act_thrust,
             "actuator_selection": act_selection,
+            "pipe_inlet_diameter_mm": data.pipe_inlet_diameter_mm,
+            "pipe_outlet_diameter_mm": data.pipe_outlet_diameter_mm,
             "cv_iec_direct_mass": cv_iec_direct_mass,
             "kv_iec_direct_mass": kv_iec_direct_mass,
             "valve_spec": build_valve_spec(

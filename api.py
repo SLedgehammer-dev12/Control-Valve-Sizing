@@ -609,10 +609,16 @@ def _response(
     vendor_meta: dict[str, Any],
     characteristic: str,
     authority_pr: float,
+    pipe_inlet_diameter_mm: float | None = None,
+    pipe_outlet_diameter_mm: float | None = None,
 ) -> dict[str, Any]:
     payload = _json_safe(asdict(result))
     extra = payload.pop("extra", {}) or {}
     payload.update(extra)
+    if pipe_inlet_diameter_mm is not None:
+        payload["pipe_inlet_diameter_mm"] = pipe_inlet_diameter_mm
+    if pipe_outlet_diameter_mm is not None:
+        payload["pipe_outlet_diameter_mm"] = pipe_outlet_diameter_mm
     payload["fluid"] = _json_safe(fluid)
     payload["vendor"] = _json_safe(vendor_meta)
     payload["visuals"] = _json_safe(_visuals(result, characteristic, authority_pr))
@@ -878,7 +884,11 @@ def size_liquid(request: LiquidRequest) -> dict[str, Any]:
         "vendor_fl": definition.fl,
         "vendor_fd": definition.fd,
     }
-    return _response(result, fluid, vendor_meta, characteristic, authority)
+    return _response(
+        result, fluid, vendor_meta, characteristic, authority,
+        pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
+        pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+    )
 
 
 @app.post("/api/size/gas")
@@ -940,7 +950,11 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
         target_dn_mm=request.target_dn_mm,
     )
     fluid.update({"service": "gas", "flow_nm3h": flow_nm3h, "p1_bar_a": p1_bar, "p2_bar_a": p2_bar})
-    return _response(result, fluid, vendor_meta, characteristic, authority)
+    return _response(
+        result, fluid, vendor_meta, characteristic, authority,
+        pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
+        pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+    )
 
 
 @app.post("/api/size/steam")
@@ -1012,7 +1026,11 @@ def size_steam(request: SteamRequest) -> dict[str, Any]:
         "property_warning": property_warning,
         "vendor_xt": definition.xt,
     }
-    return _response(result, fluid, vendor_meta, characteristic, authority)
+    return _response(
+        result, fluid, vendor_meta, characteristic, authority,
+        pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
+        pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+    )
 
 
 class ProjectExportRequest(BaseModel):

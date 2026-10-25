@@ -355,6 +355,13 @@ export function createFlow2DViewer(canvasId = "flow2d-canvas", hudId = "flow2d-h
       ctx.fillStyle = "rgba(148, 163, 184, 0.60)";
       ctx.fillText(redText, pMidIn.px - 45, Math.max(14, pMidIn.py - 4));
     }
+
+    if (Math.abs(g.d2_mm - g.dn_mm) > 1.0) {
+      const expText = g.d2_mm > g.dn_mm ? "Genişletici (DN→D2)" : "Redüksiyon (DN→D2)";
+      const pMidOut = toScreen((g.x_outlet_mm + g.x_vc_mm) * 0.5, (g.d2_mm + g.dn_mm) * 0.26, w, h);
+      ctx.fillStyle = "rgba(148, 163, 184, 0.60)";
+      ctx.fillText(expText, pMidOut.px - 45, Math.max(14, pMidOut.py - 4));
+    }
     ctx.restore();
   }
 

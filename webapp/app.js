@@ -1590,10 +1590,14 @@ function renderVisuals(data) {
 async function updateFlow2D(data) {
   if (!state.flow2DViewer) return;
   try {
+    const service = state.service || "liquid";
+    const pipeIn = Number(data.pipe_inlet_diameter_mm) || optionalNumber(`${service}-pipe-in`) || Number(data.valve_dn_mm) || 50.0;
+    const pipeOut = Number(data.pipe_outlet_diameter_mm) || optionalNumber(`${service}-pipe-out`) || Number(data.valve_dn_mm) || 50.0;
+    const valveDn = Number(data.valve_dn_mm) || 50.0;
     const payload = {
-      d1_mm: Number(data.pipe_inlet_diameter_mm) || Number(data.valve_dn_mm) || 50.0,
-      d2_mm: Number(data.pipe_outlet_diameter_mm) || Number(data.valve_dn_mm) || 50.0,
-      dn_mm: Number(data.valve_dn_mm) || 50.0,
+      d1_mm: pipeIn,
+      d2_mm: pipeOut,
+      dn_mm: valveDn,
       p1_bar: Number(data.p1_bar_a) || 8.0,
       p2_bar: Number(data.p2_bar_a) || 5.0,
       pv_bar: Number(data.vapor_pressure_bar_a ?? data.fluid?.vapor_pressure) || 0.023,
