@@ -1,9 +1,10 @@
-const CACHE_NAME = "cvs-static-v1";
+const CACHE_NAME = "cvs-static-v2";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
   "/app.js",
+  "/flow_2d_viewer.js",
   "/vendor/three.module.min.js",
   "/vendor/OrbitControls.js"
 ];
@@ -28,7 +29,23 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || event.request.url.includes("/api/")) {
     return;
   }
+  const url = new URL(event.request.url);
+  const isVendor = url.pathname.startsWith("/vendor/");
+  if (isVendor) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => cached || fetch(event.request))
+    );
+    return;
+  }
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

@@ -139,7 +139,7 @@ async def _security_headers(request: Request, call_next):
     path = request.url.path
     if path.startswith("/vendor/"):
         response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-    elif path in {"/", "/index.html", "/app.js", "/styles.css"}:
+    elif path in {"/", "/index.html", "/app.js", "/flow_2d_viewer.js", "/styles.css", "/sw.js", "/manifest.json"}:
         response.headers.setdefault("Cache-Control", "no-cache")
     elif path in {"/api/meta", "/api/valve-mesh"}:
         response.headers.setdefault("Cache-Control", "public, max-age=3600")

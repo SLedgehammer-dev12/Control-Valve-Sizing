@@ -92,6 +92,9 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+if (typeof window !== "undefined") {
+  window.escapeHtml = escapeHtml;
+}
 
 function display(value, digits = 3) {
   if (value === null || value === undefined || value === "") return "—";
@@ -2018,7 +2021,8 @@ async function openIsa20Modal() {
     const data = await resp.json();
     state.activeReport = { type: "isa20", text: data.markdown, filename: "ISA20_Datasheet_FCV101.md" };
     $("modal-report-title").textContent = "ISA Form 20 — Kontrol Vanası Spesifikasyon Sayfası";
-    $("modal-report-content").innerHTML = `<pre>${escapeHtml(data.markdown)}</pre>`;
+    const safeMd = typeof escapeHtml === "function" ? escapeHtml(data.markdown) : String(data.markdown || "");
+    $("modal-report-content").innerHTML = `<pre>${safeMd}</pre>`;
     $("report-modal").showModal();
   } catch (err) {
     showError(`ISA-20 raporu oluşturulamadı: ${err.message}`);
@@ -2045,7 +2049,8 @@ async function openMarkdownReportModal() {
     const data = await resp.json();
     state.activeReport = { type: "md", text: data.report_markdown, filename: "Control_Valve_Sizing_Report.md" };
     $("modal-report-title").textContent = "Mühendislik Boyutlandırma Raporu (IEC 60534)";
-    $("modal-report-content").innerHTML = `<pre>${escapeHtml(data.report_markdown)}</pre>`;
+    const safeMd = typeof escapeHtml === "function" ? escapeHtml(data.report_markdown) : String(data.report_markdown || "");
+    $("modal-report-content").innerHTML = `<pre>${safeMd}</pre>`;
     $("report-modal").showModal();
   } catch (err) {
     showError(`Mühendislik raporu oluşturulamadı: ${err.message}`);
@@ -2262,7 +2267,12 @@ function setupShortcuts() {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((reg) => {
+          reg.update().catch(() => {});
+        })
+        .catch(() => {});
     });
   }
 }
