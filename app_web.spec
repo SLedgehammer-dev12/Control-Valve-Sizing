@@ -204,7 +204,7 @@ a = Analysis(
     ],
     hookspath=["."],
     hooksconfig={},
-    runtime_hooks=["rthook_coolprop.py"],
+    runtime_hooks=["rthook_streams.py", "rthook_coolprop.py"],
     excludes=[
         "tkinter.test",
         "pydoc",

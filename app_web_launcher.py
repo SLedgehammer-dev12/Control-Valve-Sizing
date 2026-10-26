@@ -20,6 +20,42 @@ import webbrowser
 logger = logging.getLogger("cvs_web_launcher")
 
 
+def _sanitize_standard_streams() -> None:
+    """Ensure standard I/O streams are not None in windowed (GUI) executables.
+
+    In Windows and macOS frozen applications built with console=False (pythonw subsystem),
+    sys.stdout, sys.stderr, and sys.stdin are None by default. Libraries that inspect
+    or configure logging (e.g. uvicorn, colorama, rich, click) fail with
+    AttributeError: 'NoneType' object has no attribute 'isatty' or 'write'.
+    """
+    if sys.stdout is None:
+        try:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        except Exception:
+            import io
+
+            sys.stdout = io.StringIO()
+
+    if sys.stderr is None:
+        try:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        except Exception:
+            import io
+
+            sys.stderr = io.StringIO()
+
+    if sys.stdin is None:
+        try:
+            sys.stdin = open(os.devnull, encoding="utf-8")  # noqa: SIM115
+        except Exception:
+            import io
+
+            sys.stdin = io.StringIO()
+
+
+_sanitize_standard_streams()
+
+
 def _find_free_port(start_port: int = 8501, max_tries: int = 50) -> int:
     """Find the first available TCP port on localhost starting from start_port."""
     for port in range(start_port, start_port + max_tries):
@@ -116,6 +152,8 @@ def _run_mini_gui(url: str, stop_server_fn) -> None:
 def _self_test() -> int:
     """Headless self-test for CI verification of frozen executable."""
     try:
+        _sanitize_standard_streams()
+
         import uvicorn
 
         from api import app
@@ -124,6 +162,17 @@ def _self_test() -> int:
 
         assert app is not None
         assert uvicorn is not None
+
+        is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+        cfg = uvicorn.Config(
+            app=app,
+            host="127.0.0.1",
+            port=8501,
+            log_level="info",
+            access_log=False,
+            use_colors=is_tty,
+        )
+        assert cfg is not None
 
         state = get_pure_fluid_state("Water", 5.0, 25.0)
         res = size_liquid_valve(
@@ -174,12 +223,14 @@ def main() -> int:
     print("  Durdurmak için Ctrl+C'ye basın veya pencereyi kapatın.")
     print("========================================================\n")
 
+    is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
     config = uvicorn.Config(
         app=app,
         host="127.0.0.1",
         port=port,
         log_level="info",
         access_log=False,
+        use_colors=is_tty,
     )
     server = uvicorn.Server(config)
 

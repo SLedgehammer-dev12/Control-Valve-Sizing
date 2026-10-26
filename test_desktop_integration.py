@@ -717,3 +717,45 @@ def test_release_installers_include_version():
 
     dockerfile = (APP_DIR / "Dockerfile").read_text(encoding="utf-8")
     assert "ARG APP_VERSION" in dockerfile
+
+
+def test_windowed_streams_sanitized_for_uvicorn():
+    orig_stdout, orig_stderr, orig_stdin = sys.stdout, sys.stderr, sys.stdin
+    try:
+        sys.stdout = None
+        sys.stderr = None
+        sys.stdin = None
+
+        from app_web_launcher import _sanitize_standard_streams
+
+        _sanitize_standard_streams()
+
+        assert sys.stdout is not None
+        assert sys.stderr is not None
+        assert sys.stdin is not None
+        assert getattr(sys.stdout, "isatty", lambda: True)() is False
+
+        import uvicorn
+
+        from api import app
+
+        is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+        cfg = uvicorn.Config(
+            app=app,
+            host="127.0.0.1",
+            port=8501,
+            log_level="info",
+            access_log=False,
+            use_colors=is_tty,
+        )
+        assert cfg is not None
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = orig_stdout, orig_stderr, orig_stdin
+
+
+def test_rthook_streams_included_in_spec():
+    spec_text = (APP_DIR / "app_web.spec").read_text(encoding="utf-8")
+    assert "rthook_streams.py" in spec_text
+    rthook_path = APP_DIR / "rthook_streams.py"
+    assert rthook_path.is_file()
+
