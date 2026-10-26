@@ -2,6 +2,14 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.5.1] - 2026-10-26
+
+### Fixed
+- **Gas & Steam Sizing Engine (IEC 60534-2-1)**: Fixed double division by inlet pressure $P_1$ in `size_gas_valve` and `size_steam_valve`. Previously, actual inlet volume was passed to `size_control_valve_g` which already divides by $P_1$ (via $N_9 \cdot P_1$), underestimating required $Cv$ by ~12.7x at 10.9 bar. Standard normal volumetric flow $Q_N$ ($273.15\text{ K}, 1\text{ atm}$) is now passed directly, matching industrial benchmarks and IEC Example 3 with $< 1.6\%$ tolerance.
+- **Piping Reducer Iteration Fallback**: Added robust unreduced sizing fallback when $\Delta P$ is exceptionally low ($0.001\text{ bar}$) or valve-to-pipe expansion causes non-physical piping pressure losses, preventing `math domain error` during candidate iteration.
+- **Windows Web Launcher Stability**: Sanitized `sys.stdout` and `sys.stderr` when running under GUI/windowed mode on Windows (preventing `AttributeError: 'NoneType' object has no attribute 'isatty'` during Uvicorn logging initialization).
+- **Scenario Verification Suite**: Updated `test_benchmark_iec.py` and `verify_scenarios.py` to use standard volumetric flow $Q_N$ and IEC Eq. 6a direct steam mass formulation (12/12 scenarios PASS, 52/52 industrial scenarios PASS).
+
 ## [3.5.0] - 2026-10-25
 
 ### Added

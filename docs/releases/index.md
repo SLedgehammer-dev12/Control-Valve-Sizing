@@ -5,7 +5,8 @@ Control Valve Sizing sürümlerinin what's new ve release notları. Her sürüm 
 
 | Sürüm | Tarih | Öne Çıkanlar |
 |---|---|---|
-| [v3.5.0](../../release_notes.md) | 2026-10-25 | 40" vana katalogları, 2D CFD gradyan ve boru ölçeklendirmesi, 11 UI/UX sezgisel iyileştirme |
+| [v3.5.1](../../release_notes.md) | 2026-10-26 | Gaz/buhar IEC 60534-2-1 giriş basıncı düzeltmesi, Windows uvicorn isatty launcher fix |
+| [v3.5.0](v3.5.0.md) | 2026-10-25 | 40" vana katalogları, 2D CFD gradyan ve boru ölçeklendirmesi, 11 UI/UX sezgisel iyileştirme |
 | [v3.4.0](v3.4.0.md) | 2026-10-23 | Bağımsız Web paketleri (.dmg/.exe), küresel katalog (Masoneilan, Flowserve, IMI, WZI, Azbil), split-range |
 | [v3.3.4](v3.3.4.md) | 2026-10-21 | Proje round-trip, Pv/Pc, 3D, CSP/API sertleştirme |
 | [v3.2.0](v3.2.0.md) | 2026-08-20 | Hesaplama doğrulama paketi (12 senaryo, 12/12 PASS) |

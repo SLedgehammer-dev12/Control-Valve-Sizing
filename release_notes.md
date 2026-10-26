@@ -1,4 +1,4 @@
-# Control Valve Sizing v3.5.0
+# Control Valve Sizing v3.5.1
 
 IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
@@ -6,44 +6,23 @@ IEC 60534 / ISA tabanlı kontrol vanası boyutlandırma uygulaması.
 
 ## Bu sürümde yeni
 
-### 40" e (DN1000) Kadar Genişletilmiş Vana Kataloğu
-- Genel katalog ve varsayılan vana serilerine 10", 12", 14", 16", 18", 20", 24", 28", 32", 36" ve 40" vanalar eklendi.
-- Yüksek debili boru hatlarında, ana buhar hatlarında ve büyük enerji santralleri/rafineri girişlerindeki yüksek $Cv/Kv$ gereksinimleri için 40 inç'e kadar otomatik vana seçimi ve boyutlandırması desteklenir.
+### Gaz ve Buhar Boyutlandırma Motoru IEC 60534-2-1 Düzeltmesi
+- **Doğrudan Standart Normal Debi ($Q_N$) İletimi**:
+  - `valve_sizing.py` içerisindeki gaz ve buhar boyutlandırma hesaplamalarında, IEC 60534-2-1 Denklem 8a motoruna aktüel debi yerine standart normal debi ($Q_N$, $273.15\text{ K}$, $1\text{ atm}$) aktarıldı.
+  - Giriş basıncının ($P_1$) iki kez bölünmesi hatası giderildi; böylece yüksek ve orta basınçlı gaz/buhar hatlarında $Cv$ değerinin ~12.7 kata kadar küçük hesaplanması sorunu tamamen çözüldü.
+  - BOTAŞ Marmaraereğlisi LNG Terminali gerçek vana veri sayfaları (ör. `5510-PV-101`, `5070-PV-004`, `5070-PV-007`) ile yapılan çapraz doğrulamalarda hesaplama sapması **%0.1 - %1.6** aralığına oturtuldu.
+- **Buhar İçin IEC Denklem 6a Doğrudan Kütlesel Formülasyon Uyumu**:
+  - Buhar servisi, normal yoğunluk üzerinden gaz motoruna entegre edilerek IEC 60534-2-1 Clause 8.3 Eq. 6a doğrudan kütlesel buhar formülasyonu ile **%0.27** seviyesinde tam örtüşmeye kavuşturuldu.
+- **Küçük $\Delta P$ ve Ekstrem Redüksiyon Fallback Koruması**:
+  - Çok düşük fark basınçlarda ($0.001\text{ bar}$) veya vana çapının boru çapından büyük olduğu durumlarda fluids piping iterasyonunun kilitlenmesini (`math domain error`) engelleyen koruma sağlandı.
 
-### 2D CFD Eksenel Akış Kesiti & Dinamik Boru/Vana Ölçeklendirmesi
-- **Gerçekçi Geometrik Ölçekleme**: Giriş boru çapı ($D_1$), vana anma çapı ($DN$) ve çıkış boru çapı ($D_2$) girilen fiziksel ölçülerle birebir orantılı olarak ölçeklendirilir.
-- **Akışkan Çeper ve Gradyan Geçişleri**:
-  - Vana gövdesi ile boru geçişindeki düz hatlar kaldırılarak hidrodinamik redüksiyon/genişletici profili modellendi.
-  - Vena contracta jeti ve resirkülasyon (türbülanslı girdap) sınırları keskin çizgiler yerine yumuşak renk gradyanı ile simüle edildi.
-- **İnteraktif Akış Teşhis HUD**: Kesit üzerinde fare gezdirildiğinde akış bölgesi etiketi (`🟢 Vena Contracta Jeti`, `🟣 Girdap`, `🔵 Giriş/Redüksiyon`, `🟢 Difüzör`, `⚪ Çeper`) ve hız, basınç, Mach sayısı canlı gösterilir.
+### Windows Web Arayüzü Başlatıcı (Launcher) Kararlılığı
+- Windows ortamında pencere (windowed/noconsole) modunda çalıştırıldığında Uvicorn loglayıcısının standart çıktı akışı bulamaması (`AttributeError: 'NoneType' object has no attribute 'isatty'`) sorunu giderildi; `sys.stdout` ve `sys.stderr` akışları güvenli sahte akışlara (null/log stream) yönlendirildi.
 
-### Kurulu Karakteristik Yüzeyi Eksen Etiketleri
-- 3B Kurulu Karakteristik Yüzeyi grafiğindeki eksenler fiziksel mühendislik tanımlarıyla netleştirildi:
-  - **X Ekseni**: Vana Açıklığı ($\%$)
-  - **Y Ekseni**: Basınç Düşüş Oranı ($\Delta P / P_1$)
-  - **Z Ekseni**: Bağıl Debi ($Q / Q_{max}$)
-
-### Kullanıcı Deneyimi ve Sezgisel Kullanım (11 Döngüsel UI/UX İyileştirmesi)
-1. **Canlı $\Delta P$ Göstergesi**: $P_1$ ve $P_2$ kutularının hemen yanında fark basıncını anlık gösterir; ters basınçta ($P_1 \le P_2$) kırmızı alarm rozeti verir.
-2. **Tek Tıkla "Boruyu Vanaya Eşitle (DN)" Butonu**: $D_1$ ve $D_2$ boru çaplarını seçilen vana anma çapına tek tıkla senkronize eder.
-3. **Boru/Vana Çap Oranı ve Hız Katı Rozeti**: Daralma/genişleme oranını ($D/DN$) ve tahmini hız katsayısını hesaplama öncesi bildirir.
-4. **Akışkan Kategori Çipleri**: `[Tümü]`, `[💧 Su]`, `[⛽ Hidrokarbon]`, `[🧪 Kimyasal]`, `[❄️ Kriyojenik]`, `[🔥 Doğal Gaz]` butonlarıyla tek tıkla akışkan filtreleme.
-5. **Vana Kontrol Edilebilirlik Emniyet Şeridi**: İdeal %20-%80 kontrol bandını, alt kavitasyon ve üst doyum bölgelerini gösteren ibreli gösterge.
-6. **Satır İçi Akıllı Doğrulama**: Ters basınç veya buharlaşma ($P_2 \le P_v$) durumlarında satır içi bilgilendirme.
-7. **Özeti Panoya Kopyala**: Mühendislik hesap özetini Markdown formatında tek tıkla panoya aktarma.
-8. **Sayfa Kaydırmada Sabit Tepe Çubuğu (Sticky Bar)**: Sayfa kaydırıldığında sonuçları ekranda tutan kompakt bar ve bölümlere hızlı atlama butonları.
-9. **Metrik Kartları Sağlık Durumu**: Açıklık ve fark basıncı metriklerinde yeşil, sarı ve kırmızı dinamik görsel durum stilleri.
-10. **2D CFD Etkileşimli Bölge Sınıflandırması**: Fare ile canlı akış dinamiği analizi.
-11. **Klavye Kısayol İpuçları**: Sekmeler ve hesapla butonu için tuş ipuçları (`[1]`, `[2]`, `[3]`, `[Ctrl+↵]`) ve güncellenmiş statik önbellek (`cvs-static-v6`).
-
-### Web Sürümü Bağımsız Paketleme (macOS Apple Silicon & Windows)
-- **macOS (Apple Silicon M1+) Web UI Disk İmajı**: `ControlValveSizing_Web_macos_arm64_<version>.dmg`
-  - `.app` ve `/Applications` kısayolu içerir.
-  - Açıldığında FastAPI/Uvicorn motorunu arka planda başlatır ve varsayılan tarayıcıda Web UI'ı otomatik açar.
-- **Windows Web UI Kurulum Sihirbazı**: `ControlValveSizing_Web_Setup_<version>.exe` (Inno Setup, yönetici izni gerektirmez).
-- **Windows Web UI Taşınabilir Paket**: `ControlValveSizing_Web_windows_x86_64_<version>.zip`.
-- **Otomatik Port Tespiti**: 8501 portu meşgulse çakışmayı önlemek için müsait ilk port dinamik olarak seçilir.
-- **Minimalist Durum Penceresi**: Arka plan sunucusunu izleme, tarayıcıyı yeniden açma ve tek tıkla kapatma imkanı.
+### Test ve Doğrulama
+- **Pytest**: 725/725 test %100 başarılı.
+- **Bağımsız IEC Doğrulama (`verify_scenarios.py`)**: 12/12 senaryo %100 başarılı.
+- **Endüstriyel Tesis Doğrulama (`verify_50_scenarios.py`)**: 52/52 senaryo %100 başarılı.
 
 ---
 
