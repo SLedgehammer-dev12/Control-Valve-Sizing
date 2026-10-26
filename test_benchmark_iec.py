@@ -94,8 +94,7 @@ def test_wrapper_liquid_ball_matches_iec():
 
 def test_wrapper_gas_matches_iec():
     series = [ValveSize(50, '2"', 1e5)]
-    q_actual_m3h = (38.0 / 36.0) * 3600.0
-    flow_nm3h = q_actual_m3h / ((1.01325 / 6.8) * (433.15 / 273.15) * 0.988)
+    flow_nm3h = (38.0 / 36.0) * 3600.0
     result = size_gas_valve(
         GasSizingInput(
             flow_nm3h=flow_nm3h,

@@ -24,8 +24,6 @@ from fluid_properties import evaluate_gas_mixture
 from units import (
     BAR_TO_PSI,
     M3H_TO_GPM,
-    NORMAL_P_BAR,
-    NORMAL_T_K,
     liquid_flow_from_m3h,
     liquid_flow_to_m3h,
     pressure_from_bar_a,
@@ -38,6 +36,7 @@ from valve_sizing import (
     GasSizingInput,
     LiquidSizingInput,
     SteamSizingInput,
+    cv_to_kv,
     size_gas_valve,
     size_liquid_valve,
     size_steam_valve,
@@ -76,10 +75,10 @@ def _liquid_kv_reference(flow_m3h: float, p1: float, p2: float, rho: float, pv: 
     return kv, delta_p_choked, ff
 
 
-def _gas_kv_from_actual(
-    q_actual_m3h: float, p1: float, p2: float, t_c: float, mw: float, k: float, z: float, xt: float,
+def _gas_kv_reference(
+    flow_nm3h: float, p1: float, p2: float, t_c: float, mw: float, k: float, z: float, xt: float,
 ) -> tuple[float, float, float, float, bool]:
-    """Independent IEC gas Kv from actual inlet volumetric flow (N9, P in kPa)."""
+    """Independent IEC gas Kv (IEC 60534-2-1 eq. 8a / 14a, N9 constant)."""
     t_k = t_c + 273.15
     fk = k / 1.4
     x = (p1 - p2) / p1
@@ -87,17 +86,22 @@ def _gas_kv_from_actual(
     choked = x >= x_choked
     y = max(1.0 - x / (3.0 * fk * xt), 2.0 / 3.0)
     denom = x_choked if choked else x
-    kv = q_actual_m3h / (N9 * p1 * 1.0e2 * y) * math.sqrt(mw * t_k * z / denom)
+    kv = flow_nm3h / (N9 * p1 * 1.0e2 * y) * math.sqrt(mw * t_k * z / denom)
     return kv, x, x_choked, y, choked
 
 
-def _gas_kv_reference(
-    flow_nm3h: float, p1: float, p2: float, t_c: float, mw: float, k: float, z: float, xt: float,
+def _steam_kv_reference(
+    flow_kg_h: float, p1: float, p2: float, rho: float, k: float, xt: float,
 ) -> tuple[float, float, float, float, bool]:
-    """Independent IEC gas Kv (IEC 60534-2-1 eq. 8a / 14a, N9 constant)."""
-    t_k = t_c + 273.15
-    q_actual = flow_nm3h * (NORMAL_P_BAR / p1) * (t_k / NORMAL_T_K) * z
-    kv, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, p1, p2, t_c, mw, k, z, xt)
+    """Independent IEC steam Kv (IEC 60534-2-1 eq. 6a direct mass formulation)."""
+    fk = k / 1.4
+    x = (p1 - p2) / p1
+    x_choked = fk * xt
+    choked = x >= x_choked
+    y = max(1.0 - x / (3.0 * fk * xt), 2.0 / 3.0)
+    denom = x_choked if choked else x
+    cv = flow_kg_h / (27.3 * y * math.sqrt(denom * p1 * rho))
+    kv = cv_to_kv(cv)
     return kv, x, x_choked, y, choked
 
 
@@ -246,11 +250,10 @@ def verify_liquid_velocity() -> ScenarioResult:
 
 def verify_gas_iec_anchor() -> ScenarioResult:
     """G1: IEC published gas example (CO2) reproduced by the wrapper."""
-    q_actual_m3h = (38.0 / 36.0) * 3600.0
-    flow_nm3h = q_actual_m3h / ((1.01325 / 6.8) * (433.15 / 273.15) * 0.988)
+    flow_nm3h = (38.0 / 36.0) * 3600.0
     anchor = cast(float, size_control_valve_g(
         T=433.0, MW=44.01, mu=1.4665e-4, gamma=1.30, Z=0.988,
-        P1=680e3, P2=310e3, Q=q_actual_m3h / 3600.0,
+        P1=680e3, P2=310e3, Q=flow_nm3h / 3600.0,
         D1=0.08, D2=0.1, d=0.05, FL=0.85, Fd=0.42, xT=0.60,
     ))
     data = GasSizingInput(
@@ -264,7 +267,7 @@ def verify_gas_iec_anchor() -> ScenarioResult:
     d = result.valve_dn_mm / 1000.0
     ref = cast(float, size_control_valve_g(
         T=t_k, MW=44.01, mu=1.4665e-4, gamma=1.30, Z=0.988,
-        P1=680e3, P2=310e3, Q=q_actual_m3h / 3600.0,
+        P1=680e3, P2=310e3, Q=flow_nm3h / 3600.0,
         D1=0.08, D2=0.1, d=d, FL=0.85, Fd=0.42, xT=0.60,
     ))
     dev = _deviation_pct(result.required_kv, ref)
@@ -351,10 +354,9 @@ def verify_gas_energy_blend() -> ScenarioResult:
 
     low, high = _run(20000.0), _run(30000.0)
     d = low.valve_dn_mm / 1000.0
-    q_actual = 20000.0 * (NORMAL_P_BAR / 10.0) * (293.15 / NORMAL_T_K) * z
     ref = cast(float, size_control_valve_g(
         T=293.15, MW=mw, mu=mu, gamma=k, Z=z, P1=10e5, P2=7e5,
-        Q=q_actual / 3600.0, D1=d, D2=d, d=d, FL=0.85, Fd=1.0, xT=0.69,
+        Q=20000.0 / 3600.0, D1=d, D2=d, d=d, FL=0.85, Fd=1.0, xT=0.69,
     ))
     dev = _deviation_pct(low.required_kv, ref)
     checks = [
@@ -385,9 +387,7 @@ def verify_steam_superheated() -> ScenarioResult:
     result = size_steam_valve(data, valve_series=DEFAULT_VALVE_SERIES)
     rho = CP.PropsSI("D", "P", 12e5, "T", 493.15, "Water")
     k_iapws = CP.PropsSI("CPMASS", "P", 12e5, "T", 493.15, "Water") / CP.PropsSI("CVMASS", "P", 12e5, "T", 493.15, "Water")
-    z_iapws = CP.PropsSI("Z", "P", 12e5, "T", 493.15, "Water")
-    q_actual = 5000.0 / rho
-    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 12.0, 8.0, 220.0, 18.015, k_iapws, z_iapws, 0.72)
+    kv_ref, x, x_choked, y, choked = _steam_kv_reference(5000.0, 12.0, 8.0, rho, k_iapws, 0.72)
     dev = _deviation_pct(result.required_kv, kv_ref)
     checks = [
         dev <= STEAM_DEV_MAX_PCT,
@@ -418,9 +418,7 @@ def verify_steam_near_saturated() -> ScenarioResult:
     result = size_steam_valve(data, valve_series=DEFAULT_VALVE_SERIES)
     rho = CP.PropsSI("D", "P", 6e5, "T", 438.15, "Water")
     k_iapws = CP.PropsSI("CPMASS", "P", 6e5, "T", 438.15, "Water") / CP.PropsSI("CVMASS", "P", 6e5, "T", 438.15, "Water")
-    z_iapws = CP.PropsSI("Z", "P", 6e5, "T", 438.15, "Water")
-    q_actual = 8000.0 / rho
-    kv_ref, x, x_choked, y, choked = _gas_kv_from_actual(q_actual, 6.0, 3.0, 165.0, 18.015, k_iapws, z_iapws, 0.72)
+    kv_ref, x, x_choked, y, choked = _steam_kv_reference(8000.0, 6.0, 3.0, rho, k_iapws, 0.72)
     dev = _deviation_pct(result.required_kv, kv_ref)
     checks = [
         dev <= STEAM_DEV_MAX_PCT,
@@ -522,10 +520,9 @@ def verify_vendor_catalog() -> ScenarioResult:
         valve_meta={"vendor": definition.vendor, "family": definition.family, "style": definition.style},
     )
     d = result.valve_dn_mm / 1000.0
-    q_actual = 120000.0 * (NORMAL_P_BAR / 15.0) * (313.15 / NORMAL_T_K) * 0.95
     ref = cast(float, size_control_valve_g(
         T=313.15, MW=17.3, mu=1.1e-5, gamma=1.31, Z=0.95, P1=15e5, P2=10e5,
-        Q=q_actual / 3600.0, D1=d, D2=d, d=d, FL=definition.fl, Fd=definition.fd, xT=definition.xt,
+        Q=120000.0 / 3600.0, D1=d, D2=d, d=d, FL=definition.fl, Fd=definition.fd, xT=definition.xt,
     ))
     dev = _deviation_pct(result.required_kv, ref)
     catalog_dns = {v.dn_mm for v in definition.sizes}

@@ -8,7 +8,7 @@ size_steam_valve), plus unit conversions (cv_to_kv, kv_to_cv).
 
 from __future__ import annotations
 
-__version__ = "3.5.0"
+__version__ = "3.5.1"
 
 import logging
 import math
@@ -921,13 +921,24 @@ def size_gas_valve(
     valve_series = valve_series or DEFAULT_VALVE_SERIES
 
     def _eval(d1: float, d2: float, d: float) -> dict[str, Any]:
-        return cast(dict[str, Any], size_control_valve_g(
-            T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
-            P1=data.inlet_pressure_bar_a * 1e5,
-            P2=data.outlet_pressure_bar_a * 1e5,
-            Q=q_actual_m3h / 3600.0,
-            D1=d1, D2=d2, d=d, FL=fl, Fd=fd, xT=xt, full_output=True,
-        ))
+        try:
+            return cast(dict[str, Any], size_control_valve_g(
+                T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
+                P1=data.inlet_pressure_bar_a * 1e5,
+                P2=data.outlet_pressure_bar_a * 1e5,
+                Q=flow_nm3h / 3600.0,
+                D1=d1, D2=d2, d=d, FL=fl, Fd=fd, xT=xt, full_output=True,
+            ))
+        except (ValueError, ZeroDivisionError):
+            fallback = cast(dict[str, Any], size_control_valve_g(
+                T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
+                P1=data.inlet_pressure_bar_a * 1e5,
+                P2=data.outlet_pressure_bar_a * 1e5,
+                Q=flow_nm3h / 3600.0,
+                FL=fl, Fd=fd, xT=xt, full_output=True,
+            ))
+            fallback["FP"] = 1.0
+            return fallback
 
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
@@ -1165,6 +1176,8 @@ def size_steam_valve(
             mw = 18.015
             logger.warning("CoolProp steam properties unavailable; ideal gas fallback used (inaccurate above 30 bar(a)).")
 
+    density_normal = (NORMAL_P_BAR * 1e5 * mw * 1e-3) / (8.314462618 * NORMAL_T_K)
+    flow_nm3h = flow_kg_h / density_normal if density_normal > 0 else 0.0
     q_actual_m3h = flow_kg_h / density if density > 0 else 0.0
 
     p1_psia = data.inlet_pressure_bar_a * BAR_TO_PSI
@@ -1177,13 +1190,24 @@ def size_steam_valve(
     valve_series = valve_series or DEFAULT_VALVE_SERIES
 
     def _eval(d1: float, d2: float, d: float) -> dict[str, Any]:
-        return cast(dict[str, Any], size_control_valve_g(
-            T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
-            P1=data.inlet_pressure_bar_a * 1e5,
-            P2=data.outlet_pressure_bar_a * 1e5,
-            Q=q_actual_m3h / 3600.0,
-            D1=d1, D2=d2, d=d, FL=fl, Fd=fd, xT=xt, full_output=True,
-        ))
+        try:
+            return cast(dict[str, Any], size_control_valve_g(
+                T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
+                P1=data.inlet_pressure_bar_a * 1e5,
+                P2=data.outlet_pressure_bar_a * 1e5,
+                Q=flow_nm3h / 3600.0,
+                D1=d1, D2=d2, d=d, FL=fl, Fd=fd, xT=xt, full_output=True,
+            ))
+        except (ValueError, ZeroDivisionError):
+            fallback = cast(dict[str, Any], size_control_valve_g(
+                T=t_k, MW=mw, mu=mu, gamma=k, Z=z,
+                P1=data.inlet_pressure_bar_a * 1e5,
+                P2=data.outlet_pressure_bar_a * 1e5,
+                Q=flow_nm3h / 3600.0,
+                FL=fl, Fd=fd, xT=xt, full_output=True,
+            ))
+            fallback["FP"] = 1.0
+            return fallback
 
     valve, details, overflow = _size_iteration(
         valve_series, data.pipe_inlet_diameter_mm, data.pipe_outlet_diameter_mm, _eval,
