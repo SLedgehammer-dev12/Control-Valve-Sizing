@@ -2,6 +2,18 @@
 
 Sürüm bazlı what's new ve release notları için `docs/releases/` dizinine bakın.
 
+## [3.5.2] - 2026-10-26
+
+### Added
+- **Multicomponent Hydrocarbon Peng-Robinson VLE Flash**: Added `FlashResult` and `flash_multicomponent_mixture()` in `fluid_properties.py` using Wilson K-values initial estimation and Rachford-Rice equation solver. Provides accurate vapor fraction $\beta$, phase split, and liquid condensate density (e.g. cryogenic natural gas condensation producing LNG at ~423 kg/m³).
+- **Interactive Engineering Parameter Info Modal**: Added native `<dialog id="info-modal">` in `webapp/index.html` accessible from intermediate values table buttons and column headers, detailing definitions, standard symbols, engineering formulas, and physical interpretation.
+- **Single-Row Process Conditions Grid**: Arranged Operating & Process Conditions (Flow, Temperature, P1, ΔP Badge, P2) in a unified horizontal single row on desktop screens.
+- **Explicit Pipe Internal Diameter Labels**: Clarified pipe inputs to "Hat giriş iç çapı D1 [mm]" and "Hat çıkış iç çapı D2 [mm]".
+- **E2E & Flash Test Suite**: Added `test_e2e_webapp.py`, `test_multicomponent_flash.py`, and `test_phase_transformation.py` bringing the test suite to 765 passing tests.
+
+### Fixed
+- **Dynamic Evaluation Stutter & Two-Phase API Stability**: Handled condensing gas streams and near-vapor-pressure liquids in `api.py` without throwing HTTP 400/500 errors or stalling UI calculations.
+
 ## [3.5.1] - 2026-10-26
 
 ### Fixed

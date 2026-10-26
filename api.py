@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import numbers
@@ -26,16 +27,29 @@ from fluid_properties import (
     GAS_COMPONENT_ALIASES,
     LIQUID_PRESETS,
     evaluate_gas_mixture,
+    evaluate_gas_phase_state,
     evaluate_liquid_preset,
     evaluate_steam_state,
+    flash_multicomponent_mixture,
     gas_component_options,
+    get_gas_saturation_info,
     get_pure_fluid_state,
     get_steam_properties_iapws,
     prepare_composition_rows,
 )
+from joule_thomson import calc_joule_thomson_drop
 from multi_case import OperatingCase, size_multicase
 from project_io import build_project_payload, validate_project_payload
 from reporting import build_report
+from two_phase import (
+    cavitation_index,
+    cavitation_severity,
+    flash_fraction,
+    flashing_check,
+    flashing_cv_estimate,
+    two_phase_density_homogeneous,
+    vapor_density_ideal_gas,
+)
 from units import (
     DEFAULT_UNITS,
     GAS_FLOW_UNITS,
@@ -184,6 +198,8 @@ class LiquidRequest(BaseModel):
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
     target_dn_mm: float | None = None
+    advanced_two_phase: bool = False
+    inlet_vapor_quality_x: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class GasComponent(BaseModel):
@@ -218,6 +234,8 @@ class GasRequest(BaseModel):
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
     target_dn_mm: float | None = None
+    advanced_two_phase: bool = False
+    inlet_vapor_quality_x: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class SteamRequest(BaseModel):
@@ -237,6 +255,8 @@ class SteamRequest(BaseModel):
     pipe_outlet_diameter_mm: float | None = None
     authority_pr: float = 0.5
     target_dn_mm: float | None = None
+    advanced_two_phase: bool = False
+    inlet_vapor_quality_x: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class GasPropertiesRequest(BaseModel):
@@ -407,6 +427,9 @@ def _gas_summary_from_preset(gas_preset: str, p1_bar: float, temperature_c: floa
         "specific_heat_ratio": summary.specific_heat_ratio or 1.30,
         "mixture_string": summary.mixture_string,
         "phase": summary.phase,
+        "phase_diagnostic": evaluate_gas_phase_state(
+            gas_preset, p1_bar, temperature_c, gas_model=gas_model
+        ),
         "fallback_used": summary.fallback_used,
         "model_used": summary.model_used,
         "property_warning": (
@@ -509,6 +532,9 @@ def _gas_summary(
             "specific_heat_ratio": summary.specific_heat_ratio or 1.30,
             "mixture_string": summary.mixture_string,
             "phase": summary.phase,
+            "phase_diagnostic": evaluate_gas_phase_state(
+                None, p1_bar, temperature_c, composition=normalized_rows, composition_basis=basis, gas_model=gas_model
+            ),
             "fallback_used": summary.fallback_used,
             "model_used": summary.model_used,
             "property_warning": (
@@ -522,14 +548,18 @@ def _gas_summary(
     return _gas_summary_from_preset(gas_preset, p1_bar, temperature_c, gas_model)
 
 
-def _reject_non_gas_phase(fluid: dict[str, Any]) -> None:
+def _reject_non_gas_phase(fluid: dict[str, Any], allow_two_phase: bool = False) -> None:
+    if allow_two_phase:
+        return
     phase = fluid.get("phase")
+    phase_diag = fluid.get("phase_diagnostic") or {}
     labels = {"liquid": "sıvı", "supercritical_liquid": "süperkritik sıvı", "two_phase": "iki fazlı"}
     if phase in labels:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Seçilen P/T'de gaz {labels[phase]} fazında; gaz sizing için gaz veya süperkritik gaz fazı gerekir.",
+        warning_tr = phase_diag.get("warning_tr")
+        detail = warning_tr if warning_tr else (
+            f"Seçilen P/T'de gaz {labels[phase]} fazında; gaz sizing için gaz veya süperkritik gaz fazı gerekir."
         )
+        raise HTTPException(status_code=400, detail=detail)
 
 
 @lru_cache(maxsize=64)
@@ -603,6 +633,264 @@ def _visuals(result: SizingResult, characteristic: str, authority_pr: float) -> 
     }
 
 
+def _evaluate_two_phase_liquid(
+    p1_bar: float,
+    p2_bar: float,
+    pv_bar: float,
+    temperature_c: float,
+    density_kg_m3: float,
+    flow_m3h: float,
+    required_cv: float,
+    valve_dn_mm: float,
+    outlet_pipe_dn_mm: float | None = None,
+    fl: float = 0.90,
+    inlet_quality_x: float = 0.0,
+) -> dict[str, Any]:
+    is_flashing = flashing_check(p1_bar, p2_bar, pv_bar) or (p2_bar < pv_bar)
+    sigma = cavitation_index(p1_bar, p2_bar, pv_bar)
+    severity = cavitation_severity(sigma, fl)
+
+    if inlet_quality_x > 0:
+        quality_x = inlet_quality_x
+        regime = "Girişte İki Fazlı Akış (Two-Phase Inlet)"
+    elif is_flashing:
+        quality_x = flash_fraction(p1_bar, p2_bar, temperature_c, 4184.0, 2.26e6, 0.4615, pv_bar)
+        if quality_x <= 0:
+            quality_x = max(0.01, min(0.40, (pv_bar - p2_bar) / max(p1_bar, 1.0) * 0.15))
+        regime = "Flashing (Buharlaşma / İki Faz)"
+    elif sigma < 1.0:
+        quality_x = 0.0
+        regime = f"Kavitasyon ({severity})"
+    else:
+        quality_x = 0.0
+        regime = "Tek Fazlı Sıvı (Kavitasyon Yok)"
+
+    rho_vapor = vapor_density_ideal_gas(p2_bar, temperature_c, 18.015)
+    if rho_vapor <= 0:
+        rho_vapor = max(0.6, p2_bar * 0.8)
+
+    rho_tp = two_phase_density_homogeneous(quality_x, density_kg_m3, rho_vapor)
+    cv_tp = flashing_cv_estimate(required_cv, quality_x, density_kg_m3, rho_vapor)
+    cv_ratio = (cv_tp / required_cv) if required_cv > 0 else 1.0
+    cv_increase_pct = (cv_ratio - 1.0) * 100.0
+
+    mass_flow_kg_s = (flow_m3h * density_kg_m3) / 3600.0
+    q_tp_m3_s = mass_flow_kg_s / max(rho_tp, 0.1)
+    q_tp_m3_h = q_tp_m3_s * 3600.0
+
+    out_dn = outlet_pipe_dn_mm or valve_dn_mm or 50.0
+    area_out_m2 = math.pi * ((out_dn / 1000.0) ** 2) / 4.0
+    v_out_tp = q_tp_m3_s / max(area_out_m2, 1e-5)
+
+    v_limit_api14e = (1.22 * 100.0) / math.sqrt(max(rho_tp, 0.1))
+    is_erosive = v_out_tp > v_limit_api14e
+    erosive_ratio = (v_out_tp / v_limit_api14e) if v_limit_api14e > 0 else 1.0
+
+    recommendations = []
+    if is_flashing or inlet_quality_x > 0:
+        recommendations.append(
+            "Flashing akışında genleşen buhar yüksek hacim ve erozyonel hız yaratır. Geleneksel düz geçişli globe vana "
+            "yerine Açılı Vana (Angle Body) veya genişletilmiş çıkışlı (Expanded Outlet) vana gövdesi önerilir."
+        )
+        recommendations.append(
+            "Yüksek hızlı sıvı damlacıklarının gövde aşındırmasını azaltmak için akış yönü 'Flow-to-Close' veya akışı "
+            "doğrudan aşağıya yönlendirecek şekilde seçilmelidir."
+        )
+        recommendations.append(
+            "Vana içi trim malzemesi erozyona dirençli sertleştirilmiş alaşım (Stellite No. 6 kaplama veya Masif Tungsten Karbür) seçilmelidir."
+        )
+        if is_erosive:
+            recommendations.append(
+                f"Çıkış iki fazlı hızı ({v_out_tp:.1f} m/s) API 14E limitini ({v_limit_api14e:.1f} m/s) aşıyor! "
+                "Vana çıkış boru çapı en az bir üst çapa genişletilmelidir."
+            )
+    elif sigma < 1.0:
+        if sigma < 0.5:
+            recommendations.append(
+                f"Şiddetli kavitasyon tespit edildi (σ={sigma:.2f}). Çok kademeli (Multi-stage) anti-kavitasyon trim zorunludur."
+            )
+        else:
+            recommendations.append(
+                f"Hafif/orta kavitasyon riski (σ={sigma:.2f}). Sertleştirilmiş paslanmaz çelik (17-4PH veya 316+Stellite) trim önerilir."
+            )
+    else:
+        recommendations.append("Sıvı tek fazlı rejimde kalmaktadır (P2 > Pv). Standart trim ve tek fazlı IEC 60534-2-1 boyutlandırması yeterlidir.")
+
+    return {
+        "enabled": True,
+        "service": "liquid",
+        "regime": regime,
+        "is_flashing": is_flashing,
+        "sigma": round(sigma, 3),
+        "cavitation_severity": severity,
+        "quality_x": round(quality_x, 4),
+        "rho_liquid_kg_m3": round(density_kg_m3, 2),
+        "rho_vapor_kg_m3": round(rho_vapor, 3),
+        "rho_tp_kg_m3": round(rho_tp, 2),
+        "cv_single_phase": round(required_cv, 2),
+        "cv_two_phase": round(cv_tp, 2),
+        "cv_increase_pct": round(cv_increase_pct, 1),
+        "q_tp_m3_h": round(q_tp_m3_h, 2),
+        "v_out_tp_m_s": round(v_out_tp, 2),
+        "v_limit_api14e_m_s": round(v_limit_api14e, 2),
+        "is_erosive": is_erosive,
+        "erosive_ratio_pct": round(erosive_ratio * 100.0, 1),
+        "recommendations": recommendations,
+    }
+
+
+def _evaluate_two_phase_gas(
+    p1_bar: float,
+    p2_bar: float,
+    temperature_c: float,
+    gas_preset: str,
+    fluid: dict[str, Any],
+    composition: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    sg = float(fluid.get("specific_gravity") or 0.60)
+    jt = calc_joule_thomson_drop(
+        fluid=gas_preset or "Methane",
+        p1_bar_a=p1_bar,
+        p2_bar_a=p2_bar,
+        t1_c=temperature_c,
+        specific_gravity=sg,
+    )
+    sat_info = get_gas_saturation_info(gas_preset, p2_bar, composition=composition)
+    t_sat = (sat_info.get("t_sat_c") or sat_info.get("t_dew_c")) if sat_info else None
+
+    flash_target: list[dict[str, Any]] | str = composition if composition is not None else (gas_preset or "Doğal Gaz")
+    flash_res = None
+    with contextlib.suppress(Exception):
+        flash_res = flash_multicomponent_mixture(flash_target, p2_bar, jt.t2_c)
+
+    is_condensing = bool(t_sat is not None and jt.t2_c <= t_sat)
+    if flash_res and flash_res.liquid_mass_fraction > 0.001:
+        is_condensing = True
+
+    recommendations = []
+    if is_condensing:
+        liq_pct = (flash_res.liquid_mass_fraction * 100.0) if flash_res else 0.0
+        if liq_pct > 0.1 and flash_res and flash_res.rho_liquid_kg_m3:
+            regime = f"Joule-Thomson Yoğuşması (%{liq_pct:.1f} Sıvı - PR Flash)"
+            recommendations.append(
+                f"Vana çıkışında Peng-Robinson VLE hesaplamasına göre %{liq_pct:.1f} kütlesel sıvı damlacığı yoğuşması tespit edildi "
+                f"(Yoğunluk: {flash_res.rho_liquid_kg_m3:.1f} kg/m³)."
+            )
+        else:
+            regime = "Joule-Thomson Genleşmesinde Yoğuşma (2 Fazlı Akış)"
+            recommendations.append(
+                f"Vana çıkışında gaz sıcaklığı ({jt.t2_c:.1f} °C) doyma sıcaklığının ({t_sat:.1f} °C) altına inerek sıvı damlacıklarına yoğuşuyor!"
+            )
+        recommendations.append(
+            "Boru hattı çıkışına sıvı ayrıştırıcı (knock-out drum / separator) veya gaz girişine ön ısıtıcı (gas preheater) konulmalıdır."
+        )
+        recommendations.append("Damlacık erozyonuna karşı vana triminde Stellite sertleştirme ve paslanmaz çelik astar önerilir.")
+    elif jt.hydrate_risk:
+        regime = "Gaz Hidratı (Kristalleşme) Riski"
+        recommendations.append(
+            f"Gaz hidrat sıcaklığı ({jt.t_hydrate_c:.1f} °C) çıkış sıcaklığına ({jt.t2_c:.1f} °C) çok yakın! "
+            "Hat tıkanmasını önlemek için metanol/glikol enjeksiyonu veya ön ısıtma gereklidir."
+        )
+    elif jt.freezing_risk:
+        regime = "Donma / Buzlanma Riski"
+        recommendations.append(
+            f"Çıkış sıcaklığı {jt.t2_c:.1f} °C <= 0 °C. Dış ortam nemi veya gaz içi su donma riski taşır."
+        )
+    else:
+        regime = "Kuru Gaz Fazı (Yoğuşma Yok)"
+        recommendations.append(
+            f"Genleşme sonrası gaz sıcaklığı: {jt.t2_c:.1f} °C (ΔT_JT: {-jt.delta_t_c:+.1f} °C). Gaz fazı korunuyor."
+        )
+
+    res_dict: dict[str, Any] = {
+        "enabled": True,
+        "service": "gas",
+        "regime": regime,
+        "t1_c": round(temperature_c, 1),
+        "t2_c": round(jt.t2_c, 1),
+        "delta_t_jt_c": round(-jt.delta_t_c, 1),
+        "mu_jt_c_per_bar": round(jt.mu_jt_c_per_bar, 3),
+        "t_sat_p2_c": round(t_sat, 1) if t_sat is not None else None,
+        "is_condensing": is_condensing,
+        "hydrate_risk": jt.hydrate_risk,
+        "t_hydrate_c": round(jt.t_hydrate_c, 1),
+        "freezing_risk": jt.freezing_risk,
+        "t_preheat_min_c": round(jt.t_preheat_min_c, 1),
+        "recommendations": recommendations,
+    }
+    if flash_res:
+        res_dict["quality_x"] = round(flash_res.vapor_mass_fraction, 4)
+        res_dict["liquid_mass_fraction"] = round(flash_res.liquid_mass_fraction, 4)
+        res_dict["rho_liquid_kg_m3"] = flash_res.rho_liquid_kg_m3
+        res_dict["rho_vapor_kg_m3"] = flash_res.rho_vapor_kg_m3
+        res_dict["rho_tp_kg_m3"] = flash_res.rho_tp_kg_m3
+        res_dict["vle_method"] = flash_res.method_used
+
+    return res_dict
+
+
+def _evaluate_two_phase_steam(
+    p1_bar: float,
+    p2_bar: float,
+    temperature_c: float,
+) -> dict[str, Any]:
+    try:
+        from CoolProp.CoolProp import PropsSI
+        p1_pa = p1_bar * 1e5
+        p2_pa = p2_bar * 1e5
+        t1_k = temperature_c + 273.15
+        h1 = PropsSI("H", "P", p1_pa, "T", t1_k, "Water")
+        t_sat_k = PropsSI("T", "P", p2_pa, "Q", 1.0, "Water")
+        h_f = PropsSI("H", "P", p2_pa, "Q", 0.0, "Water")
+        h_g = PropsSI("H", "P", p2_pa, "Q", 1.0, "Water")
+        t_sat_c = t_sat_k - 273.15
+        if h1 < h_g:
+            quality_x = max(0.0, min(1.0, (h1 - h_f) / max(h_g - h_f, 1e-3)))
+            t2_c = t_sat_c
+            is_wet = True
+        else:
+            t2_k = PropsSI("T", "P", p2_pa, "H", h1, "Water")
+            t2_c = t2_k - 273.15
+            quality_x = 1.0
+            is_wet = False
+    except Exception:
+        t_sat_c = 100.0 * (p2_bar ** 0.25)
+        t2_c = temperature_c - 15.0
+        quality_x = 1.0
+        is_wet = False
+
+    recommendations = []
+    if is_wet and quality_x < 0.999:
+        moisture_pct = (1.0 - quality_x) * 100.0
+        regime = f"Islak Buhar / 2 Fazlı Genleşme (%{moisture_pct:.1f} Nem/Su Damlacığı)"
+        recommendations.append(
+            f"Kızgın/doymuş buhar vana çıkışında kısmen yoğuşarak %{moisture_pct:.1f} su damlacığı (wet steam) içermektedir."
+        )
+        recommendations.append(
+            "Yüksek hızlı su damlacıkları erozyon ve kavitasyona yol açar. "
+            "Vana çıkış borusu genişletilmeli, vana trimi sertleştirilmiş (Stellite) seçilmelidir."
+        )
+        recommendations.append("Vana sonrasına kondenstop veya damla tutucu (moisture separator) konulması önerilir.")
+    else:
+        regime = "Kızgın Buhar Fazı Korunuyor"
+        recommendations.append(
+            f"Vana çıkışında buhar kızgın buhar fazını koruyor (T2={t2_c:.1f} °C, Tsat={t_sat_c:.1f} °C). Tek fazlı gaz/buhar denklemleri geçerlidir."
+        )
+
+    return {
+        "enabled": True,
+        "service": "steam",
+        "regime": regime,
+        "is_wet": is_wet,
+        "quality_x": round(quality_x, 4),
+        "moisture_pct": round((1.0 - quality_x) * 100.0, 2) if is_wet else 0.0,
+        "t1_c": round(temperature_c, 1),
+        "t2_c": round(t2_c, 1),
+        "t_sat_p2_c": round(t_sat_c, 1),
+        "recommendations": recommendations,
+    }
+
+
 def _response(
     result: SizingResult,
     fluid: dict[str, Any],
@@ -611,6 +899,7 @@ def _response(
     authority_pr: float,
     pipe_inlet_diameter_mm: float | None = None,
     pipe_outlet_diameter_mm: float | None = None,
+    two_phase_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = _json_safe(asdict(result))
     extra = payload.pop("extra", {}) or {}
@@ -622,6 +911,8 @@ def _response(
     payload["fluid"] = _json_safe(fluid)
     payload["vendor"] = _json_safe(vendor_meta)
     payload["visuals"] = _json_safe(_visuals(result, characteristic, authority_pr))
+    if two_phase_analysis is not None:
+        payload["two_phase_analysis"] = _json_safe(two_phase_analysis)
     return _json_safe(payload)
 
 
@@ -850,12 +1141,17 @@ def size_liquid(request: LiquidRequest) -> dict[str, Any]:
     )
     margin = _clamp(_number_or_400(request.design_margin_pct, "Tasarım marjı"), 0.0, 100.0)
     authority = _clamp(_number_or_400(request.authority_pr, "Otorite"), 0.01, 1.0)
+    effective_pv = pv_bar
+    if request.advanced_two_phase:
+        ff = 0.96 - 0.28 * math.sqrt(max(pv_bar / max(pc_bar, 1.0), 0.0))
+        if p1_bar <= ff * pv_bar:
+            effective_pv = min(pv_bar, (p1_bar / max(ff, 0.5)) * 0.98)
     data = LiquidSizingInput(
         flow_m3h=flow_m3h,
         inlet_pressure_bar_a=p1_bar,
         outlet_pressure_bar_a=p2_bar,
         density_kg_m3=density,
-        vapor_pressure_bar_a=pv_bar,
+        vapor_pressure_bar_a=effective_pv,
         critical_pressure_bar_a=pc_bar,
         viscosity_pa_s=viscosity,
         fl=definition.fl or 0.9,
@@ -884,10 +1180,26 @@ def size_liquid(request: LiquidRequest) -> dict[str, Any]:
         "vendor_fl": definition.fl,
         "vendor_fd": definition.fd,
     }
+    two_phase_analysis = None
+    if request.advanced_two_phase:
+        two_phase_analysis = _evaluate_two_phase_liquid(
+            p1_bar=p1_bar,
+            p2_bar=p2_bar,
+            pv_bar=pv_bar,
+            temperature_c=temperature_c,
+            density_kg_m3=density,
+            flow_m3h=flow_m3h,
+            required_cv=result.required_cv,
+            valve_dn_mm=float(result.valve_dn_mm or 50.0),
+            outlet_pipe_dn_mm=request.pipe_outlet_diameter_mm,
+            fl=definition.fl or 0.9,
+            inlet_quality_x=request.inlet_vapor_quality_x,
+        )
     return _response(
         result, fluid, vendor_meta, characteristic, authority,
         pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
         pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+        two_phase_analysis=two_phase_analysis,
     )
 
 
@@ -902,6 +1214,7 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
     p1_bar = _absolute_pressure_or_400(request.p1_value, pressure_unit, "Giriş basıncı")
     p2_bar = _absolute_pressure_or_400(request.p2_value, pressure_unit, "Çıkış basıncı")
     temperature_c = _temperature_or_400(request.temperature_value, temperature_unit)
+    composition_rows = [row.model_dump() for row in request.composition] if request.composition is not None else None
     fluid = _gas_summary(
         request.gas_preset,
         p1_bar,
@@ -910,11 +1223,81 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
         request.specific_heat_ratio,
         request.z,
         request.viscosity_pa_s,
-        composition=[row.model_dump() for row in request.composition] if request.composition is not None else None,
+        composition=composition_rows,
         composition_basis=request.composition_basis,
         gas_model=request.gas_model,
     )
-    _reject_non_gas_phase(fluid)
+    _reject_non_gas_phase(fluid, allow_two_phase=request.advanced_two_phase)
+    phase = fluid.get("phase")
+    margin = _clamp(_number_or_400(request.design_margin_pct, "Tasarım marjı"), 0.0, 100.0)
+    authority = _clamp(_number_or_400(request.authority_pr, "Otorite"), 0.01, 1.0)
+
+    if request.advanced_two_phase and phase in ("liquid", "supercritical_liquid", "two_phase"):
+        mw = float(fluid.get("average_molecular_weight") or 16.04)
+        density_kg_m3 = float(fluid.get("density_kg_m3") or 420.0)
+        if request.flow_unit in {"kgh", "lbh"}:
+            mass_kg_h = steam_flow_to_kgh(request.flow_value, request.flow_unit)
+            flow_m3h = mass_kg_h / max(density_kg_m3, 1.0)
+            flow_nm3h = (mass_kg_h / mw) * 22.414
+        else:
+            flow_nm3h = gas_flow_to_nm3h(
+                _require_positive(request.flow_value, "Debi"),
+                flow_unit,
+                pressure_bar_a=p1_bar,
+                temperature_c=temperature_c,
+                z=float(fluid.get("z") or 1.0),
+                density_kg_m3=density_kg_m3,
+            )
+            mass_kg_h = (flow_nm3h / 22.414) * mw
+            flow_m3h = mass_kg_h / max(density_kg_m3, 1.0)
+
+        pv_bar = min(p1_bar * 0.90, p2_bar * 0.95)
+        liquid_data = LiquidSizingInput(
+            flow_m3h=flow_m3h,
+            inlet_pressure_bar_a=p1_bar,
+            outlet_pressure_bar_a=p2_bar,
+            density_kg_m3=density_kg_m3,
+            vapor_pressure_bar_a=max(0.01, pv_bar),
+            critical_pressure_bar_a=46.0,
+            viscosity_pa_s=float(fluid.get("viscosity_pa_s") or 1.5e-4),
+            fl=definition.fl or 0.9,
+            fd=definition.fd or 1.0,
+            pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
+            pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+            temperature_c=temperature_c,
+        )
+        result = _run_sizing(
+            size_liquid_valve,
+            liquid_data,
+            valve_series=list(definition.sizes),
+            valve_meta=vendor_meta,
+            design_margin_pct=margin,
+            flow_characteristic=characteristic,
+            target_dn_mm=request.target_dn_mm,
+        )
+        fluid.update({
+            "service": "gas",
+            "flow_nm3h": flow_nm3h,
+            "flow_m3h": flow_m3h,
+            "p1_bar_a": p1_bar,
+            "p2_bar_a": p2_bar,
+            "condensed_liquid": True,
+        })
+        two_phase_analysis = _evaluate_two_phase_gas(
+            p1_bar=p1_bar,
+            p2_bar=p2_bar,
+            temperature_c=temperature_c,
+            gas_preset=request.gas_preset,
+            fluid=fluid,
+            composition=composition_rows,
+        )
+        return _response(
+            result, fluid, vendor_meta, characteristic, authority,
+            pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
+            pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+            two_phase_analysis=two_phase_analysis,
+        )
+
     flow_nm3h = gas_flow_to_nm3h(
         _require_positive(request.flow_value, "Debi"),
         flow_unit,
@@ -923,8 +1306,6 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
         z=float(fluid["z"] or 1.0),
         density_kg_m3=fluid["density_kg_m3"],
     )
-    margin = _clamp(_number_or_400(request.design_margin_pct, "Tasarım marjı"), 0.0, 100.0)
-    authority = _clamp(_number_or_400(request.authority_pr, "Otorite"), 0.01, 1.0)
     data = GasSizingInput(
         flow_nm3h=flow_nm3h,
         inlet_pressure_bar_a=p1_bar,
@@ -950,10 +1331,21 @@ def size_gas(request: GasRequest) -> dict[str, Any]:
         target_dn_mm=request.target_dn_mm,
     )
     fluid.update({"service": "gas", "flow_nm3h": flow_nm3h, "p1_bar_a": p1_bar, "p2_bar_a": p2_bar})
+    two_phase_analysis = None
+    if request.advanced_two_phase:
+        two_phase_analysis = _evaluate_two_phase_gas(
+            p1_bar=p1_bar,
+            p2_bar=p2_bar,
+            temperature_c=temperature_c,
+            gas_preset=request.gas_preset,
+            fluid=fluid,
+            composition=composition_rows,
+        )
     return _response(
         result, fluid, vendor_meta, characteristic, authority,
         pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
         pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+        two_phase_analysis=two_phase_analysis,
     )
 
 
@@ -1026,10 +1418,18 @@ def size_steam(request: SteamRequest) -> dict[str, Any]:
         "property_warning": property_warning,
         "vendor_xt": definition.xt,
     }
+    two_phase_analysis = None
+    if request.advanced_two_phase:
+        two_phase_analysis = _evaluate_two_phase_steam(
+            p1_bar=p1_bar,
+            p2_bar=p2_bar,
+            temperature_c=temperature_c,
+        )
     return _response(
         result, fluid, vendor_meta, characteristic, authority,
         pipe_inlet_diameter_mm=request.pipe_inlet_diameter_mm,
         pipe_outlet_diameter_mm=request.pipe_outlet_diameter_mm,
+        two_phase_analysis=two_phase_analysis,
     )
 
 

@@ -24,6 +24,7 @@ const state = {
   service: "liquid",
   hasCalculated: false,
   busy: false,
+  advanceTwoPhase: false,
   gasProps: null,
   gasTimer: null,
   gasRequest: 0,
@@ -383,6 +384,28 @@ async function applyLiquidPreset() {
   $("liquid-pc").value = formatInput(data.critical_pressure_bar_a);
   $("liquid-preset-note").textContent = data.warning
     || (data.temperature_corrected ? "Özellikler CoolProp ile P/T'ye göre güncellendi." : "Bu preset için P/T düzeltmesi yok; sabit değerler kullanılıyor.");
+
+  const liqDiag = data.phase_diagnostic;
+  const liqAlert = $("liquid-phase-alert");
+  if (liqAlert) {
+    if (liqDiag && liqDiag.is_phase_mismatch) {
+      liqAlert.hidden = false;
+      const titleEl = $("liquid-phase-alert-title");
+      if (titleEl) titleEl.textContent = "Faz Uyarısı: Girişte Buharlaşma / Kaynama";
+      const descEl = $("liquid-phase-alert-desc");
+      if (descEl) descEl.textContent = liqDiag.warning_tr || "";
+      const switchBtn = $("liquid-phase-switch-btn");
+      if (switchBtn) {
+        switchBtn.onclick = () => switchToService("steam", {
+          p1: numberValue("liquid-p1"),
+          p2: numberValue("liquid-p2"),
+          temperature: numberValue("liquid-temperature"),
+        });
+      }
+    } else {
+      liqAlert.hidden = true;
+    }
+  }
   scheduleRecalc();
 }
 
@@ -551,6 +574,69 @@ function normalizeGasComposition() {
   scheduleRecalc();
 }
 
+function switchToService(targetService, options = {}) {
+  const tab = $(`tab-${targetService}`);
+  if (tab) tab.click();
+  if (targetService === "liquid") {
+    if (options.preset) {
+      const presetSelect = $("liquid-preset");
+      if (presetSelect) {
+        presetSelect.value = options.preset;
+        presetSelect.dispatchEvent(new Event("change"));
+      }
+    }
+    if (options.p1 != null) $("liquid-p1").value = options.p1;
+    if (options.p2 != null) $("liquid-p2").value = options.p2;
+    if (options.temperature != null) $("liquid-temperature").value = options.temperature;
+    if (options.density != null) $("liquid-density").value = formatInput(options.density);
+    if (options.viscosity != null) $("liquid-viscosity").value = formatInput(options.viscosity);
+    showToast(`${options.preset || "Sıvı"} proses koşulları aktarıldı.`);
+  } else if (targetService === "steam") {
+    if (options.p1 != null) $("steam-p1").value = options.p1;
+    if (options.p2 != null) $("steam-p2").value = options.p2;
+    if (options.temperature != null) $("steam-temperature").value = options.temperature;
+    showToast("Buhar proses koşulları aktarıldı.");
+  }
+  updateDeltaPBadges();
+  scheduleRecalc();
+}
+
+function checkSteamPhase() {
+  if (state.service !== "steam") return;
+  let p1;
+  let p2;
+  let t;
+  try {
+    p1 = numberValue("steam-p1");
+    p2 = numberValue("steam-p2");
+    t = numberValue("steam-temperature");
+  } catch {
+    return;
+  }
+  const tSat = p1 >= 220.64 ? 373.95 : (100.0 + 28.0 * Math.log(Math.max(p1, 0.1)));
+  const alertEl = $("steam-phase-alert");
+  if (!alertEl) return;
+  if (t < tSat - 10.0) {
+    alertEl.hidden = false;
+    const titleEl = $("steam-phase-alert-title");
+    if (titleEl) titleEl.textContent = `Faz Uyarısı: Su Sıvı Fazında (Yoğuşma, ΔT = ${(t - tSat).toFixed(1)} °C)`;
+    const descEl = $("steam-phase-alert-desc");
+    if (descEl) descEl.textContent = `${p1.toFixed(1)} bar(a) basınçta doymuş buhar sıcaklığı ~${tSat.toFixed(1)} °C'dir. Girilen ${t.toFixed(1)} °C sıcaklıkta akışkan tamamen sıvı su fazına yoğuşmuştur.`;
+    const switchBtn = $("steam-phase-switch-btn");
+    if (switchBtn) {
+      switchBtn.onclick = () => switchToService("liquid", {
+        preset: "Water",
+        p1,
+        p2,
+        temperature: t,
+        density: 950.0,
+      });
+    }
+  } else {
+    alertEl.hidden = true;
+  }
+}
+
 async function updateGasProperties() {
   if (!state.meta) return;
   if (document.hidden) {
@@ -563,6 +649,8 @@ async function updateGasProperties() {
   const box = $("gas-properties");
   if (manual) {
     box.textContent = "Manuel gaz özellikleri kullanılıyor.";
+    const alertEl = $("gas-phase-alert");
+    if (alertEl) alertEl.hidden = true;
     return;
   }
   let composition;
@@ -587,19 +675,25 @@ async function updateGasProperties() {
       if (request !== state.gasRequest) return;
       state.gasProps = data;
       box.replaceChildren();
+      const phaseDiag = data.phase_diagnostic;
+      const phaseLabel = phaseDiag?.phase_label_tr || data.phase || "ideal gaz/bilinmiyor";
       const rows = [
         ["MW", display(data.average_molecular_weight, 3)],
         ["Z", display(data.z, 5)],
         ["Yoğunluk", `${display(data.density_kg_m3, 4)} kg/m³`],
         ["k = Cp/Cv", display(data.specific_heat_ratio, 5)],
         ["Viskozite", `${display(data.viscosity_pa_s, 4)} Pa·s`],
-        ["Faz", data.phase || "ideal gaz/bilinmiyor"],
+        ["Faz", data.phase ? (phaseDiag?.phase_label_tr || data.phase) : "ideal gaz/bilinmiyor"],
       ];
       for (const [label, value] of rows) {
         const span = document.createElement("span");
         span.textContent = `${label}: `;
         const b = document.createElement("b");
         b.textContent = value;
+        if (label === "Faz" && phaseDiag?.is_phase_mismatch) {
+          b.style.color = "#f87171";
+          b.style.fontWeight = "700";
+        }
         span.append(b);
         box.append(span, document.createTextNode("  ·  "));
       }
@@ -614,10 +708,45 @@ async function updateGasProperties() {
         mode.textContent = data.property_warning || (data.mixture_string ? `${modelLabel}: ${data.mixture_string}` : modelLabel);
       }
       box.append(mode);
+
+      const alertEl = $("gas-phase-alert");
+      if (alertEl) {
+        if (phaseDiag && phaseDiag.is_phase_mismatch) {
+          alertEl.hidden = false;
+          const titleEl = $("gas-phase-alert-title");
+          if (titleEl) titleEl.textContent = phaseDiag.phase_label_tr || "Faz Değişimi Tespit Edildi";
+          const descEl = $("gas-phase-alert-desc");
+          if (descEl) descEl.textContent = phaseDiag.warning_tr || "";
+          const switchBtn = $("gas-phase-switch-btn");
+          if (switchBtn) {
+            if (phaseDiag.suggested_action) {
+              switchBtn.hidden = false;
+              switchBtn.textContent = phaseDiag.suggested_action.label || "💧 Sıvı Servisine Aktar";
+              switchBtn.onclick = () => {
+                const act = phaseDiag.suggested_action;
+                switchToService(act.target_service || "liquid", {
+                  preset: act.preset || "LNG",
+                  p1: numberValue("gas-p1"),
+                  p2: numberValue("gas-p2"),
+                  temperature: numberValue("gas-temperature"),
+                  density: act.density_kg_m3 || data.density_kg_m3,
+                  viscosity: data.viscosity_pa_s,
+                });
+              };
+            } else {
+              switchBtn.hidden = true;
+            }
+          }
+        } else {
+          alertEl.hidden = true;
+        }
+      }
     } catch (error) {
       if (request !== state.gasRequest) return;
       state.gasProps = null;
       box.textContent = `Gaz özellikleri alınamadı: ${error.message}`;
+      const alertEl = $("gas-phase-alert");
+      if (alertEl) alertEl.hidden = true;
     }
   }, 250);
 }
@@ -650,6 +779,7 @@ function servicePayload(service) {
     pipe_inlet_diameter_mm: optionalNumber(`${service}-pipe-in`),
     pipe_outlet_diameter_mm: optionalNumber(`${service}-pipe-out`),
     target_dn_mm: Number($("target-dn")?.value) || null,
+    advanced_two_phase: Boolean(state.advanceTwoPhase),
   };
   if (service === "liquid") {
     Object.assign(payload, {
@@ -938,6 +1068,383 @@ function renderResult(data) {
   renderDiagnostics(data);
 }
 
+const PARAMETER_INFOS = {
+  Q_gpm: {
+    symbol: "Q [gpm]",
+    name: "Volumetrik Debi (US GPM)",
+    formula: "Q_gpm = Q [m³/h] × 4.40287",
+    desc: "Vana standart hesaplamalarında (IEC / ISA-75) kullanılan galon/dakika cinsinden sıvı hacimsel debisidir.",
+  },
+  SG: {
+    symbol: "SG",
+    name: "Özgül Ağırlık (Specific Gravity)",
+    formula: "SG = ρ / ρ_su (15.6 °C)",
+    desc: "Akışkan yoğunluğunun 15.6 °C (60 °F) referans su yoğunluğuna oranıdır (boyutsuzdur).",
+  },
+  FF: {
+    symbol: "FF",
+    name: "Sıvı Kritik Basınç Oranı Faktörü",
+    formula: "FF = 0.96 - 0.28 × √(Pv / Pc)",
+    desc: "Vena contracta'da buharlaşmanın başladığı basıncı belirler (IEC 60534-2-1).",
+  },
+  DeltaP_actual_bar: {
+    symbol: "ΔP_actual",
+    name: "Gerçek Proses Basınç Düşüşü",
+    formula: "ΔP = P1 - P2",
+    desc: "Vananın giriş ve çıkışı arasındaki mevcut statik proses basınç farkıdır [bar].",
+  },
+  DeltaP_max_bar: {
+    symbol: "ΔP_max",
+    name: "Maksimum Boğulma Basınç Düşüşü",
+    formula: "ΔP_max = FLP² × (P1 - FF × Pv)",
+    desc: "Sıvıda kavitasyon / boğulmuş akış (choked flow) sınırıdır. ΔP bu değeri aşarsa Cv hesabında ΔP_max kullanılır.",
+  },
+  DeltaP_max_valve_only_bar: {
+    symbol: "ΔP_max (Vana)",
+    name: "Vana Boğulma Basınç Limiti",
+    formula: "ΔP_max_valve = FL² × (P1 - FF × Pv)",
+    desc: "Boru redüksiyonları hariç, vananın kendi gövde ve trim geometrisinin tek başına oluşturduğu boğulma sınırıdır.",
+  },
+  DeltaP_effective_bar: {
+    symbol: "ΔP_eff",
+    name: "Efektif Basınç Düşüşü",
+    formula: "ΔP_eff = min(ΔP_actual, ΔP_max)",
+    desc: "IEC Cv denkleminde paydaya konulan geçerli basınç farkıdır. Boğulma varsa ΔP_max'a eşitlenir.",
+  },
+  FLP: {
+    symbol: "FLP",
+    name: "Boru Redüksiyonlu Basınç Geri Kazanım Faktörü",
+    formula: "FLP = FL / √(1 + (FL²/d⁴) × Σζ1)",
+    desc: "Boru hattı redüksiyonlarının (daraltıcı/genişletici) basınç geri kazanımı üzerindeki birleşik etkisidir (IEC 60534-2-1).",
+  },
+  FL_valve_only: {
+    symbol: "FL",
+    name: "Vana Basınç Geri Kazanım Faktörü",
+    formula: "FL = √((P1 - P2) / (P1 - Pvc))",
+    desc: "Vana iç geometrisinin vena contracta'dan sonra basıncı ne oranda geri kazandığını gösterir (Globe ~0.9, Kelebek ~0.6-0.7).",
+  },
+  Fd: {
+    symbol: "Fd",
+    name: "Vana İç Yapısı Çap Modifikatörü",
+    formula: "Fd = d_h / d_o (Hidrolik çap oranı)",
+    desc: "Kafesli veya çok delikli trimlerde Reynolds sayısı ve laminar akış düzeltmelerini belirleyen trim geometri faktörüdür.",
+  },
+  Fp: {
+    symbol: "Fp",
+    name: "Boru Geometrisi Faktörü",
+    formula: "Fp = 1 / √(1 + (Σζ / d⁴) × (Cv/N₁)²)",
+    desc: "Vana giriş ve çıkışındaki boru redüksiyonlarının sürtünme kaybı nedeniyle gereken efektif Cv düzeltme katsayısıdır.",
+  },
+  FR: {
+    symbol: "FR",
+    name: "Reynolds Sayısı Düzeltme Faktörü",
+    formula: "FR = f(Rev) per IEC 60534-2-1",
+    desc: "Laminar veya geçiş rejimindeki yüksek viskoziteli akışkanlarda Cv katsayısını artıran viskozite düzeltme katsayısıdır.",
+  },
+  mu_Pa_s: {
+    symbol: "μ [Pa·s]",
+    name: "Dinamik Viskozite",
+    desc: "Akışkanın iç sürtünme direnci (1 Pa·s = 1000 cP = 1 kg/(m·s)).",
+  },
+  Rev: {
+    symbol: "Rev",
+    name: "Vana Reynolds Sayısı",
+    formula: "Rev = (N₄ × Fd × Q) / (ν × FL^0.5 × Cv^0.5)",
+    desc: "Vana içi akış rejimini (laminar Rev < 10, geçiş 10-10000, türbülanslı > 10000) belirleyen boyutsuz sayıdır.",
+  },
+  Laminar: {
+    symbol: "Laminar Rejim",
+    name: "Laminar Akış Durumu",
+    desc: "Akışın türbülanslı rejim yerine düşük hızlı veya yüksek viskoziteli laminar bölgede olduğunu gösterir.",
+  },
+  Cavitation_index: {
+    symbol: "σ (Sigma)",
+    name: "Klasik Kavitasyon İndeksi",
+    formula: "σ = (P1 - Pv) / (P1 - P2)",
+    desc: "σ > 1: Kavitasyon yok; 0.5 < σ < 1: Başlangıç kavitasyonu; σ < 0.5: Şiddetli kavitasyon / flashing.",
+  },
+  Design_margin_pct: {
+    symbol: "Tasarım Marjı [%]",
+    name: "Tasarım / Emniyet Güvenlik Payı",
+    desc: "Pompa toleransları, boru kirlenmesi ve proses dalgalanmalarına karşı hesaplanan Cv'ye eklenen güvenlik marjıdır.",
+  },
+  Opening_percent: {
+    symbol: "Açıklık [%]",
+    name: "Vana Strok Açıklık Yüzdesi",
+    desc: "Vananın proses debisini geçirmek için bulunacağı strok açıklık yüzdesidir (%20-%80 arası idealdir).",
+  },
+  Cv_ratio: {
+    symbol: "Cv / Cv_rated",
+    name: "Cv Kapasite Yükleme Oranı",
+    formula: "Cv_ratio = Cv_gerekli / Cv_katalog",
+    desc: "Gerekli Cv'nin seçilen vananın tam açık nominal katalog Cv'sine oranıdır.",
+  },
+  Rangeability_min_Cv: {
+    symbol: "Min Cv",
+    name: "Minimum Kontrol Edilebilir Cv",
+    formula: "Cv_min = Cv_rated / Rangeability",
+    desc: "Vananın hassas ve kararlı kontrol sağlayabildiği en düşük akış katsayısıdır.",
+  },
+  Rangeability_ok: {
+    symbol: "Rangeability Uygunluğu",
+    name: "Kontrol Edilebilirlik Aralığı Uygunluğu",
+    desc: "İstenen debinin vananın alt kontrol edilebilirlik limitinin (rangeability) üzerinde olup olmadığını belirtir.",
+  },
+  Flashing_Cv_multiplier: {
+    symbol: "Flashing Çarpanı",
+    name: "İki Fazlı Cv Büyütme Çarpanı",
+    formula: "√(ρ_sıvı / ρ_iki_faz)",
+    desc: "Flashing durumunda oluşan buhar hacmini karşılamak için gereken Cv büyütme katsayısıdır.",
+  },
+  Pipe_in_velocity_m_s: {
+    symbol: "v_giriş [m/s]",
+    name: "Giriş Boru Hattı Akış Hızı",
+    formula: "v = Q / (π × D_in² / 4)",
+    desc: "Vana öncesi boru hattındaki ortalama akışkan hızıdır. Sıvıda < 3 m/s, gazda < 30 m/s önerilir.",
+  },
+  Pipe_out_velocity_m_s: {
+    symbol: "v_çıkış [m/s]",
+    name: "Çıkış Boru Hattı Akış Hızı",
+    formula: "v = Q / (π × D_out² / 4)",
+    desc: "Vana sonrası boru hattındaki ortalama akış hızıdır. Aşırı hız titreşim, gürültü ve erozyona yol açar.",
+  },
+  Q_nm3h: {
+    symbol: "Q [Nm³/h]",
+    name: "Normal Hacimsel Gaz Debisi",
+    desc: "0 °C (273.15 K) ve 1.01325 bar(a) normal şartlarındaki gaz debisidir.",
+  },
+  Q_actual_m3h: {
+    symbol: "Q_aktüel [m³/h]",
+    name: "İşletme Şartlarındaki Gerçek Debi",
+    formula: "Q_act = Q_norm × (P_norm / P1) × (T1 / T_norm) × Z",
+    desc: "Vana girişindeki gerçek işletme basınç ve sıcaklığındaki hacimsel gaz debisidir.",
+  },
+  Q_scfh: {
+    symbol: "Q [SCFH]",
+    name: "Standart Hacimsel Debi (ft³/h)",
+    desc: "Amerikan standart şartlarında (60 °F, 14.696 psia) gaz akış debisidir.",
+  },
+  P1_psia: {
+    symbol: "P1 [psia]",
+    name: "Giriş Mutlak Basıncı (psia)",
+    formula: "P1 [bar(a)] × 14.50377",
+    desc: "IEC / ISA gaz formüllerinde kullanılan mutlak giriş basıncıdır.",
+  },
+  T1_R: {
+    symbol: "T1 [°R]",
+    name: "Giriş Mutlak Sıcaklığı (Rankine)",
+    formula: "T1 [°R] = (T1 [°C] + 273.15) × 1.8",
+    desc: "İngiliz mühendislik birim sistemindeki mutlak sıcaklıktır.",
+  },
+  Gg: {
+    symbol: "Gg",
+    name: "Gaza Göre Özgül Ağırlık",
+    formula: "Gg = M_gaz / 28.964 (kuru havaya göre)",
+    desc: "Gazın moleküler ağırlığının kuru havaya (28.964 g/mol) bağıl oranıdır.",
+  },
+  k: {
+    symbol: "k (κ)",
+    name: "Özgül Isı Oranı (İzentropik Üs)",
+    formula: "k = Cp / Cv",
+    desc: "Sabit basınçtaki özgül ısının sabit hacimdeki özgül ısıya oranıdır.",
+  },
+  Fk: {
+    symbol: "Fk",
+    name: "Özgül Isı Oranı Faktörü",
+    formula: "Fk = k / 1.40",
+    desc: "Gazın özgül ısı oranının referans havaya (1.40) göre düzeltme faktörüdür (IEC 60534-2-1).",
+  },
+  x: {
+    symbol: "x",
+    name: "Basınç Düşüm Oranı",
+    formula: "x = (P1 - P2) / P1 = ΔP / P1",
+    desc: "Vana boyunca meydana gelen basınç düşüşünün giriş mutlak basıncına oranıdır.",
+  },
+  x_choked: {
+    symbol: "x_choked",
+    name: "Efektif Boğulma Basınç Oranı Limiti",
+    formula: "x_choked = min(x, xTP × Fk)",
+    desc: "Gaz akışında ses hızına (Mach 1) ulaşıldığı kritik boğulma sınırıdır.",
+  },
+  x_choked_valve_only: {
+    symbol: "xT × Fk",
+    name: "Vana Boğulma Basınç Oranı",
+    formula: "xT × Fk",
+    desc: "Boru redüksiyonları hariç, vananın tek başına ulaştığı kritik gaz boğulma oranıdır.",
+  },
+  x_for_equation: {
+    symbol: "x_hesap",
+    name: "Formülde Kullanılan Basınç Oranı",
+    formula: "min(x, x_choked)",
+    desc: "IEC gaz Cv formülüne doğrudan uygulanan sınırlanmış basınç düşüm oranıdır.",
+  },
+  Y: {
+    symbol: "Y",
+    name: "Gaz Genleşme Faktörü",
+    formula: "Y = 1 - (x / (3 × Fk × xTP))",
+    desc: "Gazın vana içinde genleşirken yoğunluğunun düşmesini hesaba katan düzeltme katsayısıdır (0.667 ≤ Y ≤ 1.0).",
+  },
+  xTP: {
+    symbol: "xTP",
+    name: "Boru Redüksiyonlu Gaz Boğulma Limiti",
+    formula: "xTP = xT / (Fp² × (1 + (xT × Σζ1 / 1000)))",
+    desc: "Boru hattı redüksiyonlarının gaz boğulma limiti xT üzerindeki birleşik etkisidir (IEC 60534-2-1).",
+  },
+  Z: {
+    symbol: "Z",
+    name: "Gaz Sıkıştırılabilirlik Faktörü",
+    formula: "Z = P × V / (R × T)",
+    desc: "Gerçek gazın ideal gaz davranışından sapma katsayısıdır (İdeal gazda Z=1.0).",
+  },
+  Z_source: {
+    symbol: "Z Kaynağı",
+    name: "Sıkıştırılabilirlik Faktörü Kaynağı",
+    desc: "Z değerinin CoolProp HEOS, Peng-Robinson veya kullanıcı girdisinden alındığını gösterir.",
+  },
+  Mach_outlet: {
+    symbol: "Mach_çıkış",
+    name: "Çıkış Borusu Mach Sayısı",
+    formula: "Mach = v_çıkış / c_ses",
+    desc: "Vana çıkış borusundaki gaz hızının yerel ses hızına oranıdır (akustik yorulma için < 0.30 önerilir).",
+  },
+  W_kg_h: {
+    symbol: "W [kg/h]",
+    name: "Kütlesel Debi",
+    desc: "Buhar veya gaz akışkanın saatte geçen kütlesel miktarıdır [kg/h].",
+  },
+  Cv_IEC_direct_mass: {
+    symbol: "Cv (Doğrudan Kütle)",
+    name: "IEC Doğrudan Kütlesel Cv Değeri",
+    desc: "IEC 60534-2-1 Madde 9.2 doğrudan kütlesel debi formülü ile hesaplanan teorik Cv değeridir.",
+  },
+  Kv_IEC_direct_mass: {
+    symbol: "Kv (Doğrudan Kütle)",
+    name: "IEC Doğrudan Kütlesel Kv Değeri",
+    formula: "Kv = Cv / 1.156",
+    desc: "Metrik sistemdeki eşdeğer vana debi katsayısıdır [m³/h @ 1 bar ΔP].",
+  },
+  "W_kg/h": {
+    symbol: "W [kg/h]",
+    name: "Kütlesel Buhar/Gaz Debisi",
+    desc: "Buhar veya gaz akışkanın saatte geçen net kütlesel miktarıdır [kg/h].",
+  },
+  pipe_in_m_s: {
+    symbol: "v_giriş [m/s]",
+    name: "Giriş Boru Hattı Akış Hızı",
+    formula: "v = Q / (π · D_in² / 4)",
+    desc: "Vana öncesi boru hattındaki ortalama akışkan hızıdır. Sıvıda < 3 m/s, gazda < 30 m/s önerilir.",
+  },
+  pipe_out_m_s: {
+    symbol: "v_çıkış [m/s]",
+    name: "Çıkış Boru Hattı Akış Hızı",
+    formula: "v = Q / (π · D_out² / 4)",
+    desc: "Vana sonrası boru hattındaki ortalama akış hızıdır. Aşırı hız titreşim, gürültü ve erozyona yol açar.",
+  },
+  mach_outlet: {
+    symbol: "Mach_çıkış",
+    name: "Çıkış Mach Sayısı",
+    formula: "Mach = v_çıkış / c_ses",
+    desc: "Vana çıkışındaki gaz akış hızının yerel ses hızına oranıdır. Akustik yorulmayı önlemek için Mach < 0.30 tutulmalıdır.",
+  },
+  is_choked: {
+    symbol: "Boğulma Durumu",
+    name: "Kritik Boğulmuş Akış (Choked)",
+    desc: "Vana vena contracta kesitinde kritik boğulma sınırına (gazda Mach 1, sıvıda buharlaşma sınırına) ulaşıldığını ve debinin doyuma ulaştığını gösterir.",
+  },
+  acoustic_fatigue_risk: {
+    symbol: "AIV Riski",
+    name: "Akustik İndüklü Titreşim Riski",
+    desc: "Yüksek ses gücünün (> 155 dB) boru cidarında yüksek frekanslı titreşim ve yorulma kırılması yaratma riskidir.",
+  },
+  selected: {
+    symbol: "Aktüatör Tipi",
+    name: "Seçilen Aktüatör Konfigürasyonu",
+    desc: "Vana strok kuvveti ve proses basınç düşüşüne göre seçilen pnömatik diyafram veya pistonlu aktüatördür.",
+  },
+  model: {
+    symbol: "Model",
+    name: "Aktüatör Model Kodu",
+    desc: "Seçilen aktüatörün üretici katalog model kodu ve tip tanımıdır.",
+  },
+  thrust_n: {
+    symbol: "F_üretilen [N]",
+    name: "Aktüatörün Ürettiği Net İtme Kuvveti",
+    formula: "F = P_hava · A_diyafram - F_yay",
+    desc: "Hava besleme basıncında aktüatörün mile uygulayabildiği net kuvvet (Newton).",
+  },
+  required_n: {
+    symbol: "F_gerekli [N]",
+    name: "Vana İçin Gerekli Kapama Kuvveti",
+    formula: "F_req = F_sit + F_dengesiz + F_salmastra",
+    desc: "Vananın kaçak sınıfına uygun şekilde tam kapanması ve proses basıncına direnmesi için gereken minimum kuvvettir.",
+  },
+  thrust_margin_pct: {
+    symbol: "Kuvvet Marjı [%]",
+    name: "Aktüatör Emniyet / Güvenlik Payı",
+    formula: "((F_üretilen / F_gerekli) - 1) × 100",
+    desc: "Aktüatör kuvvetinin gereken minimum kuvvete göre yüzde güvenlik marjıdır (en az %20-30 önerilir).",
+  },
+  stroke_ok: {
+    symbol: "Strok Uygunluğu",
+    name: "Strok Uzunluğu Uygunluğu",
+    desc: "Aktüatörün maksimum hareket mesafesinin vananın tam strok açıklığına yetip yetmediğini belirtir.",
+  },
+  details: {
+    symbol: "Aktüatör Detayı",
+    name: "Aktüatör Boyutlandırma Detayı",
+    desc: "Aktüatörün yay aralığı, hava basıncı ve strok parametrelerinin teknik özetidir.",
+  },
+};
+
+function getParamInfo(key) {
+  if (PARAMETER_INFOS[key]) return PARAMETER_INFOS[key];
+  const normalizedKey = key.replace(/\//g, "_");
+  if (PARAMETER_INFOS[normalizedKey]) return PARAMETER_INFOS[normalizedKey];
+  const lowerKey = key.toLowerCase();
+  if (PARAMETER_INFOS[lowerKey]) return PARAMETER_INFOS[lowerKey];
+  return {
+    symbol: key,
+    name: key.replace(/_/g, " "),
+    desc: "Bu parametre kontrol vanası IEC 60534 / ISA-75 boyutlandırma motoru tarafından hesaplanan ara değer veya kontrol metriğidir.",
+  };
+}
+
+function showParamInfo(key, info) {
+  if (!info) return;
+  const modal = $("info-modal");
+  if (!modal) return;
+  $("info-modal-title").textContent = info.name || key;
+  $("info-modal-symbol").textContent = info.symbol || key;
+  $("info-modal-key").textContent = `Kod: ${key}`;
+
+  const formulaWrap = $("info-modal-formula-wrap");
+  const formulaEl = $("info-modal-formula");
+  if (info.formula) {
+    formulaWrap.hidden = false;
+    formulaEl.textContent = info.formula;
+  } else {
+    formulaWrap.hidden = true;
+    formulaEl.textContent = "";
+  }
+  $("info-modal-desc").textContent = info.desc || "";
+
+  if (typeof modal.showModal === "function") {
+    modal.showModal();
+  } else {
+    modal.hidden = false;
+  }
+}
+
+function setupInfoModal() {
+  const modal = $("info-modal");
+  if (!modal) return;
+  $("info-modal-close")?.addEventListener("click", () => modal.close());
+  $("info-modal-ok")?.addEventListener("click", () => modal.close());
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) modal.close();
+  });
+}
+
 function appendTable(container, title, entries) {
   if (!entries.length) return;
   const section = document.createElement("div");
@@ -950,8 +1457,47 @@ function appendTable(container, title, entries) {
   for (const [key, value] of entries) {
     const row = document.createElement("tr");
     const th = document.createElement("th");
-    th.textContent = key;
     const td = document.createElement("td");
+
+    const info = getParamInfo(key);
+    th.className = "has-info";
+    const tooltip = [
+      info.name,
+      info.formula ? `Formül: ${info.formula}` : null,
+      info.desc,
+    ].filter(Boolean).join("\n\n");
+
+    const headerDiv = document.createElement("div");
+    headerDiv.className = "param-cell-header";
+
+    const symbolSpan = document.createElement("span");
+    symbolSpan.className = "param-symbol";
+    symbolSpan.textContent = info.symbol || key;
+
+    const infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.className = "info-icon-btn";
+    infoBtn.setAttribute("aria-label", `${info.name} açıklaması`);
+    infoBtn.title = tooltip;
+    infoBtn.textContent = "ℹ️";
+
+    infoBtn.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      showParamInfo(key, info);
+    });
+
+    th.addEventListener("click", () => {
+      showParamInfo(key, info);
+    });
+
+    headerDiv.append(symbolSpan, infoBtn);
+
+    const subDiv = document.createElement("div");
+    subDiv.className = "param-name-sub";
+    subDiv.textContent = info.name;
+
+    th.append(headerDiv, subDiv);
+
     td.textContent = value;
     row.append(th, td);
     tbody.append(row);
@@ -1031,6 +1577,42 @@ function renderDetails(data) {
 }
 
 function renderDiagnostics(data) {
+  const tpCard = $("diag-two-phase");
+  const tp = data.two_phase_analysis;
+  if (tpCard) {
+    if (tp && tp.enabled) {
+      tpCard.hidden = false;
+      const tpBadge = $("two-phase-badge");
+      if (tpBadge) {
+        const isSevere = Boolean(tp.is_flashing || tp.is_condensing || tp.is_wet || (tp.sigma && tp.sigma < 0.5));
+        tpBadge.textContent = isSevere ? "⚡ 2 Fazlı Rejim (Aktif)" : "⚡ 2 Faz Analizi (Güvenli)";
+        tpBadge.className = isSevere ? "diag-badge warn" : "diag-badge ok";
+      }
+      $("two-phase-title").textContent = `İki Fazlı Akış Analizi · ${tp.service === "liquid" ? "Sıvı/Buhar (HEM)" : tp.service === "gas" ? "Gaz / J-T Yoğuşması" : "Buhar Genleşmesi"}`;
+      $("two-phase-desc").textContent = `${tp.regime}. ${tp.cv_two_phase ? `Tek fazlı Cv: ${display(tp.cv_single_phase, 2)} → İki fazlı gereken Cv: ${display(tp.cv_two_phase, 2)} (artış: %${display(tp.cv_increase_pct, 1)}).` : ""}`;
+
+      $("tp-regime").textContent = tp.regime || "—";
+      $("tp-quality").textContent = tp.quality_x !== undefined && tp.quality_x !== null ? `${display(tp.quality_x, 4)} (%${display(tp.quality_x * 100, 1)})` : "—";
+      $("tp-density").textContent = tp.rho_tp_kg_m3 ? `${display(tp.rho_tp_kg_m3, 2)} kg/m³` : "—";
+      $("tp-cv").textContent = tp.cv_two_phase ? `${display(tp.cv_two_phase, 2)}` : (tp.cv_single_phase ? `${display(tp.cv_single_phase, 2)}` : "—");
+      $("tp-velocity").textContent = tp.v_out_tp_m_s ? `${display(tp.v_out_tp_m_s, 2)} m/s` : "—";
+      $("tp-limit").textContent = tp.v_limit_api14e_m_s ? `${display(tp.v_limit_api14e_m_s, 2)} m/s` : "—";
+
+      const recsList = $("two-phase-recs");
+      if (recsList) {
+        recsList.replaceChildren();
+        const items = tp.recommendations || [];
+        for (const item of items) {
+          const li = document.createElement("li");
+          li.textContent = item;
+          recsList.append(li);
+        }
+      }
+    } else {
+      tpCard.hidden = true;
+    }
+  }
+
   const splitCard = $("diag-split-range");
   const turndown = Number(data.turndown_ratio || (data.cv_ratio ? 1 / data.cv_ratio : 1));
   const needsSplit = Boolean(data.split_range || data.split_range_recommendation || turndown > 50);
@@ -1853,6 +2435,8 @@ function setupEvents() {
     }
     updateUnitLabels(state.service);
     if (state.service === "gas") updateGasProperties();
+    if (state.service === "steam") checkSteamPhase();
+    if (state.service === "liquid") refreshLiquidPresetIfAuto();
     updateDeltaPBadges();
     updatePipeRatioPill();
     scheduleRecalc();
@@ -1913,6 +2497,8 @@ function setupEvents() {
   $("liquid-preset").addEventListener("change", applyLiquidPreset);
   $("liquid-p1").addEventListener("input", refreshLiquidPresetIfAuto);
   $("liquid-temperature").addEventListener("input", refreshLiquidPresetIfAuto);
+  $("steam-p1")?.addEventListener("input", checkSteamPhase);
+  $("steam-temperature")?.addEventListener("input", checkSteamPhase);
   for (const id of ["liquid-density", "liquid-viscosity", "liquid-pv", "liquid-pc"]) {
     $(id).addEventListener("input", () => {
       state.liquidPresetAuto = false;
@@ -1979,6 +2565,15 @@ function setupEvents() {
   $("gas-p1").addEventListener("input", updateGasProperties);
   $("gas-temperature").addEventListener("input", updateGasProperties);
   $("calculate").addEventListener("click", () => calculate(false));
+  const btnAdvance = $("btn-advance-calc");
+  if (btnAdvance) {
+    btnAdvance.addEventListener("click", () => {
+      state.advanceTwoPhase = !state.advanceTwoPhase;
+      btnAdvance.setAttribute("aria-pressed", String(state.advanceTwoPhase));
+      btnAdvance.classList.toggle("active", state.advanceTwoPhase);
+      calculate(false);
+    });
+  }
   $("liquid-pipe-sync")?.addEventListener("click", () => syncPipeToValve("liquid"));
   $("gas-pipe-sync")?.addEventListener("click", () => syncPipeToValve("gas"));
   $("steam-pipe-sync")?.addEventListener("click", () => syncPipeToValve("steam"));
@@ -2571,6 +3166,7 @@ function setupShortcuts() {
       $("report-modal")?.close();
       $("converter-modal")?.close();
       $("shortcuts-modal")?.close();
+      $("info-modal")?.close();
       return;
     }
     if (document.activeElement && ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) {
@@ -2611,6 +3207,7 @@ async function init() {
   setupPresetFilters();
   setupShortcuts();
   setupUnitConverter();
+  setupInfoModal();
   registerServiceWorker();
 
   $("btn-theme-toggle")?.addEventListener("click", toggleTheme);

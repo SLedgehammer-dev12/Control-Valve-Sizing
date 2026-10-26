@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project_name": "control-valve-sizing",
-  "version": "3.5.1",
-  "indexed_at": "2026-10-21T20:50:39.011728+00:00",
+  "version": "3.5.2",
+  "indexed_at": "2026-10-26T20:20:00.000000+00:00",
   "staleness_threshold_days": 7,
   "freshness_score": 100,
   "metrics": {
-    "test_count": 666,
+    "test_count": 765,
     "test_coverage_percent": 95.32,
     "industrial_scenarios_count": 52,
     "industrial_scenarios_pass_rate": 100.0,

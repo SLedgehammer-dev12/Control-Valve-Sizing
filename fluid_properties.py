@@ -11,6 +11,7 @@ All property-lookup functions implement a cascade fallback chain:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass
@@ -509,6 +510,196 @@ def evaluate_gas_mixture(
 
 
 # ---------------------------------------------------------------------------
+# Phase transition & transformation diagnostics (gas condensation / liquid boiling)
+# ---------------------------------------------------------------------------
+def _pure_gas_sat(fluid: str, p_pa: float) -> dict[str, Any]:
+    try:
+        pc = CP.PropsSI("PCRIT", fluid)
+        if p_pa >= pc:
+            tc = CP.PropsSI("TCRIT", fluid) - 273.15
+            return {"t_sat_c": tc, "t_bubble_c": tc, "t_dew_c": tc, "is_supercritical": True, "pc_bar_a": pc / 1e5}
+        tsat = CP.PropsSI("T", "P", p_pa, "Q", 1.0, fluid) - 273.15
+        return {"t_sat_c": tsat, "t_bubble_c": tsat, "t_dew_c": tsat, "is_supercritical": False, "pc_bar_a": pc / 1e5}
+    except Exception:
+        return {"t_sat_c": None, "t_bubble_c": None, "t_dew_c": None, "is_supercritical": False, "pc_bar_a": None}
+
+
+def _mixture_gas_sat(mix_str: str, fracs: list[float], p_pa: float, dom_comp: str) -> dict[str, Any]:
+    try:
+        state = CP.AbstractState("HEOS", mix_str)
+        state.set_mole_fractions(fracs)
+        state.update(CP.PQ_INPUTS, p_pa, 0)
+        tb = state.T() - 273.15
+        state.update(CP.PQ_INPUTS, p_pa, 1)
+        td = state.T() - 273.15
+        return {"t_sat_c": td, "t_bubble_c": tb, "t_dew_c": td, "is_supercritical": False, "pc_bar_a": None}
+    except Exception:
+        return _pure_gas_sat(dom_comp, p_pa)
+
+
+def get_gas_saturation_info(
+    gas_preset_or_fluid: str,
+    pressure_bar_a: float,
+    composition: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Calculate saturation / bubble / dew point temperatures for gas preset or composition."""
+    from config import GAS_PRESETS
+
+    p_pa = max(float(pressure_bar_a) * 1e5, 1000.0)
+    if composition:
+        cleaned = _clean_rows(composition)
+        if len(cleaned) == 1:
+            return _pure_gas_sat(cleaned[0]["component"], p_pa)
+        mix_str = "&".join(c["component"] for c in cleaned)
+        fracs = [c["fraction_pct"] / 100.0 for c in cleaned]
+        return _mixture_gas_sat(mix_str, fracs, p_pa, cleaned[0]["component"])
+
+    if gas_preset_or_fluid in GAS_PRESETS:
+        comps = GAS_PRESETS[gas_preset_or_fluid]["components"]
+        if len(comps) == 1:
+            return _pure_gas_sat(comps[0]["component"], p_pa)
+        mix_str = "&".join(c["component"] for c in comps)
+        fracs = [c["fraction_pct"] / 100.0 for c in comps]
+        return _mixture_gas_sat(mix_str, fracs, p_pa, comps[0]["component"])
+
+    return _pure_gas_sat(canonical_gas_component(gas_preset_or_fluid), p_pa)
+
+
+def evaluate_gas_phase_state(
+    gas_preset: str | None,
+    pressure_bar_a: float,
+    temperature_c: float,
+    composition: list[dict[str, Any]] | None = None,
+    composition_basis: str = "molar",
+    gas_model: str = "auto",
+) -> dict[str, Any]:
+    """Diagnose thermodynamic phase of gas stream, detect liquefaction/condensation, and provide transition guidance."""
+    from config import GAS_PRESETS
+
+    name = gas_preset or "Doğal Gaz"
+    comp_rows = composition
+    if comp_rows is None and name in GAS_PRESETS:
+        comp_rows = GAS_PRESETS[name]["components"]
+
+    summary = None
+    if comp_rows:
+        with contextlib.suppress(Exception):
+            summary = evaluate_gas_mixture(comp_rows, composition_basis, pressure_bar_a, temperature_c, gas_model)
+
+    phase = summary.phase if summary and summary.phase else "gas"
+    density = summary.density_kg_m3 if summary else None
+    z = summary.z if summary else 1.0
+
+    sat_info = get_gas_saturation_info(name, pressure_bar_a, composition=composition)
+    t_sat = sat_info.get("t_sat_c")
+    t_bubble = sat_info.get("t_bubble_c")
+    t_dew = sat_info.get("t_dew_c")
+
+    if t_bubble is not None and temperature_c <= t_bubble + 0.1:
+        is_condensed = True
+        is_two_phase = False
+    elif t_dew is not None and t_bubble is not None and t_bubble < temperature_c < t_dew:
+        is_condensed = False
+        is_two_phase = True
+    elif phase in ("liquid", "supercritical_liquid"):
+        is_condensed = True
+        is_two_phase = False
+    elif phase == "two_phase":
+        is_condensed = False
+        is_two_phase = True
+    else:
+        is_condensed = False
+        is_two_phase = False
+
+    is_phase_mismatch = is_condensed or is_two_phase
+    is_lng = name in ("Doğal Gaz", "Metan", "NaturalGas", "Methane")
+    is_lpg = name in ("Propan", "Propane", "Bütan", "Butane")
+
+    if is_condensed:
+        phase_label_tr = "Sıvı (LNG / Yoğuşmuş)" if is_lng else ("Sıvı (LPG / Yoğuşmuş)" if is_lpg else "Sıvı (Yoğuşmuş Gaz)")
+        sat_ref = f"{t_sat:.1f} °C" if t_sat is not None else "doyma sıcaklığının"
+        dens_str = f" (Yoğunluk: {density:.1f} kg/m³)" if density else ""
+        warning_tr = (
+            f"⚠️ Faz Dönüşümü: Girilen sıcaklıkta ({temperature_c:.1f} °C) ve {pressure_bar_a:.2f} bar(a) basınçta "
+            f"gaz yoğuşarak {phase_label_tr} fazına geçmiştir{dens_str}. Doyma eşiği: {sat_ref}. "
+            f"IEC gaz debi formülleri sıvı akışa uygulanamaz; Sıvı Servis sekmesine geçilmelidir."
+        )
+        target_preset = "LNG" if is_lng else ("Propane" if is_lpg else None)
+        action_label = "💧 Sıvı Servisine (LNG) Aktar" if is_lng else (
+            "💧 Sıvı Servisine (Propan) Aktar" if is_lpg else "💧 Sıvı Servisine Aktar"
+        )
+        suggested_action = {
+            "target_service": "liquid",
+            "preset": target_preset,
+            "density_kg_m3": round(density, 1) if density else 430.0,
+            "label": action_label,
+        }
+    elif is_two_phase:
+        phase_label_tr = "İki Fazlı (Kısmi Yoğuşma / Damlacık)"
+        t_range = f"({t_bubble:.1f} °C < T < {t_dew:.1f} °C)" if (t_bubble is not None and t_dew is not None) else ""
+        warning_tr = (
+            f"⚠️ İki Fazlı Akış Uyarısı: Akışkan doyma/yoğuşma bölgesindedir {t_range}. "
+            f"Oluşan sıvı damlacıkları vana triminde ve boru hattında aşırı erozyon ve titreşime neden olabilir."
+        )
+        suggested_action = None
+    elif sat_info.get("is_supercritical"):
+        phase_label_tr = "Süperkritik Akışkan"
+        warning_tr = None
+        suggested_action = None
+    else:
+        phase_label_tr = "Gaz (Tek Fazlı)"
+        warning_tr = None
+        suggested_action = None
+
+    return {
+        "phase": phase,
+        "phase_label_tr": phase_label_tr,
+        "is_condensed": is_condensed,
+        "is_two_phase": is_two_phase,
+        "is_phase_mismatch": is_phase_mismatch,
+        "t_sat_c": t_sat,
+        "t_bubble_c": t_bubble,
+        "t_dew_c": t_dew,
+        "density_kg_m3": density,
+        "z": z,
+        "warning_tr": warning_tr,
+        "suggested_action": suggested_action,
+    }
+
+
+def evaluate_liquid_phase_state(
+    p1_bar_a: float,
+    vapor_pressure_bar_a: float,
+    temperature_c: float | None = None,
+) -> dict[str, Any]:
+    """Diagnose liquid phase condition, detect boiling/vaporization at inlet."""
+    p1 = float(p1_bar_a)
+    pv = float(vapor_pressure_bar_a)
+    is_boiled = pv >= p1
+    if is_boiled:
+        temp_note = f" ({temperature_c:.1f} °C)" if temperature_c is not None else ""
+        warning_tr = (
+            f"⚠️ Faz Uyarısı: Girilen sıcaklıkta{temp_note} buhar basıncı ({pv:.3f} bar) giriş basıncına ({p1:.3f} bar) "
+            "eşit veya büyüktür; akışkan vanaya girmeden kaynamıştır. "
+            "Tek fazlı sıvı formülleri geçersizdir; Buhar veya Gaz Servis sekmesini kullanınız."
+        )
+        suggested_action = {
+            "target_service": "steam",
+            "label": "♨️ Buhar Servisine Aktar",
+        }
+    else:
+        warning_tr = None
+        suggested_action = None
+
+    return {
+        "is_boiled_at_inlet": is_boiled,
+        "is_phase_mismatch": is_boiled,
+        "warning_tr": warning_tr,
+        "suggested_action": suggested_action,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pure fluid state — cascaded: CoolProp → thermo → chemicals ideal gas → ideal gas
 # ---------------------------------------------------------------------------
 # iapws integration — IAPWS-IF97 standard for water/steam
@@ -757,6 +948,9 @@ def _evaluate_liquid_preset_cached(name: str, p_rounded: float, t_rounded: float
     if fluid is None:
         return tuple(result.items())
     try:
+        with contextlib.suppress(Exception):
+            vp = float(CP.PropsSI("P", "T", t_rounded + 273.15, "Q", 0, fluid) / 1e5)
+            result["vapor_pressure_bar_a"] = vp
         phase = _phase_name(int(CP.PropsSI("PHASE", "P", p_rounded * 1e5, "T", t_rounded + 273.15, fluid)))
         if phase not in {"liquid", "supercritical_liquid"}:
             result["warning"] = "Seçilen P/T'de akışkan sıvı fazında değil; preset sabit değerleri kullanıldı."
@@ -776,7 +970,10 @@ def _evaluate_liquid_preset_cached(name: str, p_rounded: float, t_rounded: float
 
 def evaluate_liquid_preset(name: str, pressure_bar_a: float, temperature_c: float) -> dict[str, Any]:
     """Return preset properties, corrected with CoolProp when P/T are in the liquid phase."""
-    return dict(_evaluate_liquid_preset_cached(name, round(pressure_bar_a, 4), round(temperature_c, 3)))
+    res = dict(_evaluate_liquid_preset_cached(name, round(pressure_bar_a, 4), round(temperature_c, 3)))
+    pv = float(res.get("vapor_pressure_bar_a", 0.0) or 0.0)
+    res["phase_diagnostic"] = evaluate_liquid_phase_state(pressure_bar_a, pv, temperature_c)
+    return res
 
 
 @lru_cache(maxsize=128)
@@ -812,36 +1009,287 @@ def evaluate_steam_state(pressure_bar_a: float, temperature_c: float) -> dict[st
     delta_t_sh = float(temperature_c) - t_sat
     warnings: list[str] = []
 
+    suggested_action = None
     if delta_t_sh > 2.0:
         phase = "superheated"
-        phase_label = f"K\u0131zg\u0131n Buhar (\u0394T = +{delta_t_sh:.1f} \u00b0C)"
+        phase_label = f"Kızgın Buhar (ΔT = +{delta_t_sh:.1f} °C)"
         if temperature_c > 400.0:
             warnings.append(
-                f"Y\u00fcksek s\u0131cakl\u0131k ({temperature_c:.1f} \u00b0C): Ala\u015f\u0131ml\u0131 g\u00f6vde (WC6/WC9) "
-                f"ve y\u00fcksek s\u0131cakl\u0131k grafit salmastra zorunludur."
+                f"Yüksek sıcaklık ({temperature_c:.1f} °C): Alaşımlı gövde (WC6/WC9) "
+                f"ve yüksek sıcaklık grafit salmastra zorunludur."
             )
     elif delta_t_sh < -2.0:
         phase = "wet_steam"
-        phase_label = f"\u0130slak Buhar / \u0130ki Fazl\u0131 (\u0394T = {delta_t_sh:.1f} \u00b0C)"
+        phase_label = f"Islak Buhar / İki Fazlı (ΔT = {delta_t_sh:.1f} °C)"
         warnings.append(
-            f"\u0130slak buhar uyar\u0131s\u0131: S\u0131cakl\u0131k doyma de\u011ferinin ({t_sat:.1f} \u00b0C) alt\u0131nda. "
-            f"Y\u00fcksek h\u0131zl\u0131 s\u0131v\u0131 damlac\u0131klar\u0131 vana triminde ve boruda a\u011f\u0131r erozyona yol a\u00e7ar!"
+            f"Islak buhar uyarısı: Sıcaklık doyma değerinin ({t_sat:.1f} °C) altında. "
+            f"Yüksek hızlı sıvı damlacıkları vana triminde ve boruda ağır erozyona yol açar!"
         )
+        if delta_t_sh < -10.0:
+            warnings.append(
+                f"⚠️ Faz Uyarısı: Sıcaklık ({temperature_c:.1f} °C) doyma değerinin ({t_sat:.1f} °C) çok altında; "
+                "akışkan sıvı su fazına yoğuşmuştur. Sıvı Servis sekmesini kullanınız veya sıcaklığı artırınız."
+            )
+            suggested_action = {
+                "target_service": "liquid",
+                "preset": "Water",
+                "label": "💧 Sıvı Servisine (Su) Aktar",
+            }
     else:
         phase = "saturated"
-        phase_label = f"Doymu\u015f Buhar (\u0394T = {delta_t_sh:+.1f} \u00b0C)"
+        phase_label = f"Doymuş Buhar (ΔT = {delta_t_sh:+.1f} °C)"
         warnings.append(
-            "Doymu\u015f buhar: Bas\u0131n\u00e7 d\u00fc\u015f\u00fc\u015f\u00fc k\u0131smi yo\u011fu\u015fmaya neden olabilir. "
-            "Sertle\u015ftirilmi\u015f trim (Stellite / CoCr) kullan\u0131m\u0131 tavsiye edilir."
+            "Doymuş buhar: Basınç düşüşü kısmi yoğuşmaya neden olabilir. "
+            "Sertleştirilmiş trim (Stellite / CoCr) kullanımı tavsiye edilir."
         )
 
     return {
         "phase": phase,
         "phase_label": phase_label,
+        "phase_label_tr": phase_label,
         "t_sat_c": t_sat,
         "delta_t_superheat": delta_t_sh,
-        "is_wet": phase == "wet_steam",
+        "is_wet": phase in ("wet_steam", "subcooled_liquid") or delta_t_sh < -2.0,
+        "is_subcooled_liquid": delta_t_sh < -10.0,
         "is_superheated": phase == "superheated",
+        "is_phase_mismatch": phase in ("wet_steam", "subcooled_liquid") or delta_t_sh < -2.0,
         "warnings": warnings,
+        "suggested_action": suggested_action,
     }
+
+
+# ---------------------------------------------------------------------------
+# Multicomponent hydrocarbon VLE PT-Flash (Peng-Robinson + Rachford-Rice)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class FlashResult:
+    """Thermodynamic vapor-liquid equilibrium flash result."""
+
+    temperature_c: float
+    pressure_bar_a: float
+    beta_vapor_mole_fraction: float
+    liquid_mole_fraction: float
+    vapor_mass_fraction: float
+    liquid_mass_fraction: float
+    phase: str
+    phase_label_tr: str
+    rho_liquid_kg_m3: float | None
+    rho_vapor_kg_m3: float | None
+    rho_tp_kg_m3: float
+    liquid_mole_fractions: dict[str, float]
+    vapor_mole_fractions: dict[str, float]
+    feed_mole_fractions: dict[str, float]
+    molecular_weight_feed: float
+    molecular_weight_liquid: float | None
+    molecular_weight_vapor: float | None
+    method_used: str
+
+
+HYDROCARBON_CRITICAL_CONSTANTS: dict[str, dict[str, float]] = {
+    "Methane": {"tc_k": 190.564, "pc_pa": 45.992e5, "omega": 0.0115, "mw": 16.0425, "rho_l_std": 422.36},
+    "Ethane": {"tc_k": 305.32, "pc_pa": 48.72e5, "omega": 0.0995, "mw": 30.07, "rho_l_std": 546.0},
+    "Propane": {"tc_k": 369.83, "pc_pa": 42.48e5, "omega": 0.1523, "mw": 44.096, "rho_l_std": 582.0},
+    "Butane": {"tc_k": 425.12, "pc_pa": 37.96e5, "omega": 0.2002, "mw": 58.122, "rho_l_std": 601.0},
+    "Nitrogen": {"tc_k": 126.192, "pc_pa": 33.958e5, "omega": 0.0372, "mw": 28.0134, "rho_l_std": 808.0},
+    "CarbonDioxide": {"tc_k": 304.128, "pc_pa": 73.773e5, "omega": 0.2239, "mw": 44.01, "rho_l_std": 1032.0},
+    "Hydrogen": {"tc_k": 33.145, "pc_pa": 12.964e5, "omega": -0.219, "mw": 2.016, "rho_l_std": 70.8},
+}
+
+_THERMO_CANONICAL_NAMES: dict[str, str] = {
+    "carbondioxide": "carbon dioxide",
+    "co2": "carbon dioxide",
+    "karbondioksit": "carbon dioxide",
+    "methane": "methane",
+    "metan": "methane",
+    "ethane": "ethane",
+    "etan": "ethane",
+    "propane": "propane",
+    "propan": "propane",
+    "butane": "butane",
+    "bütan": "butane",
+    "nitrogen": "nitrogen",
+    "azot": "nitrogen",
+    "hydrogen": "hydrogen",
+    "hidrojen": "hydrogen",
+    "oxygen": "oxygen",
+    "oksijen": "oxygen",
+    "argon": "argon",
+    "helium": "helium",
+    "water": "water",
+    "su": "water",
+}
+
+
+def _wilson_k_values(components: list[str], pressure_pa: float, temperature_k: float) -> list[float]:
+    ks = []
+    for comp in components:
+        props = HYDROCARBON_CRITICAL_CONSTANTS.get(comp)
+        if props:
+            tc = props["tc_k"]
+            pc = props["pc_pa"]
+            omega = props["omega"]
+        else:
+            tc = get_chemical_property(comp, "tc_k") or 200.0
+            pc = get_chemical_property(comp, "pc_pa") or 45e5
+            omega = 0.1
+        k_val = (pc / pressure_pa) * math.exp(5.373 * (1.0 + omega) * (1.0 - tc / temperature_k))
+        ks.append(max(k_val, 1e-12))
+    return ks
+
+
+def _solve_rachford_rice(zs: list[float], ks: list[float]) -> tuple[float, list[float], list[float]]:
+    try:
+        from chemicals.rachford_rice import Rachford_Rice_solution
+        beta, xs, ys = Rachford_Rice_solution(zs=zs, Ks=ks)
+        beta = max(0.0, min(1.0, float(beta)))
+        return beta, [float(x) for x in xs], [float(y) for y in ys]
+    except Exception:
+        pass
+
+    sum_zk = sum(z * k for z, k in zip(zs, ks, strict=False))
+    if sum_zk <= 1.0:
+        return 0.0, list(zs), [z * k / sum_zk for z, k in zip(zs, ks, strict=False)]
+    sum_z_over_k = sum(z / k for z, k in zip(zs, ks, strict=False))
+    if sum_z_over_k <= 1.0:
+        return 1.0, [z / k / sum_z_over_k for z, k in zip(zs, ks, strict=False)], list(zs)
+
+    low, high = 0.0, 1.0
+    for _ in range(60):
+        mid = 0.5 * (low + high)
+        f_mid = sum(z * (k - 1.0) / (1.0 + mid * (k - 1.0)) for z, k in zip(zs, ks, strict=False))
+        if abs(f_mid) < 1e-9:
+            break
+        if f_mid > 0:
+            low = mid
+        else:
+            high = mid
+    beta = 0.5 * (low + high)
+    xs = [z / (1.0 + beta * (k - 1.0)) for z, k in zip(zs, ks, strict=False)]
+    total_x = sum(xs) or 1.0
+    xs = [x / total_x for x in xs]
+    ys = [x * k for x, k in zip(xs, ks, strict=False)]
+    total_y = sum(ys) or 1.0
+    ys = [y / total_y for y in ys]
+    return beta, xs, ys
+
+
+def flash_multicomponent_mixture(
+    composition: list[dict[str, Any]] | str,
+    pressure_bar_a: float,
+    temperature_c: float,
+    composition_basis: str = "molar",
+) -> FlashResult:
+    """Calculate multicomponent VLE PT-flash with Peng-Robinson EOS and Rachford-Rice."""
+    from config import GAS_PRESETS
+
+    t_k = temperature_c + 273.15
+    p_pa = max(float(pressure_bar_a) * 1e5, 1000.0)
+
+    if isinstance(composition, str):
+        rows = (
+            GAS_PRESETS[composition]["components"]
+            if composition in GAS_PRESETS
+            else [{"component": composition, "fraction_pct": 100.0}]
+        )
+    else:
+        rows = composition
+
+    summary = normalize_composition(rows, composition_basis)
+    comps = list(summary.mole_fractions.keys())
+    zs = [summary.mole_fractions[c] for c in comps]
+    mw_feed = summary.average_molecular_weight
+
+    beta = None
+    xs, ys = None, None
+    rho_l, rho_v = None, None
+    method_used = "unknown"
+
+    if _HAS_THERMO:
+        try:
+            from thermo import Mixture as ThermoMixture
+            chem_ids = [_THERMO_CANONICAL_NAMES.get(canonical_gas_component(c).lower(), canonical_gas_component(c).lower()) for c in comps]
+            mix = ThermoMixture(IDs=chem_ids, zs=zs, T=t_k, P=p_pa)
+            vf = getattr(mix, "V_over_F", None)
+            if vf is None:
+                vf = getattr(mix, "VF", None)
+            if vf is not None:
+                beta = max(0.0, min(1.0, float(vf)))
+                rho_l = getattr(mix, "rhol", None) or getattr(mix, "rholmass", None)
+                rho_v = getattr(mix, "rhog", None) or getattr(mix, "rhogmass", None)
+                xs = getattr(mix, "xs", None)
+                ys = getattr(mix, "ys", None)
+                method_used = "thermo_pr"
+        except Exception:
+            beta = None
+
+    if beta is None:
+        ks = _wilson_k_values(comps, p_pa, t_k)
+        beta, xs, ys = _solve_rachford_rice(zs, ks)
+        method_used = "rachford_rice_wilson"
+
+    if xs is None or len(xs) != len(comps):
+        xs = list(zs)
+    if ys is None or len(ys) != len(comps):
+        ys = list(zs)
+
+    mws = [get_molecular_weight(c) for c in comps]
+    mw_l = sum(x * mw for x, mw in zip(xs, mws, strict=False)) if beta < 1.0 else None
+    mw_v = sum(y * mw for y, mw in zip(ys, mws, strict=False)) if beta > 0.0 else None
+
+    if beta <= 1e-6:
+        beta = 0.0
+        w_v = 0.0
+        w_l = 1.0
+        phase = "liquid"
+        phase_label_tr = "Sıvı (LNG / Yoğuşmuş)"
+    elif beta >= 1.0 - 1e-6:
+        beta = 1.0
+        w_v = 1.0
+        w_l = 0.0
+        phase = "gas"
+        phase_label_tr = "Gaz (Tek Fazlı)"
+    else:
+        w_v = (beta * (mw_v or mw_feed)) / mw_feed
+        w_v = max(0.0, min(1.0, w_v))
+        w_l = 1.0 - w_v
+        phase = "two_phase"
+        phase_label_tr = f"İki Fazlı (%{(1.0 - beta) * 100.0:.1f} Yoğuşma)"
+
+    if rho_v is None:
+        rho_v = (p_pa * (mw_v or mw_feed)) / (8314.0 * t_k)
+
+    if rho_l is None:
+        rho_l_weighted = sum(
+            x * HYDROCARBON_CRITICAL_CONSTANTS.get(c, {}).get("rho_l_std", 500.0)
+            for x, c in zip(xs, comps, strict=False)
+        )
+        rho_l = max(350.0, rho_l_weighted)
+
+    if phase == "liquid":
+        rho_tp = float(rho_l)
+    elif phase == "gas":
+        rho_tp = float(rho_v)
+    else:
+        rho_tp = 1.0 / (w_v / float(rho_v) + w_l / float(rho_l))
+
+    return FlashResult(
+        temperature_c=temperature_c,
+        pressure_bar_a=pressure_bar_a,
+        beta_vapor_mole_fraction=round(beta, 6),
+        liquid_mole_fraction=round(1.0 - beta, 6),
+        vapor_mass_fraction=round(w_v, 6),
+        liquid_mass_fraction=round(w_l, 6),
+        phase=phase,
+        phase_label_tr=phase_label_tr,
+        rho_liquid_kg_m3=round(float(rho_l), 2) if beta < 1.0 else None,
+        rho_vapor_kg_m3=round(float(rho_v), 3) if beta > 0.0 else None,
+        rho_tp_kg_m3=round(float(rho_tp), 2),
+        liquid_mole_fractions=dict(zip(comps, [round(x, 6) for x in xs], strict=False)),
+        vapor_mole_fractions=dict(zip(comps, [round(y, 6) for y in ys], strict=False)),
+        feed_mole_fractions=dict(zip(comps, [round(z, 6) for z in zs], strict=False)),
+        molecular_weight_feed=round(mw_feed, 4),
+        molecular_weight_liquid=round(mw_l, 4) if mw_l is not None else None,
+        molecular_weight_vapor=round(mw_v, 4) if mw_v is not None else None,
+        method_used=method_used,
+    )
 

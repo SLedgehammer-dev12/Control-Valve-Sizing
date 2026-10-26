@@ -925,7 +925,10 @@ class ValveSizingApp:
             if summary.average_molecular_weight is not None:
                 self.inputs["gas_mw"].set(summary.average_molecular_weight)
 
-            if z_value < 0.25 or z_value > 1.5:
+            if summary.phase in ("liquid", "supercritical_liquid", "two_phase"):
+                phase_label = "Sıvı (LNG/yoğuşma)" if summary.phase != "two_phase" else "İki Fazlı (yoğuşma)"
+                self.gas_status_text.set(f"⚠️ Faz Uyarısı: Akışkan {phase_label} fazındadır. Gaz formülleri geçersizdir!")
+            elif z_value < 0.25 or z_value > 1.5:
                 self.gas_status_text.set(f"Uyari: Z={z_value:.3f} tipik araligin disinda.")
             else:
                 self.gas_status_text.set("")
@@ -1136,6 +1139,12 @@ class ValveSizingApp:
         p2 = pressure_to_bar_a(self.inputs["gas_p2"].get(), self.gas_pres_unit.get())
         temp_c = temperature_to_c(self.inputs["gas_temp_c"].get(), self.gas_temp_unit.get())
         summary = evaluate_gas_mixture(self._gas_composition_rows(), "molar", p1, temp_c, self._gas_model_key())
+        if summary.phase in ("liquid", "supercritical_liquid", "two_phase"):
+            phase_name = "sıvı (LNG / yoğuşmuş)" if summary.phase != "two_phase" else "iki-fazlı"
+            raise ValueError(
+                f"Girilen P/T'de gaz {phase_name} fazındadır. "
+                "Gaz IEC formülleri sıvı veya iki fazlı akışa uygulanamaz; Sıvı servisi seçilmelidir."
+            )
         flow_nm3h = gas_flow_to_nm3h(
             self.inputs["gas_flow_nm3h"].get(),
             self.gas_flow_unit.get(),

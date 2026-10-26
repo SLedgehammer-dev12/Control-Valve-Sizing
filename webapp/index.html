@@ -117,17 +117,58 @@
           <div class="panel-head">
             <div>
               <h2>Sıvı Servis</h2>
-              <p class="hint">Sıvı debisi, buhar basıncı ve kavitasyon sınırı üzerinden Cv hesabı.</p>
+              <p class="hint">Sıvı debisi, buhar basıncı ve kavitasyon sınırı üzerinden IEC 60534 Cv hesabı.</p>
             </div>
-            <div class="unit-row">
-              <label>Debi birimi<select id="liquid-flow-unit"></select></label>
-              <label>Basınç birimi<select id="liquid-pressure-unit"></select></label>
-              <label>Sıcaklık birimi<select id="liquid-temperature-unit"></select></label>
+            <div class="unit-row" title="Sıvı servisi için hesaplama birimleri">
+              <label>Debi<select id="liquid-flow-unit"></select></label>
+              <label>Basınç<select id="liquid-pressure-unit"></select></label>
+              <label>Sıcaklık<select id="liquid-temperature-unit"></select></label>
             </div>
           </div>
-          <div class="grid">
-            <div class="field span-2">
-              <span>Akışkan Preset Arama / Seçim</span>
+
+          <!-- GROUP 1: İŞLETME VE PROSES KOŞULLARI -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">⚡</span>
+                <h3>İşletme & Proses Koşulları</h3>
+              </div>
+              <span class="section-tag">Debi & Basınç Profili</span>
+            </div>
+            <div class="operating-grid">
+              <label class="field">
+                <span>Debi</span>
+                <input id="liquid-flow" type="number" step="any" value="25" placeholder="Debi...">
+              </label>
+              <label class="field">
+                <span>Sıcaklık</span>
+                <input id="liquid-temperature" type="number" step="any" value="25" placeholder="Sıcaklık...">
+              </label>
+              <label class="field">
+                <span>Giriş basıncı P1</span>
+                <input id="liquid-p1" type="number" step="any" value="8" placeholder="P1...">
+              </label>
+              <div class="dp-center-badge">
+                <span class="dp-badge" id="liquid-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 3.00 bar</span>
+              </div>
+              <label class="field">
+                <span>Çıkış basıncı P2</span>
+                <input id="liquid-p2" type="number" step="any" value="5" placeholder="P2...">
+              </label>
+              <span class="field-validation-msg" id="liquid-p2-warning" hidden></span>
+            </div>
+          </div>
+
+          <!-- GROUP 2: AKIŞKAN VE TERMODİNAMİK ÖZELLİKLER -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">💧</span>
+                <h3>Akışkan & Termodinamik Özellikler</h3>
+              </div>
+              <span class="section-tag">CoolProp / HEOS</span>
+            </div>
+            <div class="preset-selection-block">
               <div class="preset-category-chips" id="liquid-category-chips">
                 <button type="button" class="chip-btn active" data-cat="all">Tümü</button>
                 <button type="button" class="chip-btn" data-cat="water">💧 Su & Kondensat</button>
@@ -140,30 +181,58 @@
                 <select id="liquid-preset" aria-describedby="liquid-preset-note"></select>
               </div>
             </div>
-            <label class="field"><span>Debi</span><input id="liquid-flow" type="number" step="any" value="25"></label>
-            <label class="field"><span>Sıcaklık</span><input id="liquid-temperature" type="number" step="any" value="25"></label>
-            <div class="field-with-badge">
-              <label class="field"><span>Giriş basıncı P1</span><input id="liquid-p1" type="number" step="any" value="8"></label>
-              <span class="dp-badge" id="liquid-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 3.00 bar</span>
+            <div class="thermo-grid">
+              <label class="field">
+                <span>Buhar basıncı Pv [bar(a)]</span>
+                <input id="liquid-pv" type="number" step="any" value="0.023">
+              </label>
+              <label class="field">
+                <span>Kritik basınç Pc [bar(a)]</span>
+                <input id="liquid-pc" type="number" step="any" value="220.64">
+              </label>
+              <label class="field">
+                <span>Yoğunluk [kg/m³]</span>
+                <input id="liquid-density" type="number" step="any" value="998">
+              </label>
+              <label class="field">
+                <span>Viskozite [Pa·s]</span>
+                <input id="liquid-viscosity" type="number" step="any" value="0.00089">
+              </label>
             </div>
-            <div class="field-with-badge">
-              <label class="field"><span>Çıkış basıncı P2</span><input id="liquid-p2" type="number" step="any" value="5"></label>
-              <span class="field-validation-msg" id="liquid-p2-warning" hidden></span>
+            <div class="phase-alert-banner" id="liquid-phase-alert" hidden>
+              <div class="phase-alert-icon">♨️</div>
+              <div class="phase-alert-body">
+                <div class="phase-alert-title" id="liquid-phase-alert-title">Faz Uyarısı: Girişte Buharlaşma / Kaynama</div>
+                <div class="phase-alert-desc" id="liquid-phase-alert-desc"></div>
+              </div>
+              <button type="button" class="phase-switch-btn" id="liquid-phase-switch-btn">♨️ Buhar Servisine Aktar</button>
             </div>
-            <label class="field"><span>Buhar basıncı Pv [bar(a)]</span><input id="liquid-pv" type="number" step="any" value="0.023"></label>
-            <label class="field"><span>Kritik basınç Pc [bar(a)]</span><input id="liquid-pc" type="number" step="any" value="220.64"></label>
-            <label class="field"><span>Yoğunluk [kg/m³]</span><input id="liquid-density" type="number" step="any" value="998"></label>
-            <label class="field"><span>Viskozite [Pa·s]</span><input id="liquid-viscosity" type="number" step="any" value="0.00089"></label>
-            <div class="field span-2">
-              <div class="pipe-fields-row">
-                <label class="field"><span>Hat giriş çapı [mm]</span><input id="liquid-pipe-in" type="number" step="any" value="50"></label>
-                <button type="button" class="pipe-sync-btn" id="liquid-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
-                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="liquid-pipe-out" type="number" step="any" value="50"></label>
+            <p class="hint" id="liquid-preset-note" aria-live="polite"></p>
+          </div>
+
+          <!-- GROUP 3: BORU HATTI VE REDÜKSİYON GEOMETRİSİ -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">📐</span>
+                <h3>Boru Hattı & Redüksiyon Ölçüleri</h3>
               </div>
               <div class="pipe-ratio-pill" id="liquid-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
             </div>
+            <div class="pipe-fields-row">
+              <label class="field" title="IEC 60534-2-1 boru geometri faktörü (Fp) ve akış hızı için giriş borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat giriş iç çapı D1 [mm]</span>
+                <input id="liquid-pipe-in" type="number" step="any" value="50" placeholder="İç çap...">
+              </label>
+              <div class="pipe-sync-col">
+                <button type="button" class="pipe-sync-btn" id="liquid-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+              </div>
+              <label class="field" title="IEC 60534-2-1 ve API 14E hız/erozyon hesabı için çıkış borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat çıkış iç çapı D2 [mm]</span>
+                <input id="liquid-pipe-out" type="number" step="any" value="50" placeholder="İç çap...">
+              </label>
+            </div>
           </div>
-          <p class="hint" id="liquid-preset-note" aria-live="polite"></p>
         </section>
 
         <section class="panel" id="panel-gas" role="tabpanel" aria-labelledby="tab-gas" data-panel="gas" hidden>
@@ -172,15 +241,56 @@
               <h2>Gaz Servis</h2>
               <p class="hint">Gaz kompozisyonu CoolProp ile değerlendirilir; choked akış xT·Fk üzerinden kontrol edilir.</p>
             </div>
-            <div class="unit-row">
-              <label>Debi birimi<select id="gas-flow-unit"></select></label>
-              <label>Basınç birimi<select id="gas-pressure-unit"></select></label>
-              <label>Sıcaklık birimi<select id="gas-temperature-unit"></select></label>
+            <div class="unit-row" title="Gaz servisi için hesaplama birimleri">
+              <label>Debi<select id="gas-flow-unit"></select></label>
+              <label>Basınç<select id="gas-pressure-unit"></select></label>
+              <label>Sıcaklık<select id="gas-temperature-unit"></select></label>
             </div>
           </div>
-          <div class="grid">
-            <div class="field span-2">
-              <span>Gaz Preset Arama / Seçim</span>
+
+          <!-- GROUP 1: İŞLETME VE PROSES KOŞULLARI -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">⚡</span>
+                <h3>İşletme & Proses Koşulları</h3>
+              </div>
+              <span class="section-tag">Debi & Basınç Profili</span>
+            </div>
+            <div class="operating-grid">
+              <label class="field">
+                <span>Debi</span>
+                <input id="gas-flow" type="number" step="any" value="800" placeholder="Debi...">
+              </label>
+              <label class="field">
+                <span>Sıcaklık</span>
+                <input id="gas-temperature" type="number" step="any" value="20" placeholder="Sıcaklık...">
+              </label>
+              <label class="field">
+                <span>Giriş basıncı P1</span>
+                <input id="gas-p1" type="number" step="any" value="8" placeholder="P1...">
+              </label>
+              <div class="dp-center-badge">
+                <span class="dp-badge" id="gas-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 2.00 bar</span>
+              </div>
+              <label class="field">
+                <span>Çıkış basıncı P2</span>
+                <input id="gas-p2" type="number" step="any" value="6" placeholder="P2...">
+              </label>
+              <span class="field-validation-msg" id="gas-p2-warning" hidden></span>
+            </div>
+          </div>
+
+          <!-- GROUP 2: GAZ AKIŞKANI VE TERMODİNAMİK MODELİ -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">🔥</span>
+                <h3>Gaz Akışkanı & Termodinamik Modeli</h3>
+              </div>
+              <span class="section-tag">CoolProp / HEOS</span>
+            </div>
+            <div class="preset-selection-block">
               <div class="preset-category-chips" id="gas-category-chips">
                 <button type="button" class="chip-btn active" data-cat="all">Tümü</button>
                 <button type="button" class="chip-btn" data-cat="natgas">🔥 Doğal Gaz</button>
@@ -193,59 +303,78 @@
                 <select id="gas-preset"></select>
               </div>
             </div>
-            <label class="field"><span>Gaz modeli</span>
-              <select id="gas-model">
-                <option value="real">Gerçek gaz (HEOS)</option>
-                <option value="auto">Gerçek gaz (mümkünse)</option>
-                <option value="ideal">İdeal gaz</option>
-              </select>
-            </label>
-            <label class="check-line"><input id="gas-composition-toggle" type="checkbox" aria-controls="gas-composition-fields"> Gaz kompozisyonunu oluştur</label>
-            <label class="field"><span>Debi</span><input id="gas-flow" type="number" step="any" value="800"></label>
-            <label class="field"><span>Sıcaklık</span><input id="gas-temperature" type="number" step="any" value="20"></label>
-            <div class="field-with-badge">
-              <label class="field"><span>Giriş basıncı P1</span><input id="gas-p1" type="number" step="any" value="8"></label>
-              <span class="dp-badge" id="gas-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 2.00 bar</span>
+            <div class="gas-model-row">
+              <label class="field gas-model-field">
+                <span>Gaz modeli</span>
+                <select id="gas-model">
+                  <option value="real">Gerçek gaz (HEOS)</option>
+                  <option value="auto">Gerçek gaz (mümkünse)</option>
+                  <option value="ideal">İdeal gaz</option>
+                </select>
+              </label>
+              <label class="check-line"><input id="gas-composition-toggle" type="checkbox" aria-controls="gas-composition-fields"> Gaz kompozisyonunu oluştur</label>
             </div>
-            <div class="field-with-badge">
-              <label class="field"><span>Çıkış basıncı P2</span><input id="gas-p2" type="number" step="any" value="6"></label>
-              <span class="field-validation-msg" id="gas-p2-warning" hidden></span>
+
+            <div id="gas-composition-fields" hidden>
+              <div class="grid">
+                <label class="field"><span>Kompozisyon bazı</span>
+                  <select id="gas-composition-basis">
+                    <option value="molar">Molar %</option>
+                    <option value="mass">Kütle %</option>
+                  </select>
+                </label>
+              </div>
+              <div class="composition-rows" id="gas-composition-rows"></div>
+              <div class="composition-actions">
+                <button class="secondary" type="button" id="gas-composition-add">+ Bileşen</button>
+                <button class="secondary" type="button" id="gas-composition-clear">Temizle</button>
+                <button class="secondary" type="button" id="gas-composition-normalize">100'e normalize et</button>
+                <button class="secondary" type="button" id="gas-composition-save">Karışımı Sakla</button>
+                <span class="composition-total" id="gas-composition-total" role="status" aria-live="polite">Toplam: %0</span>
+              </div>
+              <p class="hint" id="gas-composition-note">Toplam %100 değilse API pozitif toplamı 100'e normalize eder; normalize düğmesi taslağı da ölçekler.</p>
             </div>
-            <div class="field span-2">
-              <div class="pipe-fields-row">
-                <label class="field"><span>Hat giriş çapı [mm]</span><input id="gas-pipe-in" type="number" step="any" value="80"></label>
-                <button type="button" class="pipe-sync-btn" id="gas-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
-                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="gas-pipe-out" type="number" step="any" value="80"></label>
+
+            <div class="gas-props" id="gas-properties" role="status" aria-live="polite" aria-atomic="false">Gaz özellikleri seçim sonrası hesaplanır.</div>
+            <div class="phase-alert-banner" id="gas-phase-alert" hidden>
+              <div class="phase-alert-icon">❄️</div>
+              <div class="phase-alert-body">
+                <div class="phase-alert-title" id="gas-phase-alert-title">Faz Değişimi: Gaz Sıvılaştı (LNG)</div>
+                <div class="phase-alert-desc" id="gas-phase-alert-desc"></div>
+              </div>
+              <button type="button" class="phase-switch-btn" id="gas-phase-switch-btn">💧 Sıvı Servisine (LNG) Aktar</button>
+            </div>
+            <label class="check-line"><input id="gas-manual-toggle" type="checkbox" aria-controls="gas-manual-fields"> Gaz özelliklerini manuel gir</label>
+            <div class="thermo-grid manual-grid" id="gas-manual-fields" hidden>
+              <label class="field"><span>Moleküler ağırlık [kg/kmol]</span><input id="gas-mw" type="number" step="any"></label>
+              <label class="field"><span>k = Cp/Cv</span><input id="gas-k" type="number" step="any"></label>
+              <label class="field"><span>Z</span><input id="gas-z" type="number" step="any"></label>
+              <label class="field"><span>Viskozite [Pa·s]</span><input id="gas-viscosity" type="number" step="any"></label>
+            </div>
+          </div>
+
+          <!-- GROUP 3: BORU HATTI VE REDÜKSİYON GEOMETRİSİ -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">📐</span>
+                <h3>Boru Hattı & Redüksiyon Ölçüleri</h3>
               </div>
               <div class="pipe-ratio-pill" id="gas-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
             </div>
-          </div>
-          <div id="gas-composition-fields" hidden>
-            <div class="grid">
-              <label class="field"><span>Kompozisyon bazı</span>
-                <select id="gas-composition-basis">
-                  <option value="molar">Molar %</option>
-                  <option value="mass">Kütle %</option>
-                </select>
+            <div class="pipe-fields-row">
+              <label class="field" title="IEC 60534-2-1 boru geometri faktörü (Fp) ve akış hızı için giriş borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat giriş iç çapı D1 [mm]</span>
+                <input id="gas-pipe-in" type="number" step="any" value="80" placeholder="İç çap...">
+              </label>
+              <div class="pipe-sync-col">
+                <button type="button" class="pipe-sync-btn" id="gas-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+              </div>
+              <label class="field" title="IEC 60534-2-1 ve API 14E hız/erozyon hesabı için çıkış borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat çıkış iç çapı D2 [mm]</span>
+                <input id="gas-pipe-out" type="number" step="any" value="80" placeholder="İç çap...">
               </label>
             </div>
-            <div class="composition-rows" id="gas-composition-rows"></div>
-            <div class="composition-actions">
-              <button class="secondary" type="button" id="gas-composition-add">+ Bileşen</button>
-              <button class="secondary" type="button" id="gas-composition-clear">Temizle</button>
-              <button class="secondary" type="button" id="gas-composition-normalize">100'e normalize et</button>
-              <button class="secondary" type="button" id="gas-composition-save">Karışımı Sakla</button>
-              <span class="composition-total" id="gas-composition-total" role="status" aria-live="polite">Toplam: %0</span>
-            </div>
-            <p class="hint" id="gas-composition-note">Toplam %100 değilse API pozitif toplamı 100'e normalize eder; normalize düğmesi taslağı da ölçekler.</p>
-          </div>
-          <div class="gas-props" id="gas-properties" role="status" aria-live="polite" aria-atomic="false">Gaz özellikleri seçim sonrası hesaplanır.</div>
-          <label class="check-line"><input id="gas-manual-toggle" type="checkbox" aria-controls="gas-manual-fields"> Gaz özelliklerini manuel gir</label>
-          <div class="grid manual-grid" id="gas-manual-fields" hidden>
-            <label class="field"><span>Moleküler ağırlık [kg/kmol]</span><input id="gas-mw" type="number" step="any"></label>
-            <label class="field"><span>k = Cp/Cv</span><input id="gas-k" type="number" step="any"></label>
-            <label class="field"><span>Z</span><input id="gas-z" type="number" step="any"></label>
-            <label class="field"><span>Viskozite [Pa·s]</span><input id="gas-viscosity" type="number" step="any"></label>
           </div>
         </section>
 
@@ -255,30 +384,89 @@
               <h2>Buhar Servis</h2>
               <p class="hint">Kütlesel debi, IAPWS/CoolProp buhar özellikleriyle gerçek hacimsel debiye çevrilir.</p>
             </div>
-            <div class="unit-row">
-              <label>Debi birimi<select id="steam-flow-unit"></select></label>
-              <label>Basınç birimi<select id="steam-pressure-unit"></select></label>
-              <label>Sıcaklık birimi<select id="steam-temperature-unit"></select></label>
+            <div class="unit-row" title="Buhar servisi için hesaplama birimleri">
+              <label>Debi<select id="steam-flow-unit"></select></label>
+              <label>Basınç<select id="steam-pressure-unit"></select></label>
+              <label>Sıcaklık<select id="steam-temperature-unit"></select></label>
             </div>
           </div>
-          <div class="grid">
-            <label class="field"><span>Debi</span><input id="steam-flow" type="number" step="any" value="2500"></label>
-            <label class="field"><span>Sıcaklık</span><input id="steam-temperature" type="number" step="any" value="220"></label>
-            <div class="field-with-badge">
-              <label class="field"><span>Giriş basıncı P1</span><input id="steam-p1" type="number" step="any" value="12"></label>
-              <span class="dp-badge" id="steam-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 4.00 bar</span>
+
+          <!-- GROUP 1: İŞLETME VE PROSES KOŞULLARI -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">⚡</span>
+                <h3>İşletme & Proses Koşulları</h3>
+              </div>
+              <span class="section-tag">Debi & Basınç Profili</span>
             </div>
-            <div class="field-with-badge">
-              <label class="field"><span>Çıkış basıncı P2</span><input id="steam-p2" type="number" step="any" value="8"></label>
+            <div class="operating-grid">
+              <label class="field">
+                <span>Debi</span>
+                <input id="steam-flow" type="number" step="any" value="2500" placeholder="Kütlesel debi...">
+              </label>
+              <label class="field">
+                <span>Sıcaklık</span>
+                <input id="steam-temperature" type="number" step="any" value="220" placeholder="Sıcaklık...">
+              </label>
+              <label class="field">
+                <span>Giriş basıncı P1</span>
+                <input id="steam-p1" type="number" step="any" value="12" placeholder="P1...">
+              </label>
+              <div class="dp-center-badge">
+                <span class="dp-badge" id="steam-dp-badge" title="Fark Basıncı ΔP = P1 - P2">ΔP: 4.00 bar</span>
+              </div>
+              <label class="field">
+                <span>Çıkış basıncı P2</span>
+                <input id="steam-p2" type="number" step="any" value="8" placeholder="P2...">
+              </label>
               <span class="field-validation-msg" id="steam-p2-warning" hidden></span>
             </div>
-            <div class="field span-2">
-              <div class="pipe-fields-row">
-                <label class="field"><span>Hat giriş çapı [mm]</span><input id="steam-pipe-in" type="number" step="any" value="80"></label>
-                <button type="button" class="pipe-sync-btn" id="steam-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
-                <label class="field"><span>Hat çıkış çapı [mm]</span><input id="steam-pipe-out" type="number" step="any" value="80"></label>
+          </div>
+
+          <!-- GROUP 2: BUHAR TERMODİNAMİK DURUMU -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">♨️</span>
+                <h3>Buhar Termodinamik Durumu</h3>
+              </div>
+              <span class="section-tag">IAPWS-IF97 / CoolProp</span>
+            </div>
+            <div class="steam-status-card">
+              <p class="hint">Buhar yoğunluğu, viskozitesi ve izentropik katsayısı ($k$) girilen $P_1$ basıncı ve $T_1$ sıcaklığına göre resmi IAPWS-IF97 buhar tabloları üzerinden otomatik olarak hesaplanır (Kızgın buhar veya Doygun buhar fazı).</p>
+            </div>
+            <div class="phase-alert-banner" id="steam-phase-alert" hidden>
+              <div class="phase-alert-icon">💧</div>
+              <div class="phase-alert-body">
+                <div class="phase-alert-title" id="steam-phase-alert-title">Faz Uyarısı: Su Yoğuşmuş Sıvı Fazında</div>
+                <div class="phase-alert-desc" id="steam-phase-alert-desc"></div>
+              </div>
+              <button type="button" class="phase-switch-btn" id="steam-phase-switch-btn">💧 Sıvı Servisine (Su) Aktar</button>
+            </div>
+          </div>
+
+          <!-- GROUP 3: BORU HATTI VE REDÜKSİYON GEOMETRİSİ -->
+          <div class="form-section-card">
+            <div class="form-section-header">
+              <div class="section-title-wrap">
+                <span class="section-icon">📐</span>
+                <h3>Boru Hattı & Redüksiyon Ölçüleri</h3>
               </div>
               <div class="pipe-ratio-pill" id="steam-pipe-ratio">Düz Boru (D1 = DN = D2)</div>
+            </div>
+            <div class="pipe-fields-row">
+              <label class="field" title="IEC 60534-2-1 boru geometri faktörü (Fp) ve akış hızı için giriş borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat giriş iç çapı D1 [mm]</span>
+                <input id="steam-pipe-in" type="number" step="any" value="80" placeholder="İç çap...">
+              </label>
+              <div class="pipe-sync-col">
+                <button type="button" class="pipe-sync-btn" id="steam-pipe-sync" title="Boru çaplarını seçilen vana çapına (DN) eşitler">⌀ Vanaya Eşitle</button>
+              </div>
+              <label class="field" title="IEC 60534-2-1 ve API 14E hız/erozyon hesabı için çıkış borusunun net iç çapıdır (Internal Diameter - ID)">
+                <span>Hat çıkış iç çapı D2 [mm]</span>
+                <input id="steam-pipe-out" type="number" step="any" value="80" placeholder="İç çap...">
+              </label>
             </div>
           </div>
         </section>
@@ -315,6 +503,10 @@
 
         <div class="actions">
           <button id="calculate" class="primary" type="button">Hesapla <kbd class="key-hint">Ctrl+↵</kbd></button>
+          <button id="btn-advance-calc" class="tool-btn advance-btn" type="button" aria-pressed="false" title="2 Fazlı Akış (Flashing, HEM Modeli, J-T Yoğuşması, Damlacık Erozyonu) analizini devreye alır">
+            <span class="advance-icon">⚡</span>
+            <span class="advance-label">Gelişmiş Hesaplama (2 Fazlı Akış / HEM)</span>
+          </button>
           <span class="status" id="calc-status" aria-live="polite"></span>
           <span class="hint">Birim değiştirdiğinizde değerler otomatik dönüştürülür.</span>
         </div>
@@ -372,6 +564,45 @@
               </div>
               <p class="diag-desc" id="split-range-desc"></p>
               <div class="split-valve-grid" id="split-valve-grid"></div>
+            </div>
+
+            <!-- Advanced Two-Phase (HEM / Flashing / Condensation) Analysis Card -->
+            <div class="diag-card span-all two-phase-card" id="diag-two-phase" hidden>
+              <div class="diag-head">
+                <span class="diag-badge" id="two-phase-badge">⚡ 2 Fazlı Akış (HEM)</span>
+                <h4 id="two-phase-title">Gelişmiş İki Fazlı Akış & Termodinamik Analiz</h4>
+              </div>
+              <p class="diag-desc" id="two-phase-desc"></p>
+              <div class="two-phase-metrics-grid" id="two-phase-metrics">
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">Akış Rejimi</span>
+                  <span class="tp-metric-val" id="tp-regime">-</span>
+                </div>
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">Buhar/Gaz Kalitesi (x)</span>
+                  <span class="tp-metric-val" id="tp-quality">-</span>
+                </div>
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">İki Faz Yoğunluğu (ρ_tp)</span>
+                  <span class="tp-metric-val" id="tp-density">-</span>
+                </div>
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">Düzeltilmiş Cv_tp</span>
+                  <span class="tp-metric-val" id="tp-cv">-</span>
+                </div>
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">Çıkış İki Faz Hızı</span>
+                  <span class="tp-metric-val" id="tp-velocity">-</span>
+                </div>
+                <div class="tp-metric-tile">
+                  <span class="tp-metric-label">API 14E Hız Limiti</span>
+                  <span class="tp-metric-val" id="tp-limit">-</span>
+                </div>
+              </div>
+              <div class="two-phase-recs-wrap">
+                <h5>Mühendislik & Malzeme / Trim Tavsiyeleri:</h5>
+                <ul class="two-phase-recs-list" id="two-phase-recs"></ul>
+              </div>
             </div>
 
             <!-- Cavitation & Flashing Meter -->
@@ -562,6 +793,30 @@
           <span>Sonuç:</span>
           <b id="conv-result">—</b>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Parameter Information Modal -->
+  <dialog id="info-modal" class="app-modal" aria-labelledby="info-modal-title">
+    <div class="modal-card info-modal-card">
+      <div class="modal-head">
+        <h3 id="info-modal-title">Parametre Açıklaması</h3>
+        <button type="button" class="close-btn" id="info-modal-close" aria-label="Kapat">✕</button>
+      </div>
+      <div class="modal-body" id="info-modal-body">
+        <div class="info-badge-row">
+          <span class="info-symbol-pill" id="info-modal-symbol"></span>
+          <span class="info-key-pill" id="info-modal-key"></span>
+        </div>
+        <div class="info-formula-card" id="info-modal-formula-wrap" hidden>
+          <div class="info-formula-title">Mühendislik Formülü / Bağıntısı:</div>
+          <code class="info-formula-code" id="info-modal-formula"></code>
+        </div>
+        <div class="info-desc-text" id="info-modal-desc"></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="primary" id="info-modal-ok">Anladım</button>
       </div>
     </div>
   </dialog>
